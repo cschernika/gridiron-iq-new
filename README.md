@@ -1,17 +1,20 @@
-# Gridiron IQ ESPN Upgrade
+# Gridiron IQ — Command Center Redesign
 
-This version makes the Command Center and Draft Center use the synced ESPN league snapshot.
+This patch fixes the Command Center shown in the screenshot.
 
-## What changed
-- ESPN league settings are saved after sync.
-- Real teams, records, points, and rosters are saved when ESPN provides them.
-- Chad's Team is detected automatically by team name.
-- Command Center uses the real ESPN league.
-- Draft Center adjusts the board to the synced scoring format.
-- `/health` reports whether an ESPN snapshot exists.
-- SWID and espn_s2 are never written to disk.
+## Fixes
+- Removes the giant raw ESPN scoring-rules dump from the Teams card.
+- Shows a short scoring label instead.
+- Replaces misleading pre-draft Team Strength / Rank data with Draft Status.
+- Adds pre-draft priorities.
+- Adds your connected league teams.
+- Highlights Chad's Team.
+- Makes the dashboard useful before the 2026 draft.
+- Leaves room for the dashboard to transition to weekly team analytics after rosters populate.
 
-## Replace in GitHub
-Replace `app.py`, the `templates` folder, `static/app.css`, `static/app.js`, and `requirements.txt` with the files in this package.
+## Files
+1. Replace `templates/dashboard.html`
+2. Add the CSS in `static/app_command_center.css` to the bottom of your existing `static/app.css`
+3. Update the `scoring_label()` and `build_settings()` helpers in `app.py` using `app_settings_patch.py`
 
-Render will redeploy automatically.
+Do not replace the rest of `app.py` if ESPN sync is already working.
