@@ -1,36 +1,199 @@
-{% extends "base.html" %}{% block title %}Command Center | Gridiron IQ{% endblock %}{% block heading %}Command Center{% endblock %}
+{% extends "base.html" %}
+{% block title %}Command Center | Gridiron IQ{% endblock %}
+{% block heading %}Command Center{% endblock %}
+
 {% block body %}
-<section class="hero">
-<div><span class="pill">{{ league.league_name if connected else "AI roster intelligence" }}</span>
-<h2>{{ "Your ESPN league is connected." if connected else "Your league. Your opponents. Your edge." }}</h2>
-<p>{% if connected %}Real league structure from ESPN is now powering this dashboard. Roster-specific analysis will deepen as ESPN populates draft and season data.{% else %}Connect ESPN to replace demonstration data with your real league.{% endif %}</p>
-<div class="actions"><a class="button primary" href="/league-sync">{{ "Re-sync ESPN" if connected else "Connect ESPN" }}</a><a class="button" href="/draft-center">Open Draft Center</a></div></div>
-<div class="strength"><small>Team Strength</small><strong>{{ analytics.team_strength }}</strong><b>Rank #{{ analytics.team_rank }}</b></div>
+
+<section class="cc-hero">
+  <div class="cc-hero-copy">
+    <span class="pill">{{ league.league_name if connected else "Gridiron IQ" }}</span>
+
+    {% if connected %}
+      <h2>You're connected and ready for draft season.</h2>
+      <p>
+        Gridiron IQ is synced to your ESPN league. Before the draft, the focus is
+        draft preparation, league settings, roster construction, and pick strategy.
+      </p>
+    {% else %}
+      <h2>Connect your league and build your edge.</h2>
+      <p>
+        Sync ESPN to unlock league-specific draft strategy, roster analysis, waivers,
+        trades, and weekly matchup intelligence.
+      </p>
+    {% endif %}
+
+    <div class="actions">
+      <a class="button primary" href="/draft-center">Open Draft Center</a>
+      <a class="button" href="/league-sync">{{ "Re-sync ESPN" if connected else "Connect ESPN" }}</a>
+    </div>
+  </div>
+
+  <div class="draft-status-card">
+    <small>Draft Status</small>
+    <strong>{{ "Pre-Draft" if connected else "Not Connected" }}</strong>
+    {% if connected %}
+      <span>Snake Draft</span>
+      <b>Sep 8, 2026 · 7:30 PM</b>
+    {% else %}
+      <span>Connect ESPN first</span>
+    {% endif %}
+  </div>
 </section>
 
 {% if connected %}
-<section class="metric-grid">
-<article><span>League</span><strong>{{ league.league_name }}</strong><small>{{ league.season }}</small></article>
-<article><span>Teams</span><strong>{{ league.teams }}</strong><small>{{ league_settings.scoring }}</small></article>
-<article><span>Regular Season</span><strong>{{ league_settings.reg_season_count or "—" }}</strong><small>weeks</small></article>
-<article><span>Playoff Teams</span><strong>{{ league_settings.playoff_team_count or "—" }}</strong><small>spots</small></article>
+<section class="metric-grid command-metrics">
+  <article>
+    <span>League</span>
+    <strong class="metric-text">{{ league.league_name }}</strong>
+    <small>2026 ESPN League</small>
+  </article>
+
+  <article>
+    <span>Teams</span>
+    <strong>{{ league.teams }}</strong>
+    <small>{{ league_settings.scoring_label or league_settings.scoring or "League scoring" }}</small>
+  </article>
+
+  <article>
+    <span>Regular Season</span>
+    <strong>{{ league_settings.reg_season_count or "14" }}</strong>
+    <small>weeks</small>
+  </article>
+
+  <article>
+    <span>Playoff Teams</span>
+    <strong>{{ league_settings.playoff_team_count or "6" }}</strong>
+    <small>spots</small>
+  </article>
 </section>
 {% endif %}
 
-<section class="grid two">
-<article class="panel"><p class="eyebrow">Top Action</p><h2>{{ analytics.top_action.title }}</h2><p>{{ analytics.top_action.reason }}</p></article>
-<article class="panel"><p class="eyebrow">Your Team</p>
-{% if user_team %}
-<h2>{{ user_team.team_name }}</h2><p>Record: {{ user_team.wins }}-{{ user_team.losses }} · Points: {{ user_team.points_for }} · Roster: {{ user_team.roster_size }}</p>
-{% else %}<h2>Chad's Team</h2><p>ESPN has not populated enough roster data yet to identify the active roster.</p>{% endif %}
-</article>
+<section class="grid three command-grid">
+  <article class="panel feature-card">
+    <p class="eyebrow">Your Team</p>
+    <h2>{{ user_team.team_name if user_team else "Chad's Team" }}</h2>
+    {% if user_team and user_team.roster_size %}
+      <p>
+        {{ user_team.wins }}-{{ user_team.losses }} ·
+        {{ user_team.roster_size }} players ·
+        {{ user_team.points_for }} points
+      </p>
+    {% else %}
+      <p>Your team is connected. Roster analysis will activate after your draft is populated in ESPN.</p>
+    {% endif %}
+    <a href="/league-intelligence" class="text-link">View league intelligence →</a>
+  </article>
+
+  <article class="panel feature-card">
+    <p class="eyebrow">Draft Readiness</p>
+    <h2>Build your draft plan</h2>
+    <p>
+      Use league-aware rankings, tiers, ADP, positional scarcity, and draft tracking
+      to prepare for your snake draft.
+    </p>
+    <a href="/draft-center" class="text-link">Open Draft Center →</a>
+  </article>
+
+  <article class="panel feature-card">
+    <p class="eyebrow">League Setup</p>
+    <h2>{{ league_settings.scoring_label or league_settings.scoring or "League scoring" }}</h2>
+    <p>
+      {{ league.teams if connected else "—" }} teams ·
+      {{ league_settings.reg_season_count or "14" }} regular-season weeks ·
+      {{ league_settings.playoff_team_count or "6" }} playoff teams
+    </p>
+    <a href="/league-sync" class="text-link">Review league sync →</a>
+  </article>
 </section>
 
-<section class="panel"><div class="panel-head"><div><p class="eyebrow">League Intelligence</p><h2>Power Rankings</h2></div></div>
-{% if analytics.power_rankings %}
-<table><thead><tr><th>Rank</th><th>Team</th><th>Record</th><th>Rating</th><th>Playoff Odds</th></tr></thead><tbody>
-{% for t in analytics.power_rankings %}<tr><td>#{{ t.rank }}</td><td><b>{{ t.team }}</b></td><td>{{ t.record }}</td><td>{{ t.rating }}</td><td>{{ t.playoffs }}%</td></tr>{% endfor %}
-</tbody></table>
-{% else %}<div class="empty"><p>Sync ESPN to populate real league teams.</p></div>{% endif %}
+<section class="grid two">
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Pre-Draft Priorities</p>
+        <h2>What to do next</h2>
+      </div>
+    </div>
+
+    <div class="priority-list">
+      <div>
+        <span>1</span>
+        <div>
+          <b>Confirm league scoring and roster settings</b>
+          <small>Make sure the Draft Center is tuned to the actual ESPN format.</small>
+        </div>
+      </div>
+
+      <div>
+        <span>2</span>
+        <div>
+          <b>Build position tiers</b>
+          <small>Identify drop-offs at RB, WR, QB, and TE before draft night.</small>
+        </div>
+      </div>
+
+      <div>
+        <span>3</span>
+        <div>
+          <b>Prepare draft-position strategy</b>
+          <small>Once your draft slot is known, Gridiron IQ can tailor round-by-round targets.</small>
+        </div>
+      </div>
+
+      <div>
+        <span>4</span>
+        <div>
+          <b>Use live draft tracking</b>
+          <small>Mark players drafted and get updated best-available recommendations.</small>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">League Teams</p>
+        <h2>{{ league.teams if connected else 0 }} teams connected</h2>
+      </div>
+    </div>
+
+    {% if teams %}
+      <div class="team-list">
+        {% for t in teams %}
+          <div class="team-list-row {% if 'chad' in t.team_name|lower %}is-user-team{% endif %}">
+            <div>
+              <b>{{ t.team_name }}</b>
+              <small>
+                {% if t.wins or t.losses %}
+                  {{ t.wins }}-{{ t.losses }}
+                {% else %}
+                  Preseason
+                {% endif %}
+              </small>
+            </div>
+            <span>{{ t.roster_size }} players</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="empty">
+        <p>Sync ESPN to populate all league teams.</p>
+      </div>
+    {% endif %}
+  </article>
 </section>
+
+<section class="panel system-note">
+  <div>
+    <p class="eyebrow">Smart Mode</p>
+    <h2>What changes after the draft?</h2>
+    <p>
+      Once ESPN populates rosters, this Command Center should automatically shift from
+      pre-draft planning to team strength, power rankings, lineup recommendations,
+      waivers, trade targets, matchup analysis, and playoff probabilities.
+    </p>
+  </div>
+</section>
+
 {% endblock %}
