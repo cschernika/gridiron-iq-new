@@ -1009,9 +1009,6 @@ def latest_league():
 
 
 @app.get("/api/intelligence")
-@login_required
-def intelligence():
-    return jsonify(demo_intelligence())
 
 
 if __name__ == "__main__":
