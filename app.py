@@ -1,1016 +1,403 @@
 from __future__ import annotations
 
-import json
 import os
-import sqlite3
-from datetime import datetime
-from functools import wraps
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
-
-from dotenv import load_dotenv
-from flask import (
-    Flask, flash, jsonify, redirect, render_template, request,
-    session, url_for
-)
-from werkzeug.security import check_password_hash, generate_password_hash
-from cryptography.fernet import Fernet, InvalidToken
-import base64
-import hashlib
-import secrets
-import time
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 import requests
+from dotenv import load_dotenv
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
 load_dotenv()
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "data" / "gridiron_iq.db"
-
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "development-only-change-me")
-app.config["JSON_SORT_KEYS"] = False
+app.secret_key = os.getenv("SECRET_KEY", "gridiron-iq-development-key-change-me")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    JSON_SORT_KEYS=False,
+)
 
+USER = {"id": 1, "name": "Chad", "email": "chad@totalatlantagroup.com"}
 
-def db() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+RANKINGS = [
+    {"rank": 1, "name": "Ja'Marr Chase", "pos": "WR", "team": "CIN", "tier": 1, "adp": 1.4, "projection": 312.2},
+    {"rank": 2, "name": "Bijan Robinson", "pos": "RB", "team": "ATL", "tier": 1, "adp": 2.1, "projection": 298.4},
+    {"rank": 3, "name": "Justin Jefferson", "pos": "WR", "team": "MIN", "tier": 1, "adp": 3.2, "projection": 301.1},
+    {"rank": 4, "name": "CeeDee Lamb", "pos": "WR", "team": "DAL", "tier": 1, "adp": 4.6, "projection": 294.3},
+    {"rank": 5, "name": "Jahmyr Gibbs", "pos": "RB", "team": "DET", "tier": 1, "adp": 5.1, "projection": 286.7},
+    {"rank": 6, "name": "Amon-Ra St. Brown", "pos": "WR", "team": "DET", "tier": 2, "adp": 6.4, "projection": 285.2},
+    {"rank": 7, "name": "Puka Nacua", "pos": "WR", "team": "LAR", "tier": 2, "adp": 7.2, "projection": 279.8},
+    {"rank": 8, "name": "Saquon Barkley", "pos": "RB", "team": "PHI", "tier": 2, "adp": 8.1, "projection": 276.5},
+    {"rank": 9, "name": "Josh Allen", "pos": "QB", "team": "BUF", "tier": 2, "adp": 18.5, "projection": 368.6},
+    {"rank": 10, "name": "Brock Bowers", "pos": "TE", "team": "LV", "tier": 2, "adp": 14.8, "projection": 252.0},
+]
 
+DEMO = {
+    "team_strength": 82,
+    "team_rank": 3,
+    "playoff_probability": 71,
+    "championship_probability": 18,
+    "lineup_gain": 6.4,
+    "trade_opportunities": 4,
+    "top_action": {
+        "title": "Start the higher-volume FLEX option",
+        "reason": "The recommended player projects for more touches, a stronger red-zone role, and a safer weekly floor.",
+        "confidence": 84,
+        "gain": 4.4,
+    },
+    "power_rankings": [
+        {"rank": 1, "team": "Sunday Crushers", "record": "7-2", "rating": 91, "playoffs": 84},
+        {"rank": 2, "team": "Fourth & Long", "record": "6-3", "rating": 87, "playoffs": 78},
+        {"rank": 3, "team": "Chad's Team", "record": "6-3", "rating": 82, "playoffs": 71},
+        {"rank": 4, "team": "Gridiron Kings", "record": "5-4", "rating": 79, "playoffs": 63},
+        {"rank": 5, "team": "Red Zone Rebels", "record": "5-4", "rating": 76, "playoffs": 57},
+    ],
+    "waivers": [
+        {"player": "Emerging RB", "position": "RB", "rostered": "38%", "faab": "12–18%", "grade": "A-", "reason": "Usage and goal-line work are trending up."},
+        {"player": "High-Volume WR", "position": "WR", "rostered": "44%", "faab": "8–12%", "grade": "B+", "reason": "Target share supports a weekly flex floor."},
+        {"player": "Streaming TE", "position": "TE", "rostered": "19%", "faab": "3–6%", "grade": "B", "reason": "Strong matchup and route participation."},
+    ],
+    "lineup": [
+        {"slot": "QB", "player": "Best Available QB", "projection": 22.4, "confidence": 88},
+        {"slot": "RB1", "player": "Lead Running Back", "projection": 18.7, "confidence": 91},
+        {"slot": "RB2", "player": "Volume Running Back", "projection": 15.9, "confidence": 82},
+        {"slot": "WR1", "player": "Alpha Receiver", "projection": 19.2, "confidence": 90},
+        {"slot": "WR2", "player": "Target Leader", "projection": 16.8, "confidence": 85},
+        {"slot": "FLEX", "player": "Best Flex Option", "projection": 14.6, "confidence": 84},
+        {"slot": "TE", "player": "Top Route TE", "projection": 10.8, "confidence": 77},
+    ],
+    "matchups": [
+        {"position": "QB", "opponent": "vs. ATL", "grade": "A", "note": "Fast pace and favorable pass efficiency allowed."},
+        {"position": "RB", "opponent": "vs. CAR", "grade": "A-", "note": "Positive game script and strong red-zone opportunity."},
+        {"position": "WR", "opponent": "at TB", "grade": "B+", "note": "High passing volume offsets a tougher perimeter matchup."},
+        {"position": "TE", "opponent": "vs. LAC", "grade": "B", "note": "Middle-of-field targets project well."},
+    ],
+}
 
-def init_db() -> None:
-    with db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                email TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
+def league_state() -> list[dict[str, Any]]:
+    return session.get("connected_leagues", [])
 
-            CREATE TABLE IF NOT EXISTS league_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                platform TEXT NOT NULL,
-                league_id TEXT NOT NULL,
-                league_name TEXT NOT NULL,
-                season INTEGER NOT NULL,
-                payload TEXT NOT NULL,
-                synced_at TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS espn_credentials (
-                user_id INTEGER PRIMARY KEY,
-                league_id TEXT NOT NULL,
-                season INTEGER NOT NULL,
-                swid_encrypted TEXT NOT NULL,
-                s2_encrypted TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS yahoo_app_credentials (
-                user_id INTEGER PRIMARY KEY,
-                client_id_encrypted TEXT NOT NULL,
-                client_secret_encrypted TEXT NOT NULL,
-                redirect_uri TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS yahoo_tokens (
-                user_id INTEGER PRIMARY KEY,
-                access_token_encrypted TEXT NOT NULL,
-                refresh_token_encrypted TEXT NOT NULL,
-                expires_at INTEGER NOT NULL,
-                token_type TEXT NOT NULL,
-                yahoo_guid TEXT,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-
-            CREATE TABLE IF NOT EXISTS yahoo_league_preferences (
-                user_id INTEGER PRIMARY KEY,
-                league_key TEXT NOT NULL,
-                league_name TEXT NOT NULL,
-                season INTEGER,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-            """
+def set_league(item: dict[str, Any]) -> None:
+    leagues = [
+        x for x in league_state()
+        if not (
+            x.get("platform") == item.get("platform")
+            and str(x.get("league_id")) == str(item.get("league_id"))
         )
+    ]
+    leagues.insert(0, item)
+    session["connected_leagues"] = leagues[:8]
 
-
-init_db()
-
-
-def login_required(view):
-    @wraps(view)
-    def wrapped(*args, **kwargs):
-        if not session.get("user_id"):
-            return redirect(url_for("login"))
-        return view(*args, **kwargs)
-    return wrapped
-
-
-def current_user() -> dict[str, Any] | None:
-    if not session.get("user_id"):
-        return None
-    with db() as conn:
-        row = conn.execute(
-            "SELECT id, name, email FROM users WHERE id = ?",
-            (session["user_id"],),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def credential_cipher() -> Fernet:
-    secret = app.secret_key.encode("utf-8")
-    key = base64.urlsafe_b64encode(hashlib.sha256(secret).digest())
-    return Fernet(key)
-
-
-def encrypt_secret(value: str) -> str:
-    return credential_cipher().encrypt(value.encode("utf-8")).decode("utf-8")
-
-
-def decrypt_secret(value: str) -> str:
-    return credential_cipher().decrypt(value.encode("utf-8")).decode("utf-8")
-
-
-def saved_espn_credentials(user_id: int) -> dict[str, Any] | None:
-    with db() as conn:
-        row = conn.execute(
-            """SELECT league_id, season, swid_encrypted, s2_encrypted, updated_at
-               FROM espn_credentials WHERE user_id = ?""",
-            (user_id,),
-        ).fetchone()
-    if not row:
-        return None
-    try:
-        return {
-            "league_id": row["league_id"],
-            "season": row["season"],
-            "swid": decrypt_secret(row["swid_encrypted"]),
-            "espn_s2": decrypt_secret(row["s2_encrypted"]),
-            "updated_at": row["updated_at"],
-        }
-    except InvalidToken:
-        return None
-
-
-def effective_espn_credentials(user_id: int) -> dict[str, Any]:
-    saved = saved_espn_credentials(user_id)
-    if saved:
-        return saved
-    return {
-        "league_id": os.getenv("ESPN_LEAGUE_ID", "").strip(),
-        "season": int(os.getenv("ESPN_SEASON", "2026").strip() or "2026"),
-        "swid": os.getenv("ESPN_SWID", "").strip(),
-        "espn_s2": os.getenv("ESPN_S2", "").strip(),
-        "updated_at": None,
-    }
-
-
-
-YAHOO_AUTH_URL = "https://api.login.yahoo.com/oauth2/request_auth"
-YAHOO_TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
-YAHOO_FANTASY_URL = "https://fantasysports.yahooapis.com/fantasy/v2"
-
-
-def saved_yahoo_app(user_id: int) -> dict[str, str] | None:
-    with db() as conn:
-        row = conn.execute(
-            """SELECT client_id_encrypted, client_secret_encrypted, redirect_uri, updated_at
-               FROM yahoo_app_credentials WHERE user_id = ?""",
-            (user_id,),
-        ).fetchone()
-    if not row:
-        return None
-    try:
-        return {
-            "client_id": decrypt_secret(row["client_id_encrypted"]),
-            "client_secret": decrypt_secret(row["client_secret_encrypted"]),
-            "redirect_uri": row["redirect_uri"],
-            "updated_at": row["updated_at"],
-        }
-    except InvalidToken:
-        return None
-
-
-def effective_yahoo_app(user_id: int) -> dict[str, str]:
-    saved = saved_yahoo_app(user_id)
-    if saved:
-        return saved
-    return {
-        "client_id": os.getenv("YAHOO_CLIENT_ID", "").strip(),
-        "client_secret": os.getenv("YAHOO_CLIENT_SECRET", "").strip(),
-        "redirect_uri": os.getenv(
-            "YAHOO_REDIRECT_URI",
-            "http://127.0.0.1:8000/auth/yahoo/callback",
-        ).strip(),
-        "updated_at": "",
-    }
-
-
-def saved_yahoo_token(user_id: int) -> dict[str, Any] | None:
-    with db() as conn:
-        row = conn.execute(
-            """SELECT access_token_encrypted, refresh_token_encrypted, expires_at,
-                      token_type, yahoo_guid, updated_at
-               FROM yahoo_tokens WHERE user_id = ?""",
-            (user_id,),
-        ).fetchone()
-    if not row:
-        return None
-    try:
-        return {
-            "access_token": decrypt_secret(row["access_token_encrypted"]),
-            "refresh_token": decrypt_secret(row["refresh_token_encrypted"]),
-            "expires_at": int(row["expires_at"]),
-            "token_type": row["token_type"],
-            "yahoo_guid": row["yahoo_guid"],
-            "updated_at": row["updated_at"],
-        }
-    except InvalidToken:
-        return None
-
-
-def store_yahoo_token(user_id: int, token: dict[str, Any]) -> None:
-    existing = saved_yahoo_token(user_id)
-    refresh_token = token.get("refresh_token") or (existing or {}).get("refresh_token")
-    if not refresh_token:
-        raise ValueError("Yahoo did not return a refresh token.")
-    expires_at = int(time.time()) + int(token.get("expires_in", 3600)) - 60
-    now = datetime.utcnow().isoformat()
-    with db() as conn:
-        conn.execute(
-            """INSERT INTO yahoo_tokens
-               (user_id, access_token_encrypted, refresh_token_encrypted, expires_at,
-                token_type, yahoo_guid, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(user_id) DO UPDATE SET
-                 access_token_encrypted=excluded.access_token_encrypted,
-                 refresh_token_encrypted=excluded.refresh_token_encrypted,
-                 expires_at=excluded.expires_at,
-                 token_type=excluded.token_type,
-                 yahoo_guid=excluded.yahoo_guid,
-                 updated_at=excluded.updated_at""",
-            (
-                user_id,
-                encrypt_secret(token["access_token"]),
-                encrypt_secret(refresh_token),
-                expires_at,
-                token.get("token_type", "bearer"),
-                token.get("xoauth_yahoo_guid"),
-                now,
-            ),
-        )
-
-
-def yahoo_access_token(user_id: int) -> str:
-    token = saved_yahoo_token(user_id)
-    if not token:
-        raise RuntimeError("Yahoo is not connected.")
-    if token["expires_at"] > int(time.time()):
-        return token["access_token"]
-
-    credentials = effective_yahoo_app(user_id)
-    if not credentials["client_id"] or not credentials["client_secret"]:
-        raise RuntimeError("Yahoo application credentials are missing.")
-
-    response = requests.post(
-        YAHOO_TOKEN_URL,
-        auth=(credentials["client_id"], credentials["client_secret"]),
-        data={
-            "grant_type": "refresh_token",
-            "redirect_uri": credentials["redirect_uri"],
-            "refresh_token": token["refresh_token"],
-        },
-        timeout=25,
+def page(template: str, **context: Any):
+    return render_template(
+        template,
+        user=USER,
+        leagues=league_state(),
+        analytics=DEMO,
+        **context,
     )
-    if not response.ok:
-        raise RuntimeError(f"Yahoo token refresh failed: {response.text[:300]}")
-    refreshed = response.json()
-    store_yahoo_token(user_id, refreshed)
-    return refreshed["access_token"]
-
-
-def yahoo_api_get(user_id: int, path: str) -> dict[str, Any]:
-    response = requests.get(
-        f"{YAHOO_FANTASY_URL}/{path}",
-        headers={"Authorization": f"Bearer {yahoo_access_token(user_id)}"},
-        params={"format": "json"},
-        timeout=30,
-    )
-    if not response.ok:
-        raise RuntimeError(f"Yahoo API error {response.status_code}: {response.text[:400]}")
-    return response.json()
-
-
-def collect_yahoo_leagues(value: Any, found: list[dict[str, Any]]) -> None:
-    if isinstance(value, dict):
-        if value.get("league_key") and value.get("name"):
-            key = str(value["league_key"])
-            if not any(item["league_key"] == key for item in found):
-                found.append({
-                    "league_key": key,
-                    "league_id": value.get("league_id", ""),
-                    "name": value.get("name", "Yahoo League"),
-                    "season": value.get("season"),
-                    "url": value.get("url", ""),
-                    "num_teams": value.get("num_teams"),
-                    "current_week": value.get("current_week"),
-                })
-        for child in value.values():
-            collect_yahoo_leagues(child, found)
-    elif isinstance(value, list):
-        for child in value:
-            collect_yahoo_leagues(child, found)
-
-
-def collect_yahoo_teams(value: Any, found: list[dict[str, Any]]) -> None:
-    if isinstance(value, dict):
-        if value.get("team_key") and value.get("name"):
-            key = str(value["team_key"])
-            if not any(item["team_key"] == key for item in found):
-                managers = []
-                manager_data = value.get("managers")
-                if manager_data:
-                    collect_strings_by_key(manager_data, "nickname", managers)
-                found.append({
-                    "team_key": key,
-                    "team_id": value.get("team_id"),
-                    "name": value.get("name", "Yahoo Team"),
-                    "managers": managers,
-                    "url": value.get("url", ""),
-                    "number_of_moves": value.get("number_of_moves"),
-                    "number_of_trades": value.get("number_of_trades"),
-                })
-        for child in value.values():
-            collect_yahoo_teams(child, found)
-    elif isinstance(value, list):
-        for child in value:
-            collect_yahoo_teams(child, found)
-
-
-def collect_strings_by_key(value: Any, target_key: str, found: list[str]) -> None:
-    if isinstance(value, dict):
-        if target_key in value and isinstance(value[target_key], (str, int, float)):
-            item = str(value[target_key])
-            if item not in found:
-                found.append(item)
-        for child in value.values():
-            collect_strings_by_key(child, target_key, found)
-    elif isinstance(value, list):
-        for child in value:
-            collect_strings_by_key(child, target_key, found)
-
-
-def yahoo_selected_league(user_id: int) -> dict[str, Any] | None:
-    with db() as conn:
-        row = conn.execute(
-            """SELECT league_key, league_name, season, updated_at
-               FROM yahoo_league_preferences WHERE user_id = ?""",
-            (user_id,),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def normalize_https_base_url(value: str) -> str:
-    """Return a clean HTTPS origin without a trailing slash."""
-    value = (value or "").strip()
-    if not value:
-        raise ValueError("Enter an HTTPS address.")
-    if "://" not in value:
-        value = "https://" + value
-    parsed = urlparse(value)
-    if parsed.scheme.lower() != "https":
-        raise ValueError("Yahoo requires an HTTPS address.")
-    if not parsed.netloc:
-        raise ValueError("The HTTPS address is not valid.")
-    return f"https://{parsed.netloc}".rstrip("/")
-
-
-def yahoo_callback_from_base(value: str) -> str:
-    return normalize_https_base_url(value) + "/auth/yahoo/callback"
-
-
-def active_ngrok_https_url() -> str | None:
-    """Discover a running local ngrok tunnel from ngrok's local API."""
-    try:
-        response = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=3)
-        response.raise_for_status()
-        tunnels = response.json().get("tunnels", [])
-        https_urls = [
-            item.get("public_url", "")
-            for item in tunnels
-            if str(item.get("public_url", "")).startswith("https://")
-        ]
-        return https_urls[0].rstrip("/") if https_urls else None
-    except Exception:
-        return None
-
-def demo_intelligence() -> dict[str, Any]:
-    return {
-        "team_strength": 86,
-        "team_rank": 3,
-        "playoff_probability": 74,
-        "championship_probability": 18,
-        "lineup_gain": 7.1,
-        "trade_opportunities": 4,
-        "power_rankings": [
-            {"rank": 1, "team": "Sunday Crushers", "rating": 91, "playoffs": 82},
-            {"rank": 2, "team": "Fourth & Long", "rating": 88, "playoffs": 77},
-            {"rank": 3, "team": "Your Team", "rating": 86, "playoffs": 74},
-            {"rank": 4, "team": "Gridiron Kings", "rating": 83, "playoffs": 66},
-        ],
-        "manager_profiles": [
-            {"manager": "Mike", "pattern": "Drafts quarterbacks early", "need": "RB2", "likelihood": 78},
-            {"manager": "Sarah", "pattern": "Overvalues rookies", "need": "WR depth", "likelihood": 64},
-            {"manager": "Chris", "pattern": "Holds players too long", "need": "TE", "likelihood": 31},
-            {"manager": "Dan", "pattern": "Chases last week's points", "need": "QB", "likelihood": 72},
-        ],
-        "lineup": [
-            {"slot": "QB", "player": "Jalen Hurts", "points": 24.1},
-            {"slot": "RB", "player": "Josh Jacobs", "points": 17.6},
-            {"slot": "RB", "player": "Jordan Mason", "points": 14.8},
-            {"slot": "WR", "player": "Puka Nacua", "points": 18.9},
-            {"slot": "WR", "player": "DeVonta Smith", "points": 14.2},
-            {"slot": "TE", "player": "Dalton Kincaid", "points": 10.7},
-            {"slot": "FLEX", "player": "Marcus Reed", "points": 12.4},
-            {"slot": "DST", "player": "Baltimore", "points": 6.0},
-        ],
-        "waivers": [
-            {"player": "Marcus Reed", "position": "WR", "faab": "$7–$10", "grade": "A"},
-            {"player": "Ty Chandler", "position": "RB", "faab": "$4–$7", "grade": "B+"},
-            {"player": "Luke Musgrave", "position": "TE", "faab": "$1–$3", "grade": "B"},
-        ],
-    }
-
 
 @app.get("/")
 def home():
-    if session.get("user_id"):
-        return redirect(url_for("dashboard"))
-    return render_template("landing.html")
-
-
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-        if not name or not email or len(password) < 8:
-            flash("Enter your name, email and a password of at least 8 characters.", "error")
-            return render_template("auth.html", mode="register")
-        try:
-            with db() as conn:
-                cursor = conn.execute(
-                    "INSERT INTO users(name, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
-                    (name, email, generate_password_hash(password), datetime.utcnow().isoformat()),
-                )
-                session["user_id"] = cursor.lastrowid
-            return redirect(url_for("dashboard"))
-        except sqlite3.IntegrityError:
-            flash("An account with that email already exists.", "error")
-    return render_template("auth.html", mode="register")
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-        with db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        if user and check_password_hash(user["password_hash"], password):
-            session["user_id"] = user["id"]
-            return redirect(url_for("dashboard"))
-        flash("The email or password was not recognized.", "error")
-    return render_template("auth.html", mode="login")
-
-
-@app.post("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("home"))
-
+    return redirect(url_for("dashboard"))
 
 @app.get("/app")
-@login_required
+@app.get("/dashboard")
 def dashboard():
-    return render_template(
-        "dashboard.html",
-        user=current_user(),
-        analytics=demo_intelligence(),
+    return page("dashboard.html")
+
+@app.get("/draft-center")
+def draft_center():
+    return page("draft_center.html", players=RANKINGS)
+
+@app.get("/league-sync")
+@app.get("/connect-league")
+def league_sync():
+    return page(
+        "league_sync.html",
+        yahoo_configured=bool(os.getenv("YAHOO_CLIENT_ID") and os.getenv("YAHOO_CLIENT_SECRET")),
+        yahoo_redirect=os.getenv("YAHOO_REDIRECT_URI", ""),
     )
 
+@app.get("/lineup-optimizer")
+def lineup_optimizer():
+    return page("lineup.html")
 
+@app.get("/waiver-assistant")
+def waiver_assistant():
+    return page("waivers.html")
+
+@app.get("/trade-analyzer")
+def trade_analyzer():
+    return page("trade.html")
+
+@app.get("/matchup-analyzer")
+def matchup_analyzer():
+    return page("matchups.html")
+
+@app.get("/league-intelligence")
+def league_intelligence():
+    return page("league_intelligence.html")
+
+@app.get("/reports")
+def reports():
+    return page("reports.html")
+
+@app.get("/settings")
+def settings():
+    return page("settings.html")
+
+@app.get("/help")
+def help_page():
+    return page("help.html")
+
+@app.get("/health")
 @app.get("/api/health")
 def health():
-    configured = False
-    if session.get("user_id"):
-        creds = effective_espn_credentials(session["user_id"])
-        configured = all(creds.get(k) for k in ("league_id", "season", "swid", "espn_s2"))
-    else:
-        configured = all(
-            os.getenv(k)
-            for k in ("ESPN_LEAGUE_ID", "ESPN_SEASON", "ESPN_SWID", "ESPN_S2")
-        )
     return jsonify(
         ok=True,
-        server="Gridiron IQ V6",
-        espn_configured=configured,
-        database=str(DB_PATH.name),
+        service="Gridiron IQ",
+        mode="single-user",
+        time=datetime.now(timezone.utc).isoformat(),
     )
 
+@app.post("/api/demo/connect")
+def demo_connect():
+    item = {
+        "platform": "Demo",
+        "league_id": "demo-2026",
+        "league_name": "Gridiron IQ Demo League",
+        "season": 2026,
+        "teams": 12,
+        "synced_at": datetime.now(timezone.utc).isoformat(),
+    }
+    set_league(item)
+    return jsonify(ok=True, message="Demo league connected.", league=item)
 
-@app.post("/api/espn/sync")
-@login_required
-def sync_espn():
-    credentials = effective_espn_credentials(session["user_id"])
-    league_id = str(credentials.get("league_id", "")).strip()
-    season = str(credentials.get("season", "2026")).strip()
-    swid = str(credentials.get("swid", "")).strip()
-    espn_s2 = str(credentials.get("espn_s2", "")).strip()
-
-    missing = [
-        key for key, value in {
-            "ESPN_LEAGUE_ID": league_id,
-            "ESPN_SEASON": season,
-            "ESPN_SWID": swid,
-            "ESPN_S2": espn_s2,
-        }.items() if not value
+@app.post("/api/league/disconnect")
+def league_disconnect():
+    payload = request.get_json(silent=True) or {}
+    platform = str(payload.get("platform", "")).lower()
+    league_id = str(payload.get("league_id", ""))
+    session["connected_leagues"] = [
+        x for x in league_state()
+        if not (
+            str(x.get("platform", "")).lower() == platform
+            and str(x.get("league_id", "")) == league_id
+        )
     ]
-    if missing:
-        return jsonify(error=f"Missing settings: {', '.join(missing)}"), 400
+    return jsonify(ok=True)
 
+@app.post("/api/espn/test")
+def espn_test():
+    payload = request.get_json(silent=True) or {}
+    required = ["league_id", "season", "swid", "espn_s2"]
+    if any(not str(payload.get(k, "")).strip() for k in required):
+        return jsonify(ok=False, error="Complete League ID, season, SWID, and espn_s2."), 400
     try:
         from espn_api.football import League
-
         league = League(
-            league_id=int(league_id),
-            year=int(season),
-            swid=swid,
-            espn_s2=espn_s2,
+            league_id=int(payload["league_id"]),
+            year=int(payload["season"]),
+            swid=str(payload["swid"]).strip(),
+            espn_s2=str(payload["espn_s2"]).strip(),
+        )
+        return jsonify(
+            ok=True,
+            message="ESPN connection successful.",
+            league_name=getattr(league.settings, "name", "ESPN League"),
+            team_count=len(league.teams),
+            current_week=getattr(league, "current_week", None),
+        )
+    except Exception as exc:
+        return jsonify(ok=False, error="ESPN rejected the connection.", detail=str(exc)), 400
+
+@app.post("/api/espn/sync")
+def espn_sync():
+    payload = request.get_json(silent=True) or {}
+    required = ["league_id", "season", "swid", "espn_s2"]
+    if any(not str(payload.get(k, "")).strip() for k in required):
+        return jsonify(ok=False, error="Complete all ESPN connection fields."), 400
+    try:
+        from espn_api.football import League
+        league = League(
+            league_id=int(payload["league_id"]),
+            year=int(payload["season"]),
+            swid=str(payload["swid"]).strip(),
+            espn_s2=str(payload["espn_s2"]).strip(),
         )
         teams = []
-        roster_count = 0
         for team in league.teams:
-            roster = []
-            for player in team.roster:
-                roster.append({
-                    "name": getattr(player, "name", "Unknown"),
-                    "position": getattr(player, "position", ""),
-                    "pro_team": getattr(player, "proTeam", ""),
-                })
-            roster_count += len(roster)
+            roster = getattr(team, "roster", None) or []
             teams.append({
-                "team_name": getattr(team, "team_name", "Unnamed team"),
+                "team_name": getattr(team, "team_name", "Unnamed Team"),
                 "owner": getattr(team, "owner", ""),
                 "wins": getattr(team, "wins", 0),
                 "losses": getattr(team, "losses", 0),
-                "roster": roster,
+                "points_for": round(float(getattr(team, "points_for", 0) or 0), 2),
+                "roster_size": len(roster),
             })
-
-        payload = {
-            "league": {
-                "id": league_id,
-                "name": getattr(league.settings, "name", "ESPN League"),
-                "season": int(season),
-                "team_count": len(teams),
-                "roster_count": roster_count,
-                "current_week": getattr(league, "current_week", 0),
-            },
-            "teams": teams,
+        item = {
+            "platform": "ESPN",
+            "league_id": str(payload["league_id"]),
+            "league_name": getattr(league.settings, "name", "ESPN League"),
+            "season": int(payload["season"]),
+            "teams": len(teams),
+            "current_week": getattr(league, "current_week", None),
+            "synced_at": datetime.now(timezone.utc).isoformat(),
         }
-
-        with db() as conn:
-            conn.execute(
-                """INSERT INTO league_snapshots
-                   (user_id, platform, league_id, league_name, season, payload, synced_at)
-                   VALUES (?, 'ESPN', ?, ?, ?, ?, ?)""",
-                (
-                    session["user_id"],
-                    league_id,
-                    payload["league"]["name"],
-                    int(season),
-                    json.dumps(payload),
-                    datetime.utcnow().isoformat(),
-                ),
-            )
-        return jsonify(payload)
+        set_league(item)
+        return jsonify(ok=True, message="ESPN league synced.", league=item, teams=teams)
     except Exception as exc:
-        app.logger.exception("ESPN sync failed")
-        return jsonify(
-            error="Unable to connect to ESPN.",
-            detail=str(exc),
-            suggestion=(
-                "Confirm the final manager has joined, then refresh the SWID and espn_s2 "
-                "from the ESPN account that can open this league."
-            ),
-        ), 400
+        return jsonify(ok=False, error="ESPN sync failed.", detail=str(exc)), 400
 
-
-@app.get("/api/espn/connection")
-@login_required
-def espn_connection():
-    credentials = effective_espn_credentials(session["user_id"])
-    configured = all(credentials.get(k) for k in ("league_id", "season", "swid", "espn_s2"))
-    return jsonify(
-        configured=configured,
-        league_id=credentials.get("league_id", ""),
-        season=credentials.get("season", 2026),
-        saved_locally=saved_espn_credentials(session["user_id"]) is not None,
-        updated_at=credentials.get("updated_at"),
-    )
-
-
-@app.post("/api/espn/connection")
-@login_required
-def save_espn_connection():
+@app.post("/api/sleeper/sync")
+def sleeper_sync():
     payload = request.get_json(silent=True) or {}
     league_id = str(payload.get("league_id", "")).strip()
-    season = str(payload.get("season", "2026")).strip()
-    swid = str(payload.get("swid", "")).strip()
-    espn_s2 = str(payload.get("espn_s2", "")).strip()
-
-    if not all((league_id, season, swid, espn_s2)):
-        return jsonify(error="League ID, season, SWID and espn_s2 are all required."), 400
+    if not league_id:
+        return jsonify(ok=False, error="Enter a Sleeper league ID."), 400
     try:
-        int(league_id)
-        int(season)
-    except ValueError:
-        return jsonify(error="League ID and season must contain numbers only."), 400
-
-    now = datetime.utcnow().isoformat()
-    with db() as conn:
-        conn.execute(
-            """INSERT INTO espn_credentials
-               (user_id, league_id, season, swid_encrypted, s2_encrypted, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)
-               ON CONFLICT(user_id) DO UPDATE SET
-                 league_id=excluded.league_id,
-                 season=excluded.season,
-                 swid_encrypted=excluded.swid_encrypted,
-                 s2_encrypted=excluded.s2_encrypted,
-                 updated_at=excluded.updated_at""",
-            (
-                session["user_id"],
-                league_id,
-                int(season),
-                encrypt_secret(swid),
-                encrypt_secret(espn_s2),
-                now,
-            ),
-        )
-    return jsonify(ok=True, message="ESPN connection saved securely on this computer.")
-
-
-@app.delete("/api/espn/connection")
-@login_required
-def delete_espn_connection():
-    with db() as conn:
-        conn.execute("DELETE FROM espn_credentials WHERE user_id = ?", (session["user_id"],))
-    return jsonify(ok=True, message="Saved ESPN credentials were removed.")
-
-
-@app.post("/api/espn/test")
-@login_required
-def test_espn_connection():
-    payload = request.get_json(silent=True) or {}
-    if payload:
-        credentials = {
-            "league_id": str(payload.get("league_id", "")).strip(),
-            "season": str(payload.get("season", "2026")).strip(),
-            "swid": str(payload.get("swid", "")).strip(),
-            "espn_s2": str(payload.get("espn_s2", "")).strip(),
+        league_response = requests.get(f"https://api.sleeper.app/v1/league/{league_id}", timeout=20)
+        league_response.raise_for_status()
+        league = league_response.json()
+        rosters_response = requests.get(f"https://api.sleeper.app/v1/league/{league_id}/rosters", timeout=20)
+        rosters_response.raise_for_status()
+        rosters = rosters_response.json()
+        item = {
+            "platform": "Sleeper",
+            "league_id": league_id,
+            "league_name": league.get("name", "Sleeper League"),
+            "season": int(league.get("season") or 2026),
+            "teams": int(league.get("total_rosters") or len(rosters)),
+            "status": league.get("status", ""),
+            "synced_at": datetime.now(timezone.utc).isoformat(),
         }
-    else:
-        credentials = effective_espn_credentials(session["user_id"])
-
-    if not all(credentials.get(k) for k in ("league_id", "season", "swid", "espn_s2")):
-        return jsonify(error="Complete all four ESPN connection fields first."), 400
-
-    try:
-        from espn_api.football import League
-        league = League(
-            league_id=int(credentials["league_id"]),
-            year=int(credentials["season"]),
-            swid=credentials["swid"],
-            espn_s2=credentials["espn_s2"],
-        )
-        return jsonify(
-            ok=True,
-            league_name=getattr(league.settings, "name", "ESPN League"),
-            team_count=len(league.teams),
-            message="Connection successful.",
-        )
+        set_league(item)
+        return jsonify(ok=True, message="Sleeper league synced.", league=item)
     except Exception as exc:
-        return jsonify(
-            error="ESPN rejected the connection.",
-            detail=str(exc),
-            suggestion="Confirm the league is active and refresh both ESPN cookie values.",
-        ), 400
+        return jsonify(ok=False, error="Sleeper sync failed.", detail=str(exc)), 400
 
-
-@app.get("/api/ngrok/status")
-@login_required
-def ngrok_status():
-    public_url = active_ngrok_https_url()
-    if not public_url:
-        return jsonify(
-            running=False,
-            message="No active ngrok HTTPS tunnel was detected.",
-            help="Start ngrok with: ngrok http 8000",
-        )
-    return jsonify(
-        running=True,
-        public_url=public_url,
-        redirect_uri=yahoo_callback_from_base(public_url),
-        message="Active ngrok HTTPS tunnel detected.",
-    )
-
-
-@app.post("/api/yahoo/validate-redirect")
-@login_required
-def validate_yahoo_redirect():
-    payload = request.get_json(silent=True) or {}
-    value = str(payload.get("url") or payload.get("redirect_uri") or "").strip()
-    try:
-        if value.endswith("/auth/yahoo/callback"):
-            parsed = urlparse(value)
-            if parsed.scheme.lower() != "https" or not parsed.netloc:
-                raise ValueError("Yahoo requires a valid HTTPS callback address.")
-            redirect_uri = f"https://{parsed.netloc}/auth/yahoo/callback"
-        else:
-            redirect_uri = yahoo_callback_from_base(value)
-        return jsonify(
-            ok=True,
-            redirect_uri=redirect_uri,
-            message="This HTTPS callback format is valid for Gridiron IQ.",
-        )
-    except ValueError as exc:
-        return jsonify(ok=False, error=str(exc)), 400
-
-
-@app.get("/api/yahoo/status")
-@login_required
-def yahoo_status():
-    user_id = session["user_id"]
-    credentials = effective_yahoo_app(user_id)
-    token = saved_yahoo_token(user_id)
-    selected = yahoo_selected_league(user_id)
-    return jsonify(
-        app_configured=bool(credentials["client_id"] and credentials["client_secret"]),
-        redirect_uri=credentials["redirect_uri"],
-        connected=token is not None,
-        selected_league=selected,
-        credentials_saved_locally=saved_yahoo_app(user_id) is not None,
-    )
-
-
-@app.post("/api/yahoo/app-credentials")
-@login_required
-def save_yahoo_app_credentials():
-    payload = request.get_json(silent=True) or {}
-    client_id = str(payload.get("client_id", "")).strip()
-    client_secret = str(payload.get("client_secret", "")).strip()
-    redirect_uri = str(payload.get("redirect_uri", "")).strip()
-    if not all((client_id, client_secret, redirect_uri)):
-        return jsonify(error="Client ID, Client Secret and Redirect URI are required."), 400
-    try:
-        parsed_redirect = urlparse(redirect_uri)
-        if parsed_redirect.scheme.lower() != "https" or not parsed_redirect.netloc:
-            raise ValueError("Yahoo requires an HTTPS Redirect URI.")
-        if parsed_redirect.path.rstrip("/") != "/auth/yahoo/callback":
-            raise ValueError("The Redirect URI must end with /auth/yahoo/callback.")
-        redirect_uri = f"https://{parsed_redirect.netloc}/auth/yahoo/callback"
-    except ValueError as exc:
-        return jsonify(error=str(exc)), 400
-
-    with db() as conn:
-        conn.execute(
-            """INSERT INTO yahoo_app_credentials
-               (user_id, client_id_encrypted, client_secret_encrypted, redirect_uri, updated_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(user_id) DO UPDATE SET
-                 client_id_encrypted=excluded.client_id_encrypted,
-                 client_secret_encrypted=excluded.client_secret_encrypted,
-                 redirect_uri=excluded.redirect_uri,
-                 updated_at=excluded.updated_at""",
-            (
-                session["user_id"],
-                encrypt_secret(client_id),
-                encrypt_secret(client_secret),
-                redirect_uri,
-                datetime.utcnow().isoformat(),
-            ),
-        )
-    return jsonify(ok=True, message="Yahoo application credentials saved securely.")
-
-
-@app.delete("/api/yahoo/app-credentials")
-@login_required
-def delete_yahoo_app_credentials():
-    with db() as conn:
-        conn.execute("DELETE FROM yahoo_app_credentials WHERE user_id = ?", (session["user_id"],))
-        conn.execute("DELETE FROM yahoo_tokens WHERE user_id = ?", (session["user_id"],))
-        conn.execute("DELETE FROM yahoo_league_preferences WHERE user_id = ?", (session["user_id"],))
-    return jsonify(ok=True, message="Yahoo credentials and connection were removed.")
-
-
-@app.get("/auth/yahoo")
-@login_required
-def yahoo_authorize():
-    credentials = effective_yahoo_app(session["user_id"])
-    if not credentials["client_id"] or not credentials["client_secret"]:
-        flash("Save your Yahoo Client ID and Client Secret first.", "error")
-        return redirect(url_for("dashboard") + "#settings")
-    if not credentials["redirect_uri"].startswith("https://"):
-        flash("Yahoo requires HTTPS. Start ngrok, detect the HTTPS address, and save it first.", "error")
-        return redirect(url_for("dashboard") + "#settings")
-
-    state = secrets.token_urlsafe(32)
-    session["yahoo_oauth_state"] = state
-    params = {
-        "client_id": credentials["client_id"],
-        "redirect_uri": credentials["redirect_uri"],
+@app.get("/auth/yahoo/start")
+def yahoo_start():
+    client_id = os.getenv("YAHOO_CLIENT_ID", "").strip()
+    redirect_uri = os.getenv("YAHOO_REDIRECT_URI", "").strip()
+    if not client_id or not redirect_uri:
+        return page("error.html", code=400, message="Yahoo is not configured in Render."), 400
+    state = os.urandom(18).hex()
+    session["yahoo_state"] = state
+    query = urlencode({
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
         "response_type": "code",
-        "state": state,
         "language": "en-us",
-    }
-    return redirect(f"{YAHOO_AUTH_URL}?{urlencode(params)}")
-
+        "state": state,
+    })
+    return redirect("https://api.login.yahoo.com/oauth2/request_auth?" + query)
 
 @app.get("/auth/yahoo/callback")
-@login_required
 def yahoo_callback():
-    if request.args.get("error"):
-        flash(f"Yahoo authorization was declined: {request.args.get('error_description', request.args['error'])}", "error")
-        return redirect(url_for("dashboard") + "#settings")
-
-    state = request.args.get("state", "")
-    expected_state = session.pop("yahoo_oauth_state", "")
-    if not expected_state or not secrets.compare_digest(state, expected_state):
-        flash("Yahoo connection could not be verified. Please try again.", "error")
-        return redirect(url_for("dashboard") + "#settings")
-
+    if request.args.get("state") != session.get("yahoo_state"):
+        return page("error.html", code=400, message="Yahoo authorization state did not match."), 400
     code = request.args.get("code", "")
-    credentials = effective_yahoo_app(session["user_id"])
-    response = requests.post(
-        YAHOO_TOKEN_URL,
-        auth=(credentials["client_id"], credentials["client_secret"]),
-        data={
-            "grant_type": "authorization_code",
-            "redirect_uri": credentials["redirect_uri"],
-            "code": code,
-        },
-        timeout=25,
-    )
-    if not response.ok:
-        flash(f"Yahoo token exchange failed: {response.text[:250]}", "error")
-        return redirect(url_for("dashboard") + "#settings")
-
+    if not code:
+        return page("error.html", code=400, message="Yahoo did not return an authorization code."), 400
     try:
-        store_yahoo_token(session["user_id"], response.json())
-        flash("Yahoo connected successfully. Select your league below.", "success")
-    except Exception as exc:
-        flash(f"Yahoo connected, but the token could not be saved: {exc}", "error")
-    return redirect(url_for("dashboard") + "#settings")
-
-
-@app.post("/api/yahoo/disconnect")
-@login_required
-def yahoo_disconnect():
-    with db() as conn:
-        conn.execute("DELETE FROM yahoo_tokens WHERE user_id = ?", (session["user_id"],))
-        conn.execute("DELETE FROM yahoo_league_preferences WHERE user_id = ?", (session["user_id"],))
-    return jsonify(ok=True, message="Yahoo was disconnected.")
-
-
-@app.get("/api/yahoo/leagues")
-@login_required
-def yahoo_leagues():
-    try:
-        raw = yahoo_api_get(
-            session["user_id"],
-            "users;use_login=1/games;game_keys=nfl/leagues",
-        )
-        leagues: list[dict[str, Any]] = []
-        collect_yahoo_leagues(raw, leagues)
-        leagues.sort(key=lambda item: int(item.get("season") or 0), reverse=True)
-        return jsonify(leagues=leagues)
-    except Exception as exc:
-        app.logger.exception("Yahoo league discovery failed")
-        return jsonify(error="Unable to load Yahoo leagues.", detail=str(exc)), 400
-
-
-@app.post("/api/yahoo/select-league")
-@login_required
-def yahoo_select_league():
-    payload = request.get_json(silent=True) or {}
-    league_key = str(payload.get("league_key", "")).strip()
-    league_name = str(payload.get("league_name", "")).strip()
-    season = payload.get("season")
-    if not league_key or not league_name:
-        return jsonify(error="Choose a Yahoo league first."), 400
-    with db() as conn:
-        conn.execute(
-            """INSERT INTO yahoo_league_preferences
-               (user_id, league_key, league_name, season, updated_at)
-               VALUES (?, ?, ?, ?, ?)
-               ON CONFLICT(user_id) DO UPDATE SET
-                 league_key=excluded.league_key,
-                 league_name=excluded.league_name,
-                 season=excluded.season,
-                 updated_at=excluded.updated_at""",
-            (
-                session["user_id"],
-                league_key,
-                league_name,
-                int(season) if str(season or "").isdigit() else None,
-                datetime.utcnow().isoformat(),
-            ),
-        )
-    return jsonify(ok=True, message=f"{league_name} selected.")
-
-
-@app.post("/api/yahoo/sync")
-@login_required
-def sync_yahoo():
-    selected = yahoo_selected_league(session["user_id"])
-    if not selected:
-        return jsonify(error="Select a Yahoo league before syncing."), 400
-    try:
-        league_key = selected["league_key"]
-        raw = yahoo_api_get(
-            session["user_id"],
-            f"league/{league_key}/teams;out=standings,roster",
-        )
-        teams: list[dict[str, Any]] = []
-        collect_yahoo_teams(raw, teams)
-        payload = {
-            "league": {
-                "id": league_key,
-                "name": selected["league_name"],
-                "season": selected.get("season") or datetime.utcnow().year,
-                "team_count": len(teams),
-                "platform": "Yahoo",
+        response = requests.post(
+            "https://api.login.yahoo.com/oauth2/get_token",
+            auth=(os.getenv("YAHOO_CLIENT_ID", ""), os.getenv("YAHOO_CLIENT_SECRET", "")),
+            data={
+                "grant_type": "authorization_code",
+                "redirect_uri": os.getenv("YAHOO_REDIRECT_URI", ""),
+                "code": code,
             },
-            "teams": teams,
-            "raw_available": True,
-        }
-        with db() as conn:
-            conn.execute(
-                """INSERT INTO league_snapshots
-                   (user_id, platform, league_id, league_name, season, payload, synced_at)
-                   VALUES (?, 'Yahoo', ?, ?, ?, ?, ?)""",
-                (
-                    session["user_id"],
-                    league_key,
-                    selected["league_name"],
-                    int(payload["league"]["season"]),
-                    json.dumps(payload),
-                    datetime.utcnow().isoformat(),
-                ),
-            )
-        return jsonify(payload)
+            timeout=25,
+        )
+        response.raise_for_status()
+        token = response.json()
+        session["yahoo_access_token"] = token.get("access_token")
+        session["yahoo_refresh_token"] = token.get("refresh_token")
+        session["yahoo_connected"] = True
+        return redirect(url_for("league_sync", yahoo="connected"))
     except Exception as exc:
-        app.logger.exception("Yahoo sync failed")
-        return jsonify(
-            error="Unable to sync the Yahoo league.",
-            detail=str(exc),
-            suggestion="Reconnect Yahoo, confirm Fantasy Sports access, and verify the Redirect URI exactly matches your Yahoo app.",
-        ), 400
+        return page("error.html", code=502, message=f"Yahoo authorization failed: {exc}"), 502
 
+@app.post("/api/trade/analyze")
+def trade_analyze():
+    payload = request.get_json(silent=True) or {}
+    give = str(payload.get("give", "")).strip()
+    receive = str(payload.get("receive", "")).strip()
+    scoring = str(payload.get("scoring", "Half-PPR"))
+    if not give or not receive:
+        return jsonify(ok=False, error="Enter players on both sides of the trade."), 400
+    give_count = len([x for x in give.split(",") if x.strip()])
+    receive_count = len([x for x in receive.split(",") if x.strip()])
+    balance = 76 - abs(give_count - receive_count) * 8
+    return jsonify(
+        ok=True,
+        verdict="Fair starting point" if balance >= 65 else "Needs additional value",
+        confidence=max(48, min(88, balance)),
+        scoring=scoring,
+        summary=f"In {scoring}, compare role stability, target or touch volume, injury risk, and positional scarcity before accepting.",
+    )
 
-@app.get("/api/latest-league")
-@login_required
-def latest_league():
-    with db() as conn:
-        row = conn.execute(
-            """SELECT payload, synced_at FROM league_snapshots
-               WHERE user_id = ? ORDER BY id DESC LIMIT 1""",
-            (session["user_id"],),
-        ).fetchone()
-    if not row:
-        return jsonify(error="No league has been synced yet."), 404
-    payload = json.loads(row["payload"])
-    payload["synced_at"] = row["synced_at"]
-    return jsonify(payload)
+@app.post("/api/lineup/optimize")
+def lineup_optimize():
+    payload = request.get_json(silent=True) or {}
+    risk = str(payload.get("risk", "balanced"))
+    lineup = [dict(x) for x in DEMO["lineup"]]
+    adjustment = {"safe": -0.7, "balanced": 0.0, "upside": 1.2}.get(risk, 0.0)
+    for row in lineup:
+        row["projection"] = round(row["projection"] + adjustment, 1)
+    return jsonify(
+        ok=True,
+        risk=risk,
+        projected_total=round(sum(x["projection"] for x in lineup), 1),
+        lineup=lineup,
+    )
 
+@app.post("/api/waivers/analyze")
+def waiver_analyze():
+    payload = request.get_json(silent=True) or {}
+    budget = int(payload.get("budget", 100) or 100)
+    items = []
+    for x in DEMO["waivers"]:
+        item = dict(x)
+        item["max_bid"] = round(
+            budget * {"A-": 0.18, "B+": 0.12, "B": 0.06}.get(x["grade"], 0.05)
+        )
+        items.append(item)
+    return jsonify(ok=True, budget=budget, recommendations=items)
 
-@app.get("/api/intelligence")
+@app.post("/api/draft/recommend")
+def draft_recommend():
+    payload = request.get_json(silent=True) or {}
+    drafted = {str(x).lower() for x in payload.get("drafted", [])}
+    position = str(payload.get("position", "")).upper()
+    available = [
+        p for p in RANKINGS
+        if p["name"].lower() not in drafted
+        and (not position or p["pos"] == position)
+    ]
+    return jsonify(ok=True, recommendations=available[:5])
 
+@app.errorhandler(404)
+def not_found(_):
+    return page("error.html", code=404, message="Page not found."), 404
+
+@app.errorhandler(500)
+def server_error(_):
+    return page(
+        "error.html",
+        code=500,
+        message="Something went wrong. Check the Render logs for the full traceback.",
+    ), 500
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8000"))
-    app.run(host="127.0.0.1", port=port, debug=False)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        debug=os.getenv("FLASK_DEBUG") == "1",
+    )
