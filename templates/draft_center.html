@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Draft Center | Gridiron IQ{% endblock %}{% block heading %}Draft Center{% endblock %}
+{% block body %}
+<section class="page-intro"><span class="pill">Live draft workflow</span><h2>Rankings, tiers, ADP, and pick tracking</h2><p>Filter the board, mark players drafted, and ask Gridiron IQ for the best available options.</p></section>
+<section class="panel">
+<div class="toolbar"><input id="player-search" placeholder="Search players"><select id="position-filter"><option value="">All positions</option><option>QB</option><option>RB</option><option>WR</option><option>TE</option></select><button class="button" id="recommend-draft">Recommend next</button><button class="button" id="reset-draft">Reset</button></div>
+<div id="draft-recommendations" class="recommend-strip">Mark drafted players, then request a recommendation.</div>
+<table id="draft-table"><thead><tr><th>Rank</th><th>Player</th><th>Pos</th><th>Team</th><th>Tier</th><th>ADP</th><th>Projection</th><th>Status</th></tr></thead><tbody>
+{% for p in players %}<tr data-name="{{ p.name|lower }}" data-pos="{{ p.pos }}"><td>{{ p.rank }}</td><td class="player-name"><b>{{ p.name }}</b></td><td>{{ p.pos }}</td><td>{{ p.team }}</td><td>{{ p.tier }}</td><td>{{ p.adp }}</td><td>{{ p.projection }}</td><td><button class="draft-toggle">Available</button></td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

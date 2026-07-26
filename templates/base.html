@@ -1,1 +1,40 @@
-
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}Gridiron IQ{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<div class="app-shell">
+<aside class="sidebar" id="sidebar">
+  <a class="brand" href="/app"><span class="brand-mark">GI</span><span><b>Gridiron IQ</b><small>Fantasy Football AI</small></span></a>
+  <nav>
+    <a href="/app">Command Center</a>
+    <a href="/draft-center">Draft Center</a>
+    <a href="/lineup-optimizer">Lineup Optimizer</a>
+    <a href="/waiver-assistant">Waiver Assistant</a>
+    <a href="/trade-analyzer">Trade Analyzer</a>
+    <a href="/matchup-analyzer">Matchup Analyzer</a>
+    <a href="/league-intelligence">League Intelligence</a>
+    <a href="/league-sync">League Sync</a>
+    <a href="/reports">Reports</a>
+    <a href="/settings">Settings</a>
+    <a href="/help">Help</a>
+  </nav>
+  <div class="sidebar-foot"><span class="online-dot"></span> Application online</div>
+</aside>
+<main class="main">
+<header class="topbar">
+  <button class="menu-button" id="menu-button">☰</button>
+  <div><p class="eyebrow">2026 Fantasy Season</p><h1>{% block heading %}Gridiron IQ{% endblock %}</h1></div>
+  <div class="user-chip"><span>{{ user.name[0] if user else "G" }}</span><div><b>{{ user.name if user else "Guest" }}</b><small>Single-user mode</small></div></div>
+</header>
+{% block body %}{% endblock %}
+</main>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Command Center | Gridiron IQ{% endblock %}
+{% block heading %}Command Center{% endblock %}
+{% block body %}
+<section class="hero">
+<div class="hero-copy"><span class="pill">AI roster intelligence</span><h2>Your league. Your opponents.<br>Your <em>edge.</em></h2><p>Draft guidance, weekly decisions, trade psychology, matchup analysis, and league-wide forecasting in one place.</p>
+<div class="actions"><a class="button primary" href="/league-sync">Connect a League</a><a class="button ghost" href="/draft-center">Open Draft Center</a></div></div>
+<div class="strength"><small>Team Strength</small><strong>{{ analytics.team_strength }}</strong><b>Rank #{{ analytics.team_rank }}</b><span>Demo intelligence until a league is connected</span></div>
+</section>
+<section class="metric-grid">
+<article><span>Playoff Probability</span><strong>{{ analytics.playoff_probability }}%</strong><small>High chance</small></article>
+<article><span>Championship Probability</span><strong>{{ analytics.championship_probability }}%</strong><small>Top-three potential</small></article>
+<article><span>Lineup Improvement</span><strong>+{{ analytics.lineup_gain }}</strong><small>Projected points</small></article>
+<article><span>Trade Opportunities</span><strong>{{ analytics.trade_opportunities }}</strong><small>League fits identified</small></article>
+</section>
+<section class="grid two">
+<article class="panel action-card"><p class="eyebrow">Top Action</p><h2>{{ analytics.top_action.title }}</h2><p>{{ analytics.top_action.reason }}</p><div class="chips"><span>{{ analytics.top_action.confidence }}% confidence</span><span>+{{ analytics.top_action.gain }} points</span><span>High floor</span></div></article>
+<article class="panel"><div class="panel-head"><div><p class="eyebrow">Connected Leagues</p><h2>League Center</h2></div><a href="/league-sync">Manage</a></div>
+{% if leagues %}{% for l in leagues %}<div class="league-row"><b>{{ l.platform }}</b><span>{{ l.league_name }}</span><small>{{ l.season }} · {{ l.teams }} teams</small></div>{% endfor %}
+{% else %}<div class="empty"><h3>No league connected</h3><p>Connect ESPN, Yahoo, Sleeper, or the safe demo league.</p><a class="button primary" href="/league-sync">Connect now</a></div>{% endif %}</article>
+</section>
+<section class="panel"><div class="panel-head"><div><p class="eyebrow">League Intelligence</p><h2>Power Rankings</h2></div><a href="/league-intelligence">View analysis</a></div>
+<table><thead><tr><th>Rank</th><th>Team</th><th>Record</th><th>Rating</th><th>Playoff Odds</th></tr></thead><tbody>
+{% for t in analytics.power_rankings %}<tr><td>#{{ t.rank }}</td><td><b>{{ t.team }}</b></td><td>{{ t.record }}</td><td>{{ t.rating }}</td><td>{{ t.playoffs }}%</td></tr>{% endfor %}
+</tbody></table></section>
+{% endblock %}

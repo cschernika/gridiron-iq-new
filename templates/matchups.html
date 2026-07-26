@@ -1,0 +1,3 @@
+{% extends "base.html" %}{% block title %}Matchup Analyzer | Gridiron IQ{% endblock %}{% block heading %}Matchup Analyzer{% endblock %}
+{% block body %}<section class="page-intro"><span class="pill">Opponent Intelligence</span><h2>Position-by-position matchup outlook</h2><p>Evaluate pace, defensive tendencies, opportunity, and projected game script.</p></section>
+<section class="grid two">{% for m in analytics.matchups %}<article class="panel matchup-card"><div><span class="grade">{{ m.grade }}</span><p class="eyebrow">{{ m.position }}</p><h2>{{ m.opponent }}</h2></div><p>{{ m.note }}</p></article>{% endfor %}</section>{% endblock %}
