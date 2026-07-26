@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: gridiron-iq
+    name: gridiron-iq-new
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
