@@ -383,17 +383,27 @@ def draft_recommend():
     available = [p for p in RANKINGS if p["name"].lower() not in drafted and (not position or p["pos"] == position)]
     return jsonify(ok=True, recommendations=available[:5])
 
+@app.route("/")
+def home():
+    return redirect("/app")
+
+
 @app.errorhandler(404)
 def not_found(_):
     return page("error.html", code=404, message="Page not found."), 404
+
 
 @app.errorhandler(500)
 def server_error(_):
     return page("error.html", code=500, message="Something went wrong. Check the Render logs for the full traceback."), 500
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=os.getenv("FLASK_DEBUG") == "1")
 
+if __name__ == "__main__":
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        debug=os.getenv("FLASK_DEBUG") == "1"
+    )
 @app.route("/")
 def home():
     return redirect("/app")
