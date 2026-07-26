@@ -1,17 +1,10 @@
 {% extends "base.html" %}{% block title %}League Sync | Gridiron IQ{% endblock %}{% block heading %}League Sync{% endblock %}
 {% block body %}
-<section class="page-intro"><span class="pill">Connection Center</span><h2>Bring your leagues into Gridiron IQ</h2><p>Connect ESPN private leagues, Sleeper leagues, or authorize Yahoo Fantasy.</p></section>
-<section class="grid two">
-<article class="panel"><div class="platform-head"><span class="platform-logo espn">E</span><div><p class="eyebrow">ESPN</p><h2>ESPN Fantasy Football</h2></div></div>
+<section class="page-intro"><span class="pill">ESPN Connection</span><h2>Sync Gramp's Gridiron</h2><p>The app saves only the safe league snapshot. It does not write your SWID or espn_s2 cookies to disk.</p></section>
+<section class="panel">
 <div class="form-grid"><label>League ID<input id="espn-league-id" value="624589584"></label><label>Season<input id="espn-season" value="2026"></label><label>SWID<input id="espn-swid" type="password" placeholder="{...}"></label><label>espn_s2<input id="espn-s2" type="password" placeholder="Paste full cookie value"></label></div>
-<div class="actions"><button class="button" id="test-espn">Test Connection</button><button class="button primary" id="sync-espn">Sync League</button></div><pre class="result" id="espn-result">Waiting for ESPN credentials.</pre></article>
-<article class="panel"><div class="platform-head"><span class="platform-logo yahoo">Y!</span><div><p class="eyebrow">Yahoo</p><h2>Yahoo Fantasy Sports</h2></div></div>
-<p>Yahoo uses OAuth. Configure the Client ID, Client Secret, and Redirect URI in Render first.</p>
-<div class="config-list"><code>YAHOO_CLIENT_ID</code><code>YAHOO_CLIENT_SECRET</code><code>YAHOO_REDIRECT_URI</code></div>
-<p class="muted">Status: {{ "Configured" if yahoo_configured else "Not configured" }}</p><a class="button primary" href="/auth/yahoo/start">Authorize Yahoo</a></article>
-<article class="panel"><div class="platform-head"><span class="platform-logo sleeper">S</span><div><p class="eyebrow">Sleeper</p><h2>Sleeper Fantasy</h2></div></div>
-<label>League ID<input id="sleeper-league-id" placeholder="Enter Sleeper league ID"></label><button class="button primary top-gap" id="sync-sleeper">Sync Sleeper</button><pre class="result" id="sleeper-result">Waiting for a league ID.</pre></article>
-<article class="panel"><div class="platform-head"><span class="platform-logo demo">GI</span><div><p class="eyebrow">Safe Test</p><h2>Demo League</h2></div></div><p>Use this to verify that the dashboard, league list, and app workflow function correctly without external credentials.</p><button class="button primary" id="connect-demo">Connect Demo League</button><pre class="result" id="demo-result">Not connected.</pre></article>
+<div class="actions"><button class="button" id="test-espn">Test Connection</button><button class="button primary" id="sync-espn">Sync & Save Snapshot</button></div>
+<pre class="result" id="espn-result">{{ "ESPN snapshot is already saved." if connected else "Waiting for ESPN credentials." }}</pre>
 </section>
-{% if leagues %}<section class="panel"><div class="panel-head"><h2>Connected Leagues</h2></div>{% for l in leagues %}<div class="league-row"><b>{{ l.platform }}</b><span>{{ l.league_name }}</span><small>{{ l.season }} · {{ l.teams }} teams</small><button class="disconnect" data-platform="{{ l.platform }}" data-league="{{ l.league_id }}">Disconnect</button></div>{% endfor %}</section>{% endif %}
+{% if connected %}<section class="panel"><h2>{{ league.league_name }}</h2><p>{{ league.teams }} teams · {{ league_settings.scoring }} · Season {{ league.season }}</p><button class="button danger" id="disconnect-league">Disconnect ESPN snapshot</button></section>{% endif %}
 {% endblock %}
