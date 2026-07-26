@@ -393,3 +393,7 @@ def server_error(_):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=os.getenv("FLASK_DEBUG") == "1")
+
+@app.route("/")
+def home():
+    return redirect("/app")
