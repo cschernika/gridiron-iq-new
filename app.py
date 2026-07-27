@@ -1615,104 +1615,54 @@ def _parse_platform_adp(html, platform):
 def _adp_cache_file(platform):
     return DATA_DIR / f"adp_2026_{str(platform).lower()}_cache.json"
 
-def _platform_2026_adp_data(platform="ESPN", force=False):
+def _local_platform_adp_path(platform):
     platform = str(platform or "ESPN").upper()
+    filename = "espn_adp_2026.json" if platform == "ESPN" else "yahoo_adp_2026.json"
+    return DATA_DIR / filename
 
-    # ESPN must come from ESPN itself, not a scraped third-party table.
-    if platform == "ESPN":
-        if not force:
-            native = _load_espn_native_adp()
-            if native and native.get("players"):
-                return native
+def _platform_2026_adp_data(platform="ESPN", force=False):
+    """
+    Stable local ADP architecture.
 
-        try:
-            return _fetch_espn_native_adp(season=2026)
-        except Exception as exc:
-            native = _load_espn_native_adp()
-            if native and native.get("players"):
-                native["status"] = "cached"
-                native["warning"] = str(exc)
-                return native
+    ESPN and Yahoo ADP are read from versioned JSON files in /data instead of
+    depending on live ESPN/FantasyPros HTML/API responses from Render.
 
-            return {
-                "season": 2026,
-                "platform": "ESPN",
-                "scoring": "PPR",
-                "source": "ESPN native PPR fantasy ADP",
-                "source_url": "",
-                "updated_at": "",
-                "players": {},
-                "status": "unavailable",
-                "warning": str(exc),
-            }
+    Updating current ADP later only requires replacing the matching JSON file.
+    """
+    platform = str(platform or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
 
-    # Yahoo continues to use the Yahoo-specific source/parser.
-    platform = "YAHOO"
-    spec = ADP_2026_SOURCES[platform]
-    cache_file = _adp_cache_file(platform)
-
+    path = _local_platform_adp_path(platform)
     try:
-        if (
-            not force
-            and cache_file.exists()
-            and (time.time() - cache_file.stat().st_mtime) < ADP_2026_CACHE_TTL
-        ):
-            cached = json.loads(cache_file.read_text(encoding="utf-8"))
-            if cached.get("players"):
-                return cached
-    except Exception:
-        pass
-
-    errors = []
-
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-        response = requests.get(spec["url"], headers=headers, timeout=30)
-        response.raise_for_status()
-        players = _parse_platform_adp(response.text, platform)
-
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        players = payload.get("players", {})
         if players:
-            payload = {
-                "season": 2026,
-                "platform": platform,
-                "scoring": spec["scoring"],
-                "source": "Yahoo 2026 Half-PPR ADP",
-                "source_url": spec["url"],
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "players": players,
-                "status": "live",
-            }
-            cache_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            payload["status"] = "local"
             return payload
-
-        errors.append("Yahoo ADP column could not be parsed.")
     except Exception as exc:
-        errors.append(str(exc))
-
-    try:
-        if cache_file.exists():
-            cached = json.loads(cache_file.read_text(encoding="utf-8"))
-            if cached.get("players"):
-                cached["status"] = "cached"
-                cached["warning"] = "; ".join(errors)
-                return cached
-    except Exception:
-        pass
+        return {
+            "season": 2026,
+            "platform": platform,
+            "scoring": "PPR" if platform == "ESPN" else "Half PPR",
+            "source": f"{platform} local 2026 ADP file missing/unreadable",
+            "source_url": "",
+            "updated_at": "",
+            "players": {},
+            "status": "unavailable",
+            "warning": str(exc),
+        }
 
     return {
         "season": 2026,
-        "platform": "YAHOO",
-        "scoring": "Half PPR",
-        "source": "Yahoo 2026 ADP unavailable",
-        "source_url": spec["url"],
+        "platform": platform,
+        "scoring": "PPR" if platform == "ESPN" else "Half PPR",
+        "source": f"{platform} local 2026 ADP file is empty",
+        "source_url": "",
         "updated_at": "",
         "players": {},
         "status": "unavailable",
-        "warning": "; ".join(errors),
+        "warning": "The local ADP JSON file contains no player data.",
     }
 
 def _league_platform(league_key=None):
@@ -1830,7 +1780,7 @@ def player_research_adp_refresh():
     if platform not in {"ESPN", "YAHOO"}:
         platform = "ESPN"
 
-    data = _platform_2026_adp_data(platform, force=True)
+    data = _platform_2026_adp_data(platform)
 
     return jsonify(
         ok=bool(data.get("players")),
