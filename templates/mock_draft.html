@@ -2,109 +2,130 @@
 {% block title %}Mock Draft Lab | Gridiron IQ{% endblock %}
 {% block body %}
 <style>
-.md-page{--p:#5d3df5;--b:#2477f3;--g:#16a34a;--t:#132033;--m:#68778e;--l:#dfe5ef;color:var(--t)}
-.md-header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}
-.md-kicker{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}.md-header h1{font-size:36px;margin:5px 0}.md-header p{margin:0;color:var(--m)}
-.md-actions{display:flex;gap:9px;flex-wrap:wrap}.md-select,.md-input{border:1px solid var(--l);border-radius:10px;background:#fff;padding:10px 12px}
-.md-btn{border:1px solid var(--l);background:#fff;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;color:var(--t)}
-.md-btn.primary{border:0;color:#fff;background:linear-gradient(90deg,#2b70f4,#6038f3)}
-.md-grid{display:grid;grid-template-columns:.78fr 1.22fr;gap:16px;margin-bottom:16px}
-.md-card{background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px;box-shadow:0 8px 24px rgba(25,45,75,.035)}
-.md-card h2{font-size:21px;margin:4px 0 14px}.md-form{display:grid;grid-template-columns:1fr 1fr;gap:11px}.md-form label{font-size:10px;color:#61718a;font-weight:800}.md-form input,.md-form select{width:100%;margin-top:5px;border:1px solid var(--l);border-radius:9px;padding:10px;background:#fff}
-.md-run{width:100%;margin-top:14px}.md-note{font-size:11px;color:var(--m);line-height:1.5;margin-top:12px}
-.md-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.md-stat{background:#f8f9fd;border:1px solid #e4e8f0;border-radius:12px;padding:12px}.md-stat span,.md-stat strong{display:block}.md-stat span{font-size:9px;color:var(--m);text-transform:uppercase}.md-stat strong{font-size:24px;margin-top:4px}
-.md-sequences{margin-top:14px;display:grid;gap:8px}.md-seq{display:grid;grid-template-columns:1fr 70px 55px;gap:8px;align-items:center;border-bottom:1px solid #e8ebf1;padding:8px 0}.md-seq b{font-size:12px}.md-seq span{font-size:11px;color:var(--m)}
-.md-results{display:grid;grid-template-columns:1.15fr .85fr;gap:16px}.md-table{width:100%;border-collapse:collapse}.md-table th,.md-table td{padding:9px 6px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:11px}.md-table th{font-size:9px;color:var(--m)}
-.md-history{display:grid;gap:8px}.md-history-row{display:grid;grid-template-columns:60px 95px 1fr 50px;gap:8px;align-items:center;padding:9px;border:1px solid #e7eaf1;border-radius:9px}.md-history-row span{font-size:11px}.md-grade{display:grid;place-items:center;width:38px;height:28px;border-radius:8px;background:#eaf8ee;color:#158c3b;font-weight:900}
-.md-empty{color:var(--m);font-size:12px;padding:20px 0}
-@media(max-width:950px){.md-grid,.md-results{grid-template-columns:1fr}.md-stats{grid-template-columns:1fr 1fr}}@media(max-width:620px){.md-header{flex-direction:column}.md-form{grid-template-columns:1fr}.md-stats{grid-template-columns:1fr}}
+.ml{--p:#5d3df5;--t:#132033;--m:#68778e;--l:#dfe5ef;--g:#16a34a;--o:#f39a00;--r:#d83a3a;color:var(--t)}
+.ml-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.ml-k{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}.ml-head h1{font-size:36px;margin:5px 0}.ml-head p{margin:0;color:var(--m);max-width:730px}.ml-actions{display:flex;gap:9px;flex-wrap:wrap}
+.ml-btn,.ml-select,.ml-input{border:1px solid var(--l);background:#fff;border-radius:10px;padding:10px 13px;font:inherit}.ml-btn{font-weight:800;cursor:pointer;text-decoration:none;color:var(--t)}.ml-btn.primary{border:0;color:#fff;background:linear-gradient(90deg,#2d70f4,#6038f3)}
+.ml-grid{display:grid;grid-template-columns:.75fr 1.25fr;gap:16px;margin-bottom:16px}.ml-card{background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px;box-shadow:0 8px 24px rgba(25,45,75,.035)}.ml-card h2{font-size:21px;margin:4px 0 14px}
+.ml-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ml-form label{font-size:10px;color:#61718a;font-weight:800}.ml-form input,.ml-form select{width:100%;margin-top:5px;border:1px solid var(--l);border-radius:9px;padding:10px;background:#fff}.ml-full{width:100%;margin-top:13px}.ml-note{font-size:11px;color:var(--m);line-height:1.5}
+.ml-board-layout{display:grid;grid-template-columns:1.5fr .8fr;gap:16px}.ml-player-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.ml-player-tools input{flex:1;min-width:180px;border:1px solid var(--l);border-radius:9px;padding:9px}.ml-tabs{display:flex;gap:6px;flex-wrap:wrap}.ml-tabs button{border:0;border-radius:999px;padding:7px 10px;background:#f0f3f8;color:#65748a;font-weight:800;cursor:pointer}.ml-tabs button.active{background:var(--p);color:#fff}
+.ml-table-wrap{overflow:auto;max-height:610px}.ml-table{width:100%;border-collapse:collapse;min-width:700px}.ml-table th,.ml-table td{padding:9px 7px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:10px}.ml-table th{font-size:8px;color:var(--m);text-transform:uppercase;position:sticky;top:0;background:#fff}.ml-table tbody tr:hover{background:#f8f9fc}.ml-pick{border:0;border-radius:8px;background:var(--p);color:#fff;padding:7px 9px;font-weight:900;cursor:pointer}.ml-iq{font-weight:900;color:var(--p)}
+.ml-status{background:#f7f8fc;border-radius:12px;padding:13px;margin-bottom:12px}.ml-status span,.ml-status strong{display:block}.ml-status span{font-size:10px;color:var(--m);text-transform:uppercase}.ml-status strong{font-size:22px;margin-top:4px}.ml-grade{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}.ml-grade div{border:1px solid #e6eaf1;border-radius:10px;padding:10px}.ml-grade span,.ml-grade strong{display:block}.ml-grade span{font-size:9px;color:var(--m);text-transform:uppercase}.ml-grade strong{font-size:20px;margin-top:3px}
+.ml-roster{width:100%;border-collapse:collapse}.ml-roster th,.ml-roster td{padding:8px 5px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:10px}.ml-roster th{font-size:8px;color:var(--m)}.ml-small{font-size:10px;color:var(--m)}.ml-complete{color:var(--g);font-weight:900}
+.ml-saved{display:grid;gap:8px}.ml-saved-row{display:grid;grid-template-columns:95px 1fr 90px 90px;gap:10px;align-items:center;border:1px solid #e7eaf1;border-radius:10px;padding:10px}.ml-saved-row b,.ml-saved-row span{font-size:11px}.ml-review{color:#3d5fea;font-weight:900;text-decoration:none}.ml-empty{color:var(--m);font-size:11px;padding:14px 0}
+@media(max-width:1000px){.ml-grid,.ml-board-layout{grid-template-columns:1fr}}@media(max-width:620px){.ml-head{flex-direction:column}.ml-form{grid-template-columns:1fr}.ml-saved-row{grid-template-columns:1fr 1fr}}
 </style>
 
-<div class="md-page">
-  <section class="md-header">
-    <div>
-      <div class="md-kicker">DRAFT PRACTICE LAB</div>
-      <h1>Mock Draft Lab</h1>
-      <p>Run dozens of drafts, compare opening sequences, and fine-tune the strategy you want to use on draft night.</p>
-    </div>
-    <div class="md-actions">
-      <select id="md-league" class="md-select">
+<div class="ml">
+  <section class="ml-head">
+    <div><div class="ml-k">DRAFT PRACTICE LAB</div><h1>Mock Draft Lab</h1><p>Draft the team yourself. The other managers auto-pick around ADP, while Gridiron IQ scores your roster using projections, previous production, value versus ADP, balance, and depth.</p></div>
+    <div class="ml-actions">
+      <select id="ml-league" class="ml-select">
         {% for item in draft_leagues %}
         <option value="{{ item.key }}" {% if item.key == active_league_key %}selected{% endif %}>{{ item.name }} — {{ item.platform }}</option>
         {% endfor %}
       </select>
-      <a class="md-btn" href="/draft-center">← Draft Center</a>
+      <a class="ml-btn" href="/draft-center">← Draft Center</a>
     </div>
   </section>
 
-  <section class="md-grid">
-    <article class="md-card">
-      <div class="md-kicker">SIMULATION SETTINGS</div>
-      <h2>Run Mock Drafts</h2>
-      <div class="md-form">
-        <label>Draft Slot<input id="md-slot" type="number" min="1" max="{{ mock_context.teams }}" value="{{ mock_context.draft_slot }}"></label>
-        <label>Drafts to Run<select id="md-runs"><option>10</option><option>25</option><option selected>50</option><option>100</option></select></label>
-        <label>Rounds<select id="md-rounds"><option>10</option><option selected>12</option><option>15</option></select></label>
-        <label>Strategy<select id="md-strategy"><option value="balanced">Balanced</option><option value="hero-rb">Hero RB</option><option value="zero-rb">Zero RB</option><option value="robust-rb">Robust RB</option><option value="late-qb">Late QB</option></select></label>
+  <section id="ml-setup" class="ml-grid">
+    <article class="ml-card">
+      <div class="ml-k">MANUAL MOCK DRAFT</div>
+      <h2>Start a Draft</h2>
+      <div class="ml-form">
+        <label>Draft Slot<input id="ml-slot" type="number" min="1" max="{{ mock_context.teams }}" value="{{ mock_context.draft_slot }}"></label>
+        <label>Rounds<select id="ml-rounds"><option>10</option><option selected>12</option><option>15</option></select></label>
       </div>
-      <button id="md-run" class="md-btn primary md-run">Run Mock Draft Batch</button>
-      <p class="md-note">Each batch simulates the other managers around ADP with controlled randomness. Repeated runs help expose which opening sequences are consistently strongest from your draft slot.</p>
+      <button id="ml-start" class="ml-btn primary ml-full">Start Manual Mock Draft</button>
+      <p class="ml-note">You make every pick for your team. The simulator drafts for the other teams and stops automatically each time your pick comes up.</p>
     </article>
 
-    <article class="md-card">
-      <div class="md-kicker">YOUR RESULTS</div>
-      <h2>Sequence Analysis</h2>
-      <div class="md-stats">
-        <div class="md-stat"><span>Drafts</span><strong id="md-stat-runs">{{ mock_summary.runs or 0 }}</strong></div>
-        <div class="md-stat"><span>Avg Grade</span><strong id="md-stat-avg">{{ mock_summary.average_score or "—" }}</strong></div>
-        <div class="md-stat"><span>Best Grade</span><strong id="md-stat-best">{{ mock_summary.best_score or "—" }}</strong></div>
-        <div class="md-stat"><span>Best Start</span><strong id="md-stat-seq" style="font-size:13px">{{ mock_summary.best_sequence or "—" }}</strong></div>
+    <article class="ml-card">
+      <div class="ml-k">HOW YOU'RE SCORED</div>
+      <h2>Draft Grade</h2>
+      <div class="ml-grade">
+        <div><span>Projection</span><strong>30%</strong></div>
+        <div><span>2025 Stats</span><strong>20%</strong></div>
+        <div><span>ADP Value</span><strong>20%</strong></div>
+        <div><span>Roster Balance</span><strong>20%</strong></div>
       </div>
-      <div id="md-sequences" class="md-sequences">
-        {% if mock_summary.top_sequences %}
-          {% for s in mock_summary.top_sequences %}
-          <div class="md-seq"><b>{{ s.sequence }}</b><span>{{ s.count }} drafts</span><span>{{ s.percent }}%</span></div>
-          {% endfor %}
-        {% else %}
-          <div class="md-empty">Run your first batch to see which draft sequences repeat most often.</div>
-        {% endif %}
-      </div>
+      <p class="ml-note">The final 10% comes from positional depth. This keeps the grade from being based only on big-name players.</p>
     </article>
   </section>
 
-  <section class="md-results">
-    <article class="md-card">
-      <div class="md-kicker">BEST MOCK FROM LAST BATCH</div>
-      <h2>Round-by-Round Roster</h2>
-      <table class="md-table">
-        <thead><tr><th>ROUND</th><th>PLAYER</th><th>POS</th><th>NFL</th><th>ADP</th></tr></thead>
-        <tbody id="md-roster-body">
-          <tr><td colspan="5" class="md-empty">Run a batch to generate a best roster.</td></tr>
-        </tbody>
-      </table>
+  <section id="ml-live" class="ml-board-layout" style="display:none">
+    <article class="ml-card">
+      <div class="ml-player-tools">
+        <input id="ml-search" placeholder="Search available players...">
+        <div id="ml-tabs" class="ml-tabs">
+          <button class="active" data-pos="">All</button><button data-pos="QB">QB</button><button data-pos="RB">RB</button><button data-pos="WR">WR</button><button data-pos="TE">TE</button>
+        </div>
+      </div>
+
+      <div class="ml-table-wrap">
+        <table class="ml-table">
+          <thead><tr><th>Rank</th><th>Player</th><th>Pos</th><th>NFL</th><th>ADP</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead>
+          <tbody id="ml-player-body"></tbody>
+        </table>
+      </div>
     </article>
 
-    <article class="md-card">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
-        <div><div class="md-kicker">MOCK HISTORY</div><h2>Recent Runs</h2></div>
-        <button id="md-reset" class="md-btn">Clear</button>
+    <aside class="ml-card">
+      <div class="ml-status">
+        <span>Current Pick</span>
+        <strong id="ml-current-pick">—</strong>
+        <small id="ml-current-label" class="ml-small"></small>
       </div>
-      <div id="md-history" class="md-history">
-        {% if mock_history %}
-          {% for h in mock_history %}
-          <div class="md-history-row"><span>Slot {{ h.draft_slot }}</span><span>{{ h.strategy }}</span><span>{{ h.sequence }}</span><span class="md-grade">{{ h.score }}</span></div>
-          {% endfor %}
-        {% else %}
-          <div class="md-empty">No mock drafts saved yet.</div>
-        {% endif %}
+
+      <div class="ml-grade">
+        <div><span>Overall Grade</span><strong id="ml-grade-overall">—</strong></div>
+        <div><span>Proj Points</span><strong id="ml-grade-projpts">—</strong></div>
+        <div><span>Projection</span><strong id="ml-grade-proj">—</strong></div>
+        <div><span>ADP Value</span><strong id="ml-grade-value">—</strong></div>
+        <div><span>Balance</span><strong id="ml-grade-balance">—</strong></div>
+        <div><span>Depth</span><strong id="ml-grade-depth">—</strong></div>
       </div>
-    </article>
+
+      <button id="ml-undo" class="ml-btn ml-full">Undo Last Pick</button>
+
+      <h3>Your Roster</h3>
+      <table class="ml-roster">
+        <thead><tr><th>Rd</th><th>Player</th><th>Pos</th><th>ADP</th></tr></thead>
+        <tbody id="ml-roster-body"></tbody>
+      </table>
+
+      <div id="ml-complete-actions" style="display:none">
+        <p id="ml-summary" class="ml-note ml-complete"></p>
+        <a id="ml-review-link" class="ml-btn primary ml-full" href="#">Review This Draft</a>
+      </div>
+    </aside>
+  </section>
+
+  <section class="ml-card" style="margin-top:16px">
+    <div class="ml-k">SAVED MANUAL MOCK DRAFTS</div>
+    <h2>Review Previous Drafts</h2>
+    <div class="ml-saved">
+      {% if manual_mocks %}
+        {% for m in manual_mocks %}
+        <div class="ml-saved-row">
+          <b>{{ m.league_name }}</b>
+          <span>Slot {{ m.draft_slot }} · {{ m.rounds }} rounds · {{ m.status }}</span>
+          <span>Grade {{ (m.grade or {}).get('overall','—') }}</span>
+          <a class="ml-review" href="/mock-draft/review/{{ m.id }}">Review →</a>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="ml-empty">Your completed and in-progress manual mocks will appear here.</div>
+      {% endif %}
+    </div>
   </section>
 </div>
 
 <script>
 (() => {
   const $ = id => document.getElementById(id);
+  let mockId = null, activePos = "", currentAvailable = [];
+
   async function api(url, options={}){
     const r = await fetch(url,{headers:{"Content-Type":"application/json"},...options});
     const d = await r.json().catch(()=>({}));
@@ -112,55 +133,105 @@
     return d;
   }
 
-  $("md-league")?.addEventListener("change",()=> {
-    location.href = `/mock-draft?league=${encodeURIComponent($("md-league").value)}`;
+  $("ml-league").addEventListener("change",()=>location.href=`/mock-draft?league=${encodeURIComponent($("ml-league").value)}`);
+
+  $("ml-start").addEventListener("click", async () => {
+    const d = await api("/api/mock-draft/manual/start",{
+      method:"POST",
+      body:JSON.stringify({
+        league_key:$("ml-league").value,
+        draft_slot:Number($("ml-slot").value),
+        rounds:Number($("ml-rounds").value)
+      })
+    });
+    mockId = d.mock.id;
+    $("ml-setup").style.display = "none";
+    $("ml-live").style.display = "grid";
+    await refresh();
   });
 
-  $("md-run")?.addEventListener("click", async () => {
-    const btn = $("md-run");
-    btn.textContent = "Running Mock Drafts...";
-    btn.disabled = true;
-    try{
-      const d = await api("/api/mock-draft/run",{
-        method:"POST",
-        body:JSON.stringify({
-          league_key:$("md-league").value,
-          draft_slot:Number($("md-slot").value),
-          runs:Number($("md-runs").value),
-          rounds:Number($("md-rounds").value),
-          strategy:$("md-strategy").value
-        })
-      });
+  async function refresh(){
+    const d = await api(`/api/mock-draft/manual/${mockId}`);
+    currentAvailable = d.available || [];
+    renderPlayers();
+    renderRoster(d.roster || []);
+    renderGrade(d.grade || {});
 
-      $("md-stat-runs").textContent = d.summary.runs;
-      $("md-stat-avg").textContent = d.summary.average_score;
-      $("md-stat-best").textContent = d.summary.best_score;
-      $("md-stat-seq").textContent = d.summary.best_sequence;
-
-      $("md-sequences").innerHTML = d.summary.top_sequences
-        .map(s=>`<div class="md-seq"><b>${s.sequence}</b><span>${s.count} drafts</span><span>${s.percent}%</span></div>`)
-        .join("");
-
-      $("md-roster-body").innerHTML = d.best.roster
-        .map(p=>`<tr><td>${p.round}</td><td><b>${p.name}</b></td><td>${p.pos}</td><td>${p.team}</td><td>${p.adp}</td></tr>`)
-        .join("");
-
-      const hist = await api("/api/mock-draft/history");
-      $("md-history").innerHTML = hist.history.slice(-20).reverse()
-        .map(h=>`<div class="md-history-row"><span>Slot ${h.draft_slot}</span><span>${h.strategy}</span><span>${h.sequence}</span><span class="md-grade">${h.score}</span></div>`)
-        .join("");
-    }catch(err){
-      alert(err.message);
-    }finally{
-      btn.textContent = "Run Mock Draft Batch";
-      btn.disabled = false;
+    if(d.current_pick){
+      $("ml-current-pick").textContent = `${d.current_pick.round}.${String(d.current_pick.slot).padStart(2,"0")} · #${d.current_pick.overall}`;
+      $("ml-current-label").textContent = "Your pick";
+    }else{
+      $("ml-current-pick").textContent = "Draft Complete";
+      $("ml-current-label").textContent = "";
     }
-  });
 
-  $("md-reset")?.addEventListener("click", async () => {
-    if(!confirm("Clear all saved mock draft history?")) return;
-    await api("/api/mock-draft/reset",{method:"POST",body:"{}"});
-    location.reload();
+    if(d.mock.status === "complete"){
+      $("ml-complete-actions").style.display = "block";
+      $("ml-summary").textContent = d.grade.summary || "Draft complete.";
+      $("ml-review-link").href = `/mock-draft/review/${mockId}`;
+      document.querySelectorAll(".ml-pick").forEach(b=>b.disabled=true);
+    }
+  }
+
+  function renderPlayers(){
+    const q = ($("ml-search").value || "").toLowerCase();
+    const rows = currentAvailable.filter(p =>
+      (!q || p.name.toLowerCase().includes(q)) &&
+      (!activePos || p.pos === activePos)
+    );
+
+    $("ml-player-body").innerHTML = rows.slice(0,150).map(p=>`
+      <tr>
+        <td>${p.rank}</td><td><b>${p.name}</b></td><td>${p.pos}</td><td>${p.team}</td>
+        <td>${p.adp}</td><td>${p.projection}</td><td class="ml-iq">${p.pick_score}</td>
+        <td><button class="ml-pick" data-player="${p.name.replace(/"/g,'&quot;')}">Draft</button></td>
+      </tr>`).join("");
+
+    document.querySelectorAll(".ml-pick").forEach(btn=>btn.addEventListener("click",async()=>{
+      btn.disabled = true;
+      try{
+        await api(`/api/mock-draft/manual/${mockId}/pick`,{
+          method:"POST",
+          body:JSON.stringify({player:btn.dataset.player})
+        });
+        await refresh();
+      }catch(e){
+        alert(e.message);
+        btn.disabled = false;
+      }
+    }));
+  }
+
+  function renderRoster(roster){
+    $("ml-roster-body").innerHTML = roster.map(p=>`
+      <tr><td>${p.round}</td><td><b>${p.name}</b></td><td>${p.pos}</td><td>${p.adp}</td></tr>
+    `).join("") || `<tr><td colspan="4">No picks yet.</td></tr>`;
+  }
+
+  function renderGrade(g){
+    $("ml-grade-overall").textContent = g.overall || "—";
+    $("ml-grade-projpts").textContent = g.projected_points || "—";
+    $("ml-grade-proj").textContent = g.projection_score || "—";
+    $("ml-grade-value").textContent = g.value_score || "—";
+    $("ml-grade-balance").textContent = g.balance_score || "—";
+    $("ml-grade-depth").textContent = g.depth_score || "—";
+  }
+
+  $("ml-search").addEventListener("input",renderPlayers);
+  document.querySelectorAll("#ml-tabs button").forEach(btn=>btn.addEventListener("click",()=>{
+    document.querySelectorAll("#ml-tabs button").forEach(x=>x.classList.remove("active"));
+    btn.classList.add("active");
+    activePos = btn.dataset.pos;
+    renderPlayers();
+  }));
+
+  $("ml-undo").addEventListener("click",async()=>{
+    if(!mockId) return;
+    try{
+      await api(`/api/mock-draft/manual/${mockId}/undo`,{method:"POST",body:"{}"});
+      $("ml-complete-actions").style.display = "none";
+      await refresh();
+    }catch(e){ alert(e.message); }
   });
 })();
 </script>
