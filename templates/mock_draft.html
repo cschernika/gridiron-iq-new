@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Mock Draft Lab | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+.md-page{--p:#5d3df5;--b:#2477f3;--g:#16a34a;--t:#132033;--m:#68778e;--l:#dfe5ef;color:var(--t)}
+.md-header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}
+.md-kicker{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}.md-header h1{font-size:36px;margin:5px 0}.md-header p{margin:0;color:var(--m)}
+.md-actions{display:flex;gap:9px;flex-wrap:wrap}.md-select,.md-input{border:1px solid var(--l);border-radius:10px;background:#fff;padding:10px 12px}
+.md-btn{border:1px solid var(--l);background:#fff;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;color:var(--t)}
+.md-btn.primary{border:0;color:#fff;background:linear-gradient(90deg,#2b70f4,#6038f3)}
+.md-grid{display:grid;grid-template-columns:.78fr 1.22fr;gap:16px;margin-bottom:16px}
+.md-card{background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px;box-shadow:0 8px 24px rgba(25,45,75,.035)}
+.md-card h2{font-size:21px;margin:4px 0 14px}.md-form{display:grid;grid-template-columns:1fr 1fr;gap:11px}.md-form label{font-size:10px;color:#61718a;font-weight:800}.md-form input,.md-form select{width:100%;margin-top:5px;border:1px solid var(--l);border-radius:9px;padding:10px;background:#fff}
+.md-run{width:100%;margin-top:14px}.md-note{font-size:11px;color:var(--m);line-height:1.5;margin-top:12px}
+.md-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.md-stat{background:#f8f9fd;border:1px solid #e4e8f0;border-radius:12px;padding:12px}.md-stat span,.md-stat strong{display:block}.md-stat span{font-size:9px;color:var(--m);text-transform:uppercase}.md-stat strong{font-size:24px;margin-top:4px}
+.md-sequences{margin-top:14px;display:grid;gap:8px}.md-seq{display:grid;grid-template-columns:1fr 70px 55px;gap:8px;align-items:center;border-bottom:1px solid #e8ebf1;padding:8px 0}.md-seq b{font-size:12px}.md-seq span{font-size:11px;color:var(--m)}
+.md-results{display:grid;grid-template-columns:1.15fr .85fr;gap:16px}.md-table{width:100%;border-collapse:collapse}.md-table th,.md-table td{padding:9px 6px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:11px}.md-table th{font-size:9px;color:var(--m)}
+.md-history{display:grid;gap:8px}.md-history-row{display:grid;grid-template-columns:60px 95px 1fr 50px;gap:8px;align-items:center;padding:9px;border:1px solid #e7eaf1;border-radius:9px}.md-history-row span{font-size:11px}.md-grade{display:grid;place-items:center;width:38px;height:28px;border-radius:8px;background:#eaf8ee;color:#158c3b;font-weight:900}
+.md-empty{color:var(--m);font-size:12px;padding:20px 0}
+@media(max-width:950px){.md-grid,.md-results{grid-template-columns:1fr}.md-stats{grid-template-columns:1fr 1fr}}@media(max-width:620px){.md-header{flex-direction:column}.md-form{grid-template-columns:1fr}.md-stats{grid-template-columns:1fr}}
+</style>
+
+<div class="md-page">
+  <section class="md-header">
+    <div>
+      <div class="md-kicker">DRAFT PRACTICE LAB</div>
+      <h1>Mock Draft Lab</h1>
+      <p>Run dozens of drafts, compare opening sequences, and fine-tune the strategy you want to use on draft night.</p>
+    </div>
+    <div class="md-actions">
+      <select id="md-league" class="md-select">
+        {% for item in draft_leagues %}
+        <option value="{{ item.key }}" {% if item.key == active_league_key %}selected{% endif %}>{{ item.name }} — {{ item.platform }}</option>
+        {% endfor %}
+      </select>
+      <a class="md-btn" href="/draft-center">← Draft Center</a>
+    </div>
+  </section>
+
+  <section class="md-grid">
+    <article class="md-card">
+      <div class="md-kicker">SIMULATION SETTINGS</div>
+      <h2>Run Mock Drafts</h2>
+      <div class="md-form">
+        <label>Draft Slot<input id="md-slot" type="number" min="1" max="{{ mock_context.teams }}" value="{{ mock_context.draft_slot }}"></label>
+        <label>Drafts to Run<select id="md-runs"><option>10</option><option>25</option><option selected>50</option><option>100</option></select></label>
+        <label>Rounds<select id="md-rounds"><option>10</option><option selected>12</option><option>15</option></select></label>
+        <label>Strategy<select id="md-strategy"><option value="balanced">Balanced</option><option value="hero-rb">Hero RB</option><option value="zero-rb">Zero RB</option><option value="robust-rb">Robust RB</option><option value="late-qb">Late QB</option></select></label>
+      </div>
+      <button id="md-run" class="md-btn primary md-run">Run Mock Draft Batch</button>
+      <p class="md-note">Each batch simulates the other managers around ADP with controlled randomness. Repeated runs help expose which opening sequences are consistently strongest from your draft slot.</p>
+    </article>
+
+    <article class="md-card">
+      <div class="md-kicker">YOUR RESULTS</div>
+      <h2>Sequence Analysis</h2>
+      <div class="md-stats">
+        <div class="md-stat"><span>Drafts</span><strong id="md-stat-runs">{{ mock_summary.runs or 0 }}</strong></div>
+        <div class="md-stat"><span>Avg Grade</span><strong id="md-stat-avg">{{ mock_summary.average_score or "—" }}</strong></div>
+        <div class="md-stat"><span>Best Grade</span><strong id="md-stat-best">{{ mock_summary.best_score or "—" }}</strong></div>
+        <div class="md-stat"><span>Best Start</span><strong id="md-stat-seq" style="font-size:13px">{{ mock_summary.best_sequence or "—" }}</strong></div>
+      </div>
+      <div id="md-sequences" class="md-sequences">
+        {% if mock_summary.top_sequences %}
+          {% for s in mock_summary.top_sequences %}
+          <div class="md-seq"><b>{{ s.sequence }}</b><span>{{ s.count }} drafts</span><span>{{ s.percent }}%</span></div>
+          {% endfor %}
+        {% else %}
+          <div class="md-empty">Run your first batch to see which draft sequences repeat most often.</div>
+        {% endif %}
+      </div>
+    </article>
+  </section>
+
+  <section class="md-results">
+    <article class="md-card">
+      <div class="md-kicker">BEST MOCK FROM LAST BATCH</div>
+      <h2>Round-by-Round Roster</h2>
+      <table class="md-table">
+        <thead><tr><th>ROUND</th><th>PLAYER</th><th>POS</th><th>NFL</th><th>ADP</th></tr></thead>
+        <tbody id="md-roster-body">
+          <tr><td colspan="5" class="md-empty">Run a batch to generate a best roster.</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article class="md-card">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div><div class="md-kicker">MOCK HISTORY</div><h2>Recent Runs</h2></div>
+        <button id="md-reset" class="md-btn">Clear</button>
+      </div>
+      <div id="md-history" class="md-history">
+        {% if mock_history %}
+          {% for h in mock_history %}
+          <div class="md-history-row"><span>Slot {{ h.draft_slot }}</span><span>{{ h.strategy }}</span><span>{{ h.sequence }}</span><span class="md-grade">{{ h.score }}</span></div>
+          {% endfor %}
+        {% else %}
+          <div class="md-empty">No mock drafts saved yet.</div>
+        {% endif %}
+      </div>
+    </article>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  async function api(url, options={}){
+    const r = await fetch(url,{headers:{"Content-Type":"application/json"},...options});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || d.detail || `Request failed (${r.status})`);
+    return d;
+  }
+
+  $("md-league")?.addEventListener("change",()=> {
+    location.href = `/mock-draft?league=${encodeURIComponent($("md-league").value)}`;
+  });
+
+  $("md-run")?.addEventListener("click", async () => {
+    const btn = $("md-run");
+    btn.textContent = "Running Mock Drafts...";
+    btn.disabled = true;
+    try{
+      const d = await api("/api/mock-draft/run",{
+        method:"POST",
+        body:JSON.stringify({
+          league_key:$("md-league").value,
+          draft_slot:Number($("md-slot").value),
+          runs:Number($("md-runs").value),
+          rounds:Number($("md-rounds").value),
+          strategy:$("md-strategy").value
+        })
+      });
+
+      $("md-stat-runs").textContent = d.summary.runs;
+      $("md-stat-avg").textContent = d.summary.average_score;
+      $("md-stat-best").textContent = d.summary.best_score;
+      $("md-stat-seq").textContent = d.summary.best_sequence;
+
+      $("md-sequences").innerHTML = d.summary.top_sequences
+        .map(s=>`<div class="md-seq"><b>${s.sequence}</b><span>${s.count} drafts</span><span>${s.percent}%</span></div>`)
+        .join("");
+
+      $("md-roster-body").innerHTML = d.best.roster
+        .map(p=>`<tr><td>${p.round}</td><td><b>${p.name}</b></td><td>${p.pos}</td><td>${p.team}</td><td>${p.adp}</td></tr>`)
+        .join("");
+
+      const hist = await api("/api/mock-draft/history");
+      $("md-history").innerHTML = hist.history.slice(-20).reverse()
+        .map(h=>`<div class="md-history-row"><span>Slot ${h.draft_slot}</span><span>${h.strategy}</span><span>${h.sequence}</span><span class="md-grade">${h.score}</span></div>`)
+        .join("");
+    }catch(err){
+      alert(err.message);
+    }finally{
+      btn.textContent = "Run Mock Draft Batch";
+      btn.disabled = false;
+    }
+  });
+
+  $("md-reset")?.addEventListener("click", async () => {
+    if(!confirm("Clear all saved mock draft history?")) return;
+    await api("/api/mock-draft/reset",{method:"POST",body:"{}"});
+    location.reload();
+  });
+})();
+</script>
+{% endblock %}
