@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}2025 Player Stats | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+.ps{--p:#5b3df5;--t:#132033;--m:#6a788e;--l:#e0e5ee;color:var(--t)}
+.ps-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:18px}
+.ps-k{font-size:10px;font-weight:900;letter-spacing:.09em;color:var(--p)}
+.ps h1{font-size:34px;margin:5px 0}.ps p{color:var(--m);font-size:12px}
+.ps-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.ps-card{background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px}
+.ps-stat{font-size:34px;font-weight:900;margin:6px 0}.ps-btn{border:0;border-radius:10px;padding:11px 15px;background:var(--p);color:#fff;font-weight:900;cursor:pointer}
+.ps-status{margin-top:12px;padding:11px;border-radius:10px;background:#f4f6fa;font-size:11px;white-space:pre-wrap}
+.ps-pos{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.ps-pill{border:1px solid var(--l);border-radius:999px;padding:7px 10px;font-size:10px;font-weight:800}
+@media(max-width:800px){.ps-grid{grid-template-columns:1fr}}
+</style>
+<div class="ps">
+<div class="ps-head"><div><div class="ps-k">GRIDIRON IQ DATA ENGINE</div><h1>2025 Player Stats</h1><p>Build a durable local regular-season stats database for Player Research, Draft Center and Mock Draft Lab.</p></div></div>
+<div class="ps-grid">
+<section class="ps-card"><div class="ps-k">DATABASE</div><div id="player-count" class="ps-stat">—</div><p>Fantasy-relevant players loaded</p><button id="build-stats" class="ps-btn">Build / Refresh 2025 Stats</button><div id="build-status" class="ps-status">Checking database status…</div></section>
+<section class="ps-card"><div class="ps-k">POSITIONS</div><h2>Player Coverage</h2><div id="position-counts" class="ps-pos"></div><p>The engine stores passing, rushing, receiving and PPR fantasy production for the 2025 regular season.</p></section>
+</div>
+</div>
+<script>
+async function status(){
+ const r=await fetch("/api/data/2025-stats/status"); const d=await r.json();
+ document.getElementById("player-count").textContent=d.player_count||0;
+ document.getElementById("build-status").textContent=d.ok ? `Loaded successfully · ${d.source}\nUpdated: ${d.updated_at}` : "Database has not been built yet.";
+ const box=document.getElementById("position-counts"); box.innerHTML="";
+ Object.entries(d.position_counts||{}).forEach(([p,n])=>{const s=document.createElement("span");s.className="ps-pill";s.textContent=`${p}: ${n}`;box.appendChild(s);});
+}
+document.getElementById("build-stats").addEventListener("click",async()=>{
+ const b=document.getElementById("build-stats"), out=document.getElementById("build-status");
+ b.disabled=true; out.textContent="Building 2025 player stats database…";
+ try{
+  const r=await fetch("/api/data/build-2025-stats",{method:"POST"});
+  const d=await r.json();
+  out.textContent=d.ok ? `${d.message}\nPlayers: ${d.player_count}` : `Build failed: ${d.error}`;
+  await status();
+ }catch(e){out.textContent=`Build failed: ${e.message}`;}
+ b.disabled=false;
+});
+status();
+</script>
+{% endblock %}
