@@ -117,6 +117,60 @@
     <div class="pr-count">{{ player_count }} players shown</div>
   </section>
 
+<div id="pr-loading" class="pr-loading" style="display:none">Loading full player research…</div>
+
+  <section id="pr-detail" class="pr-detail">
+    <div class="pr-hero">
+      <div id="pr-avatar" class="pr-avatar">NFL</div>
+      <div class="pr-name">
+        <h2 id="pr-name"></h2>
+        <p id="pr-meta"></p>
+        <div id="pr-badges" class="pr-badges"></div>
+      </div>
+      <div class="pr-trend">
+        <span>CAREER TREND</span>
+        <strong id="pr-trend">—</strong>
+        <small id="pr-trend-pct"></small>
+      </div>
+    </div>
+
+    <div class="pr-detail-grid">
+      <article class="pr-card">
+        <div class="pr-kicker">2025 SEASON</div>
+        <h2>Previous-Year Stats</h2>
+        <div id="pr-prior" class="pr-stat-grid"></div>
+      </article>
+
+      <article class="pr-card">
+        <div class="pr-kicker">2026 OUTLOOK</div>
+        <h2>Gridiron IQ Projection</h2>
+        <div id="pr-proj" class="pr-stat-grid"></div>
+        <p id="pr-method" style="font-size:11px;color:var(--m)"></p>
+      </article>
+    </div>
+
+    <div class="pr-detail-grid">
+      <article class="pr-card">
+        <div class="pr-kicker">CAREER HISTORY</div>
+        <h2>Season-by-Season</h2>
+        <div style="overflow:auto">
+          <table class="pr-history">
+            <thead><tr><th>YEAR</th><th>G</th><th>PPR</th><th>PASS YDS</th><th>RUSH YDS</th><th>REC</th><th>REC YDS</th><th>TD</th></tr></thead>
+            <tbody id="pr-history"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="pr-card">
+        <div class="pr-kicker">PLAYER PROFILE</div>
+        <h2>Bio & Current Information</h2>
+        <div id="pr-info" class="pr-info"></div>
+      </article>
+    </div>
+  </section>
+
+</div>
+
   <section class="pr-card">
     <div class="pr-card-head">
       <div>
@@ -131,7 +185,7 @@
           {% endif %}
         </h2>
       </div>
-      <div class="pr-count">Click any player for full research</div>
+      <div class="pr-count">Click any player — their full research appears above this list</div>
     </div>
 
     <div class="pr-table-wrap">
@@ -209,61 +263,6 @@
       </table>
     </div>
   </section>
-
-  <div id="pr-loading" class="pr-loading" style="display:none">Loading full player research…</div>
-
-  <section id="pr-detail" class="pr-detail">
-    <div class="pr-hero">
-      <div id="pr-avatar" class="pr-avatar">NFL</div>
-      <div class="pr-name">
-        <h2 id="pr-name"></h2>
-        <p id="pr-meta"></p>
-        <div id="pr-badges" class="pr-badges"></div>
-      </div>
-      <div class="pr-trend">
-        <span>CAREER TREND</span>
-        <strong id="pr-trend">—</strong>
-        <small id="pr-trend-pct"></small>
-      </div>
-    </div>
-
-    <div class="pr-detail-grid">
-      <article class="pr-card">
-        <div class="pr-kicker">2025 SEASON</div>
-        <h2>Previous-Year Stats</h2>
-        <div id="pr-prior" class="pr-stat-grid"></div>
-      </article>
-
-      <article class="pr-card">
-        <div class="pr-kicker">2026 OUTLOOK</div>
-        <h2>Gridiron IQ Projection</h2>
-        <div id="pr-proj" class="pr-stat-grid"></div>
-        <p id="pr-method" style="font-size:11px;color:var(--m)"></p>
-      </article>
-    </div>
-
-    <div class="pr-detail-grid">
-      <article class="pr-card">
-        <div class="pr-kicker">CAREER HISTORY</div>
-        <h2>Season-by-Season</h2>
-        <div style="overflow:auto">
-          <table class="pr-history">
-            <thead><tr><th>YEAR</th><th>G</th><th>PPR</th><th>PASS YDS</th><th>RUSH YDS</th><th>REC</th><th>REC YDS</th><th>TD</th></tr></thead>
-            <tbody id="pr-history"></tbody>
-          </table>
-        </div>
-      </article>
-
-      <article class="pr-card">
-        <div class="pr-kicker">PLAYER PROFILE</div>
-        <h2>Bio & Current Information</h2>
-        <div id="pr-info" class="pr-info"></div>
-      </article>
-    </div>
-  </section>
-
-</div>
-
 <script>
 (() => {
   const $ = id => document.getElementById(id);
