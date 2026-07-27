@@ -1615,54 +1615,313 @@ def _parse_platform_adp(html, platform):
 def _adp_cache_file(platform):
     return DATA_DIR / f"adp_2026_{str(platform).lower()}_cache.json"
 
+FANTASYPROS_API_BASE = "https://api.fantasypros.com/public/v2/json"
+FANTASYPROS_API_KEY_ENV = "FANTASYPROS_API_KEY"
+
 def _local_platform_adp_path(platform):
     platform = str(platform or "ESPN").upper()
     filename = "espn_adp_2026.json" if platform == "ESPN" else "yahoo_adp_2026.json"
     return DATA_DIR / filename
 
+def _fp_api_key():
+    return str(os.getenv(FANTASYPROS_API_KEY_ENV, "") or "").strip()
+
+def _fp_get(path, params=None):
+    api_key = _fp_api_key()
+    if not api_key:
+        raise RuntimeError(
+            "FANTASYPROS_API_KEY is not set in Render. Add it under Environment and redeploy."
+        )
+
+    url = f"{FANTASYPROS_API_BASE}/{str(path).lstrip('/')}"
+    response = requests.get(
+        url,
+        params=params or {},
+        headers={
+            "x-api-key": api_key,
+            "Accept": "application/json",
+            "User-Agent": "GridironIQ/2026",
+        },
+        timeout=35,
+    )
+
+    if response.status_code in (401, 403):
+        raise RuntimeError(
+            f"FantasyPros API rejected the key ({response.status_code}). "
+            "Confirm FANTASYPROS_API_KEY and that the key has access to this endpoint."
+        )
+    response.raise_for_status()
+
+    try:
+        return response.json()
+    except Exception:
+        raise RuntimeError(
+            f"FantasyPros API returned non-JSON content ({response.status_code})."
+        )
+
+def _fp_player_rows(payload):
+    """
+    Tolerate common FantasyPros response envelopes without hard-coding a single
+    response shape. The official API examples use a top-level players array.
+    """
+    if isinstance(payload, list):
+        return payload
+
+    if not isinstance(payload, dict):
+        return []
+
+    for key in ("players", "rankings", "results", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            for inner in ("players", "rankings", "results"):
+                rows = value.get(inner)
+                if isinstance(rows, list):
+                    return rows
+    return []
+
+def _fp_first(row, *keys):
+    for key in keys:
+        value = row.get(key) if isinstance(row, dict) else None
+        if value not in (None, ""):
+            return value
+    return None
+
+def _fp_float(value):
+    if value in (None, "", "-", "—"):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+def _fp_int(value):
+    number = _fp_float(value)
+    return int(number) if number is not None else None
+
+def _fp_name(row):
+    return str(_fp_first(
+        row, "player_name", "name", "full_name", "playerName"
+    ) or "").strip()
+
+def _fp_position(row):
+    return str(_fp_first(
+        row, "player_position_id", "position", "pos", "player_position"
+    ) or "").upper().strip()
+
+def _fp_team(row):
+    return str(_fp_first(
+        row, "player_team_id", "team", "team_id", "player_team"
+    ) or "").upper().strip()
+
+def _fp_consensus_rankings(scoring="PPR", position="ALL"):
+    params = {"scoring": scoring}
+    if position and position != "ALL":
+        params["position"] = position
+
+    return _fp_get(
+        "nfl/2026/consensus-rankings",
+        params=params,
+    )
+
+def _fp_players():
+    return _fp_get("nfl/players")
+
+def _fp_projections(position=None):
+    params = {}
+    if position and position != "ALL":
+        params["position"] = position
+    return _fp_get("nfl/2026/projections", params=params)
+
+def _fp_extract_adp(row, platform):
+    """
+    Prefer an explicit platform ADP field when the API supplies one.
+    Fall back to generic ADP only if the row identifies that platform/source.
+    """
+    platform = str(platform or "ESPN").upper()
+    aliases = {
+        "ESPN": (
+            "adp_espn", "espn_adp", "adpEspn", "adp_espn_ppr",
+            "rank_adp_espn", "espn"
+        ),
+        "YAHOO": (
+            "adp_yahoo", "yahoo_adp", "adpYahoo", "adp_yahoo_half_ppr",
+            "rank_adp_yahoo", "yahoo"
+        ),
+    }
+
+    for key in aliases.get(platform, ()):
+        value = _fp_float(row.get(key)) if isinstance(row, dict) else None
+        if value is not None:
+            return value
+
+    source = str(_fp_first(
+        row, "adp_source", "source", "platform", "league_host"
+    ) or "").upper()
+    if platform in source:
+        for key in ("adp", "average_draft_position", "rank_adp"):
+            value = _fp_float(row.get(key)) if isinstance(row, dict) else None
+            if value is not None:
+                return value
+
+    return None
+
+def _fp_position_adp(row, platform, position):
+    platform = str(platform or "ESPN").upper()
+    aliases = {
+        "ESPN": ("position_adp_espn", "espn_position_adp", "pos_adp_espn"),
+        "YAHOO": ("position_adp_yahoo", "yahoo_position_adp", "pos_adp_yahoo"),
+    }
+    for key in aliases.get(platform, ()):
+        value = _fp_first(row, key)
+        if value not in (None, ""):
+            text = str(value).strip()
+            return text if any(ch.isalpha() for ch in text) else f"{position}{text}"
+    return ""
+
+def _fp_projection_map():
+    """
+    Pull 2026 projections and normalize them by player name.
+    Projection fields are preserved so Player Research can consume them as the
+    UI grows; missing fields simply remain absent.
+    """
+    result = {}
+    for position in ("QB", "RB", "WR", "TE", "K", "DST"):
+        try:
+            payload = _fp_projections(position)
+        except Exception:
+            continue
+        for row in _fp_player_rows(payload):
+            name = _fp_name(row)
+            if not name:
+                continue
+            result[_pr_norm(name)] = row
+    return result
+
+def _fp_build_platform_dataset(platform):
+    platform = str(platform or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+
+    scoring = "PPR" if platform == "ESPN" else "HALF"
+    projection_map = _fp_projection_map()
+
+    merged = {}
+    errors = []
+
+    # Pull by position so the integration can populate the complete draftable pool.
+    for position in ("QB", "RB", "WR", "TE", "K", "DST"):
+        try:
+            payload = _fp_consensus_rankings(scoring=scoring, position=position)
+            rows = _fp_player_rows(payload)
+        except Exception as exc:
+            errors.append(f"{position}: {exc}")
+            continue
+
+        for row in rows:
+            name = _fp_name(row)
+            if not name:
+                continue
+
+            pos = _fp_position(row) or position
+            if pos == "DST":
+                app_pos = "DEF"
+            else:
+                app_pos = pos
+
+            adp = _fp_extract_adp(row, platform)
+            norm = _pr_norm(name)
+
+            # Keep rankings/projections even when the API doesn't expose a
+            # platform-specific ADP field for that player.
+            item = {
+                "name": name,
+                "position": app_pos,
+                "team": _fp_team(row),
+                "adp": adp if adp is not None else 999.0,
+                "position_adp": _fp_position_adp(row, platform, app_pos),
+                "ecr": _fp_int(_fp_first(row, "rank_ecr", "ecr", "rank")),
+                "tier": _fp_int(_fp_first(row, "tier", "rank_tier")),
+                "best_rank": _fp_int(_fp_first(row, "rank_min", "best_rank")),
+                "worst_rank": _fp_int(_fp_first(row, "rank_max", "worst_rank")),
+                "source": f"FantasyPros {platform}",
+            }
+
+            projection = projection_map.get(norm)
+            if isinstance(projection, dict):
+                item["projection_2026"] = projection
+
+            merged[norm] = item
+
+    if not merged:
+        raise RuntimeError(
+            "FantasyPros returned no usable NFL ranking rows. " + " | ".join(errors)
+        )
+
+    payload = {
+        "season": 2026,
+        "platform": platform,
+        "scoring": "PPR" if platform == "ESPN" else "Half PPR",
+        "source": f"FantasyPros API — {platform} 2026 platform dataset",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "api",
+        "players": merged,
+        "warnings": errors,
+    }
+
+    # Durable local cache/fallback.
+    path = _local_platform_adp_path(platform)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return payload
+
 def _platform_2026_adp_data(platform="ESPN", force=False):
-    """
-    Stable local ADP architecture.
-
-    ESPN and Yahoo ADP are read from versioned JSON files in /data instead of
-    depending on live ESPN/FantasyPros HTML/API responses from Render.
-
-    Updating current ADP later only requires replacing the matching JSON file.
-    """
     platform = str(platform or "ESPN").upper()
     if platform not in {"ESPN", "YAHOO"}:
         platform = "ESPN"
 
     path = _local_platform_adp_path(platform)
+
+    # Normal page loads use the last successful API snapshot. This keeps
+    # Player Research/Draft Center/Mock Lab fast and avoids wasting API calls.
+    if not force:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if payload.get("players"):
+                payload["status"] = payload.get("status") or "local"
+                return payload
+        except Exception:
+            pass
+
+    # Manual refresh calls the official API.
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        players = payload.get("players", {})
-        if players:
-            payload["status"] = "local"
-            return payload
+        return _fp_build_platform_dataset(platform)
     except Exception as exc:
+        # Never throw away the last successful dataset.
+        try:
+            cached = json.loads(path.read_text(encoding="utf-8"))
+            if cached.get("players"):
+                cached["status"] = "cached"
+                cached["warning"] = str(exc)
+                return cached
+        except Exception:
+            pass
+
         return {
             "season": 2026,
             "platform": platform,
             "scoring": "PPR" if platform == "ESPN" else "Half PPR",
-            "source": f"{platform} local 2026 ADP file missing/unreadable",
-            "source_url": "",
+            "source": "FantasyPros API unavailable",
             "updated_at": "",
             "players": {},
             "status": "unavailable",
             "warning": str(exc),
         }
 
+def _fp_api_status():
     return {
-        "season": 2026,
-        "platform": platform,
-        "scoring": "PPR" if platform == "ESPN" else "Half PPR",
-        "source": f"{platform} local 2026 ADP file is empty",
-        "source_url": "",
-        "updated_at": "",
-        "players": {},
-        "status": "unavailable",
-        "warning": "The local ADP JSON file contains no player data.",
+        "configured": bool(_fp_api_key()),
+        "environment_variable": FANTASYPROS_API_KEY_ENV,
     }
 
 def _league_platform(league_key=None):
@@ -1763,6 +2022,11 @@ def player_research_adp_status():
     data = _platform_2026_adp_data(platform)
     players = data.get("players", {})
 
+    loaded_adp = sum(
+        1 for value in players.values()
+        if _fp_float(value.get("adp")) is not None and float(value.get("adp", 999)) < 999
+    )
+
     return jsonify(
         ok=bool(players),
         platform=platform,
@@ -1770,7 +2034,11 @@ def player_research_adp_status():
         source=data.get("source"),
         updated_at=data.get("updated_at"),
         player_count=len(players),
+        players_with_platform_adp=loaded_adp,
+        api_configured=_fp_api_status()["configured"],
+        required_environment_variable=FANTASYPROS_API_KEY_ENV,
         warning=data.get("warning", ""),
+        warnings=data.get("warnings", []),
     )
 
 @app.post("/api/player-research/adp/refresh")
@@ -1780,7 +2048,7 @@ def player_research_adp_refresh():
     if platform not in {"ESPN", "YAHOO"}:
         platform = "ESPN"
 
-    data = _platform_2026_adp_data(platform)
+    data = _platform_2026_adp_data(platform, force=True)
 
     return jsonify(
         ok=bool(data.get("players")),
@@ -1788,9 +2056,12 @@ def player_research_adp_refresh():
         platform=platform,
         scoring=data.get("scoring"),
         source=data.get("source"),
+        status=data.get("status"),
         updated_at=data.get("updated_at"),
         player_count=len(data.get("players", {})),
+        api_configured=_fp_api_status()["configured"],
         warning=data.get("warning", ""),
+        warnings=data.get("warnings", []),
     )
 
 @app.get("/api/player-research/position")
