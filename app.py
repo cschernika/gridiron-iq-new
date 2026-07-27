@@ -686,6 +686,236 @@ def lineup_optimize():
 def waiver_analyze():
     return jsonify(ok=True,recommendations=DEMO["waivers"])
 
+
+# ============================================================
+# PLAYER RESEARCH CENTER
+# ============================================================
+import csv
+import io
+import re
+import time
+
+PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
+PLAYER_CACHE_TTL = 24 * 60 * 60
+
+def _pr_norm(value):
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+def _pr_num(value):
+    try:
+        return float(value) if value not in (None, "", "NA", "NaN") else 0.0
+    except Exception:
+        return 0.0
+
+def _pr_int(value):
+    try:
+        return int(float(value))
+    except Exception:
+        return 0
+
+def _pr_players():
+    try:
+        if PLAYER_CACHE_FILE.exists() and (time.time() - PLAYER_CACHE_FILE.stat().st_mtime) < PLAYER_CACHE_TTL:
+            return json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    try:
+        r = requests.get("https://api.sleeper.app/v1/players/nfl?active=true", timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        PLAYER_CACHE_FILE.write_text(json.dumps(data), encoding="utf-8")
+        return data
+    except Exception:
+        try:
+            return json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8")) if PLAYER_CACHE_FILE.exists() else {}
+        except Exception:
+            return {}
+
+def _pr_search(query, limit=25):
+    q = _pr_norm(query)
+    if not q:
+        return []
+    rows = []
+    for player_id, p in _pr_players().items():
+        name = p.get("full_name") or " ".join(x for x in [p.get("first_name"), p.get("last_name")] if x)
+        if not name or q not in _pr_norm(name):
+            continue
+        rows.append({
+            "player_id": player_id,
+            "name": name,
+            "team": p.get("team") or "FA",
+            "position": p.get("position") or ((p.get("fantasy_positions") or [""])[0]),
+            "status": p.get("status") or "",
+            "age": p.get("age"),
+            "years_exp": p.get("years_exp"),
+        })
+    rows.sort(key=lambda x: (0 if _pr_norm(x["name"]).startswith(q) else 1, x["name"]))
+    return rows[:limit]
+
+def _pr_urls(season):
+    return [
+        f"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_reg_{season}.csv",
+        f"https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_reg_{season}.csv",
+        f"https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_{season}.csv",
+    ]
+
+def _pr_rows(season):
+    cache = DATA_DIR / f"player_stats_{season}.csv"
+    if cache.exists():
+        try:
+            return list(csv.DictReader(io.StringIO(cache.read_text(encoding="utf-8"))))
+        except Exception:
+            pass
+    for url in _pr_urls(season):
+        try:
+            r = requests.get(url, timeout=35)
+            if r.status_code != 200 or len(r.content) < 1000:
+                continue
+            text = r.content.decode("utf-8", errors="ignore")
+            rows = list(csv.DictReader(io.StringIO(text)))
+            if rows:
+                try:
+                    cache.write_text(text, encoding="utf-8")
+                except Exception:
+                    pass
+                return rows
+        except Exception:
+            continue
+    return []
+
+def _pr_row_name(row):
+    for key in ("player_display_name", "player_name", "name", "full_name"):
+        if row.get(key):
+            return row[key]
+    return ""
+
+def _pr_aggregate(rows, player_name):
+    target = _pr_norm(player_name)
+    matches = [r for r in rows if _pr_norm(_pr_row_name(r)) == target]
+    if not matches:
+        matches = [r for r in rows if target and (target in _pr_norm(_pr_row_name(r)) or _pr_norm(_pr_row_name(r)) in target)]
+    if not matches:
+        return None
+
+    def total(field):
+        return sum(_pr_num(r.get(field)) for r in matches)
+
+    games_values = [_pr_int(r.get("games") or r.get("games_played")) for r in matches]
+    week_values = {r.get("week") for r in matches if r.get("week")}
+    games = max(max(games_values or [0]), len(week_values), 1)
+
+    return {
+        "games": games,
+        "passing_yards": total("passing_yards"),
+        "passing_tds": total("passing_tds"),
+        "interceptions": total("interceptions"),
+        "rushing_yards": total("rushing_yards"),
+        "rushing_tds": total("rushing_tds"),
+        "carries": total("carries") or total("rushing_attempts"),
+        "receptions": total("receptions"),
+        "targets": total("targets"),
+        "receiving_yards": total("receiving_yards"),
+        "receiving_tds": total("receiving_tds"),
+        "fantasy_points": total("fantasy_points"),
+        "fantasy_points_ppr": total("fantasy_points_ppr"),
+    }
+
+def _pr_history(player_name):
+    out = []
+    for season in (2022, 2023, 2024, 2025):
+        stats = _pr_aggregate(_pr_rows(season), player_name)
+        if stats:
+            out.append({"season": season, **stats})
+    return out
+
+def _pr_projection(history, position):
+    if not history:
+        return {"method": "Insufficient historical data", "games": 17, "position": position}
+    recent = sorted(history, key=lambda x: x["season"], reverse=True)[:3]
+    raw_weights = [0.60, 0.28, 0.12][:len(recent)]
+    total_weight = sum(raw_weights)
+    weights = [w / total_weight for w in raw_weights]
+    fields = [
+        "passing_yards","passing_tds","interceptions",
+        "rushing_yards","rushing_tds","carries",
+        "receptions","targets","receiving_yards","receiving_tds",
+        "fantasy_points","fantasy_points_ppr",
+    ]
+    proj = {"games": 17, "position": position}
+    for field in fields:
+        per_game = 0.0
+        for weight, season in zip(weights, recent):
+            per_game += weight * (_pr_num(season.get(field)) / max(1, season.get("games", 1)))
+        proj[field] = round(per_game * 17, 1)
+    proj["method"] = "Gridiron IQ weighted recent-production model"
+    return proj
+
+def _pr_trend(history):
+    if len(history) < 2:
+        return {"direction": "Not enough data", "change_pct": 0}
+    ordered = sorted(history, key=lambda x: x["season"])
+    old, new = ordered[-2], ordered[-1]
+    old_pts = old.get("fantasy_points_ppr") or old.get("fantasy_points") or 0
+    new_pts = new.get("fantasy_points_ppr") or new.get("fantasy_points") or 0
+    pct = round((new_pts - old_pts) / old_pts * 100, 1) if old_pts else 0
+    direction = "Rising" if pct > 5 else "Declining" if pct < -5 else "Stable"
+    return {"direction": direction, "change_pct": pct}
+
+def _pr_profile(player_id):
+    p = _pr_players().get(str(player_id))
+    if not p:
+        return None
+    name = p.get("full_name") or " ".join(x for x in [p.get("first_name"), p.get("last_name")] if x)
+    history = _pr_history(name)
+    prior = next((x for x in history if x["season"] == 2025), None)
+    position = p.get("position") or ((p.get("fantasy_positions") or [""])[0])
+    return {
+        "bio": {
+            "player_id": str(player_id),
+            "name": name,
+            "position": position,
+            "team": p.get("team") or "FA",
+            "number": p.get("number"),
+            "age": p.get("age"),
+            "height": p.get("height"),
+            "weight": p.get("weight"),
+            "college": p.get("college"),
+            "years_exp": p.get("years_exp"),
+            "status": p.get("status"),
+            "injury_status": p.get("injury_status"),
+            "injury_body_part": p.get("injury_body_part"),
+            "practice_participation": p.get("practice_participation"),
+            "depth_chart_position": p.get("depth_chart_position"),
+            "depth_chart_order": p.get("depth_chart_order"),
+        },
+        "previous_year": prior,
+        "history": history,
+        "projection": _pr_projection(history, position),
+        "trend": _pr_trend(history),
+        "data_notes": [
+            "Player bio/status data: Sleeper read-only NFL player directory.",
+            "Historical production: nflverse public player-stat releases when available.",
+            "2026 projections: Gridiron IQ model estimates, not official platform projections.",
+        ],
+    }
+
+@app.get("/player-research")
+def player_research():
+    return page("player_research.html")
+
+@app.get("/api/player-research/search")
+def player_research_search():
+    q = request.args.get("q", "").strip()
+    return jsonify(ok=True, players=_pr_search(q) if len(q) >= 2 else [])
+
+@app.get("/api/player-research/profile/<player_id>")
+def player_research_profile(player_id):
+    profile = _pr_profile(player_id)
+    if not profile:
+        return jsonify(ok=False, error="Player not found."), 404
+    return jsonify(ok=True, profile=profile)
+
+
 @app.errorhandler(404)
 def not_found(_): return page("error.html",code=404,message="Page not found."),404
 

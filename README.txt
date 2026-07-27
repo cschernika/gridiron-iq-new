@@ -1,24 +1,17 @@
-Gridiron IQ Mock Draft Lab
-
 Upload/replace:
-1. app.py
-2. templates/mock_draft.html
-3. templates/draft_center.html (included only to add the Mock Draft Lab button)
+- app.py
+- templates/base.html
+- templates/player_research.html
 
-New page:
-  /mock-draft
+This separates Player Research from Draft Center.
 
-Features:
-- Run 10, 25, 50, or 100 mock drafts at once
-- Choose draft slot, rounds, and draft strategy
-- Supports ESPN and Yahoo league profiles
-- Simulates opponents around ADP with randomness
-- Saves recent mock results in the Flask session
-- Shows average roster grade
-- Shows best roster grade
-- Shows most common first-six-round draft sequences
-- Shows best round-by-round roster from the last batch
-- Lets you repeat batches to fine-tune your preferred draft sequence
+Player Research now provides:
+- Player search
+- 2025 stats
+- 2022-2025 career trend data when available
+- 2026 Gridiron IQ projection
+- Bio, team, position, age, college, experience
+- Depth chart information
+- Current player/injury/practice status
 
-Note:
-The mock simulator currently uses the app's built-in player pool/ADP model. It is a strategy-training engine, not a live consensus-ADP feed yet.
+The running app uses public Sleeper player metadata and nflverse historical player-stat files. The first lookup can be slower while caches are created.
