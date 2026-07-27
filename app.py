@@ -891,7 +891,9 @@ def manual_mock_state(mock_id):
         item = dict(p)
         item["pick_score"] = _manual_player_pick_score(mock, p)
         scored.append(item)
-    scored.sort(key=lambda x: (x["pick_score"], -x["rank"]), reverse=True)
+    # Draft board is ranked by ADP (lowest/best ADP first).
+    # Pick Score remains visible as Gridiron IQ's roster-aware recommendation.
+    scored.sort(key=lambda x: (float(x.get("adp", 9999)), int(x.get("rank", 9999))))
 
     return jsonify(
         ok=True,
@@ -1309,10 +1311,24 @@ def player_research_search():
     return jsonify(ok=True, players=_pr_search(q) if len(q) >= 2 else [])
 
 
+def _pr_adp_lookup():
+    """Return normalized player-name -> ADP using the app's draft player pool."""
+    lookup = {}
+    try:
+        for p in MOCK_PLAYER_POOL:
+            name = str(p.get("name") or "").strip()
+            adp = p.get("adp")
+            if name and adp is not None:
+                lookup[_pr_norm(name)] = float(adp)
+    except Exception:
+        pass
+    return lookup
+
 def _pr_position_rows(position="", limit=500):
     position = str(position or "").upper().strip()
     sleeper = _pr_players()
     season_rows = _pr_rows(2025)
+    adp_lookup = _pr_adp_lookup()
 
     # Build one stats lookup so we do not scan the CSV separately for every player.
     by_name = {}
@@ -1358,6 +1374,7 @@ def _pr_position_rows(position="", limit=500):
             "age": p.get("age"),
             "years_exp": p.get("years_exp"),
             "games": stats.get("games", 0),
+            "adp": round(adp_lookup.get(_pr_norm(name), 999.0), 1),
             "fantasy_points_ppr": round(_pr_num(fantasy), 1),
             "passing_yards": round(_pr_num(stats.get("passing_yards")), 1),
             "passing_tds": round(_pr_num(stats.get("passing_tds")), 1),
@@ -1374,7 +1391,7 @@ def _pr_position_rows(position="", limit=500):
 
     rows.sort(
         key=lambda x: (
-            -x["fantasy_points_ppr"],
+            x.get("adp", 999.0),
             x["position"],
             x["name"],
         )
