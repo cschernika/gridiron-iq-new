@@ -2698,6 +2698,128 @@ def list_2026_players():
     return jsonify(ok=True, count=len(rows), players=rows)
 
 
+
+# ============================================================
+# PLAYER RESEARCH DATA UNIFICATION
+# 2026 current team + platform ADP + 2025 stats + 2026 projections
+# ============================================================
+
+def _player_research_master_row(player_name):
+    try:
+        return _master_players_2026().get("players", {}).get(_pr_norm(player_name), {})
+    except Exception:
+        return {}
+
+def _player_research_adp(player_name, platform="ESPN"):
+    """
+    Return platform ADP from the platform dataset first, then master DB.
+    """
+    platform = str(platform or "ESPN").upper()
+    norm = _pr_norm(player_name)
+
+    try:
+        pdata = _platform_2026_adp_data(platform)
+        row = pdata.get("players", {}).get(norm, {})
+        value = row.get("adp")
+        if value not in (None, "", 999, 999.0):
+            return {
+                "adp": float(value),
+                "position_adp": row.get("position_adp") or "",
+                "source": pdata.get("source") or platform,
+            }
+    except Exception:
+        pass
+
+    master = _player_research_master_row(player_name)
+    value = master.get("adp")
+    try:
+        value = float(value)
+    except Exception:
+        value = None
+
+    return {
+        "adp": value if value is not None else 999.0,
+        "position_adp": master.get("adp_position_rank") or "",
+        "source": master.get("source") or "2026 master database",
+    }
+
+def _player_research_stats_2025(player_name):
+    """
+    Historical 2025 stats come only from the local 2025 stats snapshot.
+    """
+    try:
+        stats = _stats_2025_snapshot().get("players", {}).get(_pr_norm(player_name))
+        return dict(stats) if stats else {}
+    except Exception:
+        return {}
+
+def _player_research_projection_2026(player_name, position):
+    """
+    Prefer FantasyPros projection stored in the 2026 master DB.
+    Fall back to Gridiron IQ projection generated from history/2025 stats.
+    """
+    master = _player_research_master_row(player_name)
+    fp = master.get("projection")
+
+    if isinstance(fp, dict) and fp:
+        return {
+            "games": 17,
+            "position": position,
+            "passing_yards": fp.get("pass_yards"),
+            "passing_tds": fp.get("pass_tds"),
+            "interceptions": fp.get("interceptions"),
+            "carries": fp.get("rush_attempts"),
+            "rushing_yards": fp.get("rush_yards"),
+            "rushing_tds": fp.get("rush_tds"),
+            "targets": fp.get("targets"),
+            "receptions": fp.get("receptions"),
+            "receiving_yards": fp.get("receiving_yards"),
+            "receiving_tds": fp.get("receiving_tds"),
+            "fantasy_points": fp.get("fantasy_points"),
+            "fantasy_points_ppr": fp.get("ppr_points"),
+            "method": "FantasyPros 2026 projection",
+        }
+
+    history = _pr_history(player_name)
+    return _pr_projection(history, position)
+
+def _player_research_data_status(platform="ESPN"):
+    platform = str(platform or "ESPN").upper()
+    master = _master_players_2026()
+    stats = _stats_2025_snapshot()
+    adp = _platform_2026_adp_data(platform)
+
+    projection_count = 0
+    for p in master.get("players", {}).values():
+        if isinstance(p.get("projection"), dict) and p.get("projection"):
+            projection_count += 1
+
+    adp_count = 0
+    for p in adp.get("players", {}).values():
+        try:
+            if float(p.get("adp", 999)) < 999:
+                adp_count += 1
+        except Exception:
+            pass
+
+    return {
+        "platform": platform,
+        "master_player_count": len(master.get("players", {})),
+        "stats_2025_count": len(stats.get("players", {})),
+        "projection_2026_count": projection_count,
+        "platform_adp_count": adp_count,
+        "master_updated_at": master.get("updated_at", ""),
+        "stats_updated_at": stats.get("updated_at", ""),
+        "adp_source": adp.get("source", ""),
+        "fantasypros_api_configured": bool(os.getenv("FANTASYPROS_API_KEY", "").strip()),
+    }
+
+@app.get("/api/player-research/data-status")
+def player_research_data_status_api():
+    platform = str(request.args.get("platform") or _league_platform()).upper()
+    return jsonify(ok=True, **_player_research_data_status(platform))
+
+
 @app.get("/player-research")
 def player_research():
     selected_position = request.args.get("position", "").strip().upper()
@@ -3340,47 +3462,40 @@ def _pr_adp_lookup(platform="ESPN"):
 
 def _pr_position_rows(position="", limit=500, platform="ESPN"):
     """
-    Render-safe Player Research list builder.
+    Fast, unified Player Research table.
 
-    It reads the player directory, local ADP JSON and local 2025 stats JSON once.
-    It never parses/downloads historical CSV files while /player-research loads.
+    Uses:
+    - current player/team: 2026 master player DB
+    - ADP: selected platform dataset
+    - 2025 stats: local historical snapshot
+    - 2026 projection: FantasyPros stored in master DB when available
     """
     position = str(position or "").upper().strip()
-    player_directory = _pr_players()
-
-    adp_data = _platform_2026_adp_data(platform)
-    adp_players = adp_data.get("players", {})
-    stats_players = _stats_2025_snapshot().get("players", {})
-
-    allowed = {"QB", "RB", "WR", "TE", "K", "DEF"}
+    directory = _pr_players()
+    allowed = {"QB","RB","WR","TE","K","DEF"}
     rows = []
 
-    for player_id, p in player_directory.items():
+    for player_id, p in directory.items():
         name = p.get("full_name") or " ".join(
             x for x in [p.get("first_name"), p.get("last_name")] if x
         )
-        pos = p.get("position") or ((p.get("fantasy_positions") or [""])[0])
+        pos = str(
+            p.get("position")
+            or ((p.get("fantasy_positions") or [""])[0])
+            or ""
+        ).upper()
 
-        if not name or not pos:
-            continue
-
-        pos = str(pos).upper()
         if pos == "DST":
             pos = "DEF"
-
-        if pos not in allowed:
+        if not name or pos not in allowed:
             continue
         if position and pos != position:
             continue
 
-        norm = _pr_norm(name)
-        stats = stats_players.get(norm, {})
-        adp_row = adp_players.get(norm, {})
-
-        try:
-            adp = float(adp_row.get("adp", 999.0))
-        except Exception:
-            adp = 999.0
+        master = _player_research_master_row(name)
+        stats = _player_research_stats_2025(name)
+        adp_info = _player_research_adp(name, platform)
+        projection = _player_research_projection_2026(name, pos)
 
         fantasy = stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0
         total_tds = (
@@ -3392,13 +3507,15 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
         rows.append({
             "player_id": str(player_id),
             "name": name,
-            "team": p.get("team") or "FA",
-            "position": pos,
-            "status": p.get("status") or "",
-            "age": p.get("age"),
-            "years_exp": p.get("years_exp"),
-            "adp": round(adp, 1),
-            "adp_display": adp_row.get("adp_display"),
+            "team": master.get("team") or p.get("team") or "FA",
+            "position": master.get("position") or pos,
+            "status": master.get("status") or p.get("status") or "",
+            "age": master.get("age") if master.get("age") is not None else p.get("age"),
+            "years_exp": master.get("years_exp") if master.get("years_exp") is not None else p.get("years_exp"),
+            "rookie": bool(master.get("rookie") or p.get("rookie")),
+            "adp": round(float(adp_info.get("adp", 999.0)), 1),
+            "position_adp": adp_info.get("position_adp") or "",
+            "adp_source": adp_info.get("source") or "",
             "games": stats.get("games", 0),
             "fantasy_points_ppr": round(_pr_num(fantasy), 1),
             "passing_yards": round(_pr_num(stats.get("passing_yards")), 1),
@@ -3412,11 +3529,21 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
             "receiving_yards": round(_pr_num(stats.get("receiving_yards")), 1),
             "receiving_tds": round(_pr_num(stats.get("receiving_tds")), 1),
             "total_tds": round(total_tds, 1),
+            "proj_2026_ppr": round(_pr_num(projection.get("fantasy_points_ppr") or projection.get("fantasy_points")), 1),
+            "proj_2026_pass_yards": round(_pr_num(projection.get("passing_yards")), 1),
+            "proj_2026_pass_tds": round(_pr_num(projection.get("passing_tds")), 1),
+            "proj_2026_rush_yards": round(_pr_num(projection.get("rushing_yards")), 1),
+            "proj_2026_rush_tds": round(_pr_num(projection.get("rushing_tds")), 1),
+            "proj_2026_receptions": round(_pr_num(projection.get("receptions")), 1),
+            "proj_2026_rec_yards": round(_pr_num(projection.get("receiving_yards")), 1),
+            "proj_2026_rec_tds": round(_pr_num(projection.get("receiving_tds")), 1),
+            "projection_method": projection.get("method") or "",
         })
 
     rows.sort(
         key=lambda x: (
             x.get("adp", 999.0),
+            -x.get("proj_2026_ppr", 0),
             -x.get("fantasy_points_ppr", 0),
             x["name"],
         )
@@ -3544,12 +3671,6 @@ def _pr_trend(history):
 
 
 def _pr_profile(player_id):
-    """
-    Return the individual-player detail payload consumed by player_research.html.
-
-    This function was missing from the latest app.py, which caused every player
-    click to raise a NameError and return HTTP 500.
-    """
     players = _pr_players()
     p = players.get(str(player_id))
     if not p:
@@ -3561,81 +3682,49 @@ def _pr_profile(player_id):
     if not name:
         return None
 
-    position = p.get("position") or ((p.get("fantasy_positions") or [""])[0])
+    position = str(
+        p.get("position")
+        or ((p.get("fantasy_positions") or [""])[0])
+        or ""
+    ).upper()
     if position == "DST":
         position = "DEF"
 
+    master = _player_research_master_row(name)
+    stats_2025 = _player_research_stats_2025(name)
     history = _pr_history(name)
-    prior = next((x for x in history if x.get("season") == 2025), None)
-
-    # Prefer current 2026 master data for bio/team/status when available.
-    master = _master_players_2026().get("players", {})
-    master_row = master.get(_pr_norm(name), {})
+    projection = _player_research_projection_2026(name, master.get("position") or position)
+    adp_info = _player_research_adp(name, _league_platform())
 
     bio = {
         "player_id": str(player_id),
         "name": name,
-        "position": master_row.get("position") or position,
-        "team": master_row.get("team") or p.get("team") or "FA",
-        "number": master_row.get("number") or p.get("number"),
-        "age": master_row.get("age") if master_row.get("age") is not None else p.get("age"),
-        "height": master_row.get("height") or p.get("height"),
-        "weight": master_row.get("weight") or p.get("weight"),
-        "college": master_row.get("college") or p.get("college"),
-        "years_exp": (
-            master_row.get("years_exp")
-            if master_row.get("years_exp") is not None
-            else p.get("years_exp")
-        ),
-        "status": master_row.get("status") or p.get("status"),
-        "injury_status": master_row.get("injury_status") or p.get("injury_status"),
-        "injury_body_part": master_row.get("injury_body_part") or p.get("injury_body_part"),
-        "practice_participation": (
-            master_row.get("practice_participation")
-            or p.get("practice_participation")
-        ),
-        "depth_chart_position": (
-            master_row.get("depth_chart_position")
-            or p.get("depth_chart_position")
-        ),
-        "depth_chart_order": master_row.get("depth_chart_order") or p.get("depth_chart_order"),
-        "rookie": bool(master_row.get("rookie") or p.get("rookie")),
+        "position": master.get("position") or position,
+        "team": master.get("team") or p.get("team") or "FA",
+        "number": master.get("number") or p.get("number"),
+        "age": master.get("age") if master.get("age") is not None else p.get("age"),
+        "college": master.get("college") or p.get("college"),
+        "years_exp": master.get("years_exp") if master.get("years_exp") is not None else p.get("years_exp"),
+        "status": master.get("status") or p.get("status"),
+        "injury_status": master.get("injury_status") or p.get("injury_status"),
+        "depth_chart_position": master.get("depth_chart_position") or p.get("depth_chart_position"),
+        "rookie": bool(master.get("rookie") or p.get("rookie")),
+        "adp": adp_info.get("adp"),
+        "position_adp": adp_info.get("position_adp"),
+        "adp_source": adp_info.get("source"),
     }
-
-    projection = None
-    master_projection = master_row.get("projection")
-    if isinstance(master_projection, dict) and master_projection:
-        projection = {
-            "games": 17,
-            "position": bio["position"],
-            "passing_yards": master_projection.get("pass_yards"),
-            "passing_tds": master_projection.get("pass_tds"),
-            "interceptions": master_projection.get("interceptions"),
-            "rushing_yards": master_projection.get("rush_yards"),
-            "rushing_tds": master_projection.get("rush_tds"),
-            "carries": master_projection.get("rush_attempts"),
-            "receptions": master_projection.get("receptions"),
-            "targets": master_projection.get("targets"),
-            "receiving_yards": master_projection.get("receiving_yards"),
-            "receiving_tds": master_projection.get("receiving_tds"),
-            "fantasy_points": master_projection.get("fantasy_points"),
-            "fantasy_points_ppr": master_projection.get("ppr_points"),
-            "method": "FantasyPros 2026 projection",
-        }
-
-    if not projection:
-        projection = _pr_projection(history, bio["position"])
 
     return {
         "bio": bio,
-        "previous_year": prior or {},
+        "previous_year": stats_2025,
         "history": history,
         "projection": projection,
         "trend": _pr_trend(history),
         "data_notes": [
-            "Current player/team information: 2026 master player database when available.",
-            "Historical production: local 2025 stats snapshot and cached prior-season data.",
-            "2026 projection: FantasyPros when available; otherwise Gridiron IQ weighted model.",
+            "2026 current team: 2026 master player database.",
+            "ADP: selected ESPN/Yahoo platform dataset.",
+            "2025 stats: local historical stats snapshot.",
+            "2026 projections: FantasyPros when available, otherwise Gridiron IQ fallback model.",
         ],
     }
 
