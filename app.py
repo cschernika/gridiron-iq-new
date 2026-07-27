@@ -810,10 +810,70 @@ def _mock_projection_from_stats(stats, pos):
 
 def _build_dynamic_mock_pool(context):
     """
-    Produce enough draftable players for a full 12-team, 15-round mock.
-    Uses the app's known player pool first, then augments from the player
-    directory + 2025 stats + platform ADP.
+    Build the mock pool from the current 2026 master player database whenever
+    available. This prevents stale hard-coded teams and includes rookies.
     """
+    master = _master_players_2026()
+    master_players = master.get("players", {})
+
+    if master_players:
+        players = []
+        for norm, p in master_players.items():
+            pos = str(p.get("position") or "").upper()
+            if pos not in {"QB","RB","WR","TE","K","DEF"}:
+                continue
+
+            projection_data = p.get("projection") or {}
+            projection = (
+                projection_data.get("ppr_points")
+                or projection_data.get("fantasy_points")
+                or 0
+            )
+            try:
+                projection = float(projection or 0)
+            except Exception:
+                projection = 0.0
+
+            adp = p.get("adp")
+            try:
+                adp = float(adp)
+            except Exception:
+                adp = 999.0
+
+            stats = p.get("stats_2025") or {}
+            if not projection:
+                projection = _mock_projection_from_stats(stats, pos)
+
+            players.append({
+                "rank": 999,
+                "name": p.get("name"),
+                "pos": pos,
+                "team": p.get("team") or "FA",
+                "tier": 9,
+                "adp": adp,
+                "projection": round(projection, 1),
+                "rookie": bool(p.get("rookie")),
+                "fantasypros_id": p.get("fantasypros_id"),
+                "sleeper_id": p.get("sleeper_id"),
+            })
+
+        def master_sort(p):
+            adp = p.get("adp", 999)
+            return (
+                adp if adp < 999 else 9999,
+                -float(p.get("projection", 0) or 0),
+                p.get("name") or "",
+            )
+
+        players.sort(key=master_sort)
+        for idx, p in enumerate(players, 1):
+            p["rank"] = idx
+            if p.get("adp", 999) >= 999:
+                p["adp"] = round(max(1, idx + 8), 1)
+
+        return players[:300]
+
+    # Fallback to the prior local pool until the first master refresh is run.
     platform = "YAHOO" if "YAHOO" in str(context.get("platform","")).upper() else "ESPN"
     adp_data = _platform_2026_adp_data(platform)
     adp_map = adp_data.get("players", {})
@@ -821,9 +881,6 @@ def _build_dynamic_mock_pool(context):
     directory = _pr_players()
 
     pool = {}
-    rank_counter = 1
-
-    # Keep original curated pool.
     for p in MOCK_PLAYER_POOL:
         item = dict(p)
         norm = _pr_norm(item["name"])
@@ -837,7 +894,6 @@ def _build_dynamic_mock_pool(context):
             item["projection"] = _mock_projection_from_stats(stats, item.get("pos"))
         pool[norm] = item
 
-    # Add active fantasy players from Player Research directory.
     for pid, p in directory.items():
         name = p.get("full_name") or " ".join(x for x in [p.get("first_name"),p.get("last_name")] if x)
         pos = str(p.get("position") or ((p.get("fantasy_positions") or [""])[0]) or "").upper()
@@ -845,21 +901,15 @@ def _build_dynamic_mock_pool(context):
             pos = "DEF"
         if not name or pos not in {"QB","RB","WR","TE","K","DEF"}:
             continue
-
         norm = _pr_norm(name)
         if norm in pool:
             continue
-
         adp_row = adp_map.get(norm, {})
         try:
             adp = float(adp_row.get("adp", 999))
         except Exception:
             adp = 999.0
-
         stats = stats_map.get(norm, {})
-        projection = _mock_projection_from_stats(stats, pos)
-
-        # Exclude extremely low-information players only after the pool is deep.
         pool[norm] = {
             "rank": 999,
             "name": name,
@@ -867,28 +917,21 @@ def _build_dynamic_mock_pool(context):
             "team": p.get("team") or stats.get("team") or "FA",
             "tier": 9,
             "adp": adp,
-            "projection": projection,
+            "projection": _mock_projection_from_stats(stats, pos),
+            "rookie": bool(p.get("rookie")),
         }
 
     players = list(pool.values())
-
-    # Rank: platform ADP first, then 2025 production/projection.
-    def sort_key(p):
-        norm = _pr_norm(p["name"])
-        stats = stats_map.get(norm, {})
-        ppr = float(stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0)
-        adp = float(p.get("adp", 999))
-        return (adp if adp < 999 else 2000 - min(ppr, 500), -ppr, -float(p.get("projection",0)))
-
-    players.sort(key=sort_key)
+    players.sort(key=lambda p: (
+        float(p.get("adp",999)),
+        -float(p.get("projection",0) or 0),
+        p.get("name","")
+    ))
     for idx, p in enumerate(players, 1):
         p["rank"] = idx
         if p.get("adp", 999) >= 999:
-            # Synthetic fallback draft cost for simulator-only depth players.
             p["adp"] = round(max(1, idx + 8), 1)
-
-    # 220 is enough for 12 teams x 15 rounds (180 picks) plus buffer.
-    return players[:240]
+    return players[:300]
 
 def _manual_player_lookup(mock=None):
     pool = (mock or {}).get("player_pool") if mock else None
@@ -1856,10 +1899,30 @@ def _pr_int(value):
 
 def _pr_players():
     """
-    Sleeper is the preferred player directory, but Player Research should not
-    become unusable when Render cannot reach Sleeper. Cache successful results
-    and fall back to the app's own draft/player datasets.
+    Prefer the 2026 master database after it has been refreshed.
+    Fall back to cached/live Sleeper so Player Research remains usable.
     """
+    try:
+        master = _master_players_2026()
+        if master.get("players"):
+            out = {}
+            for idx, p in enumerate(master["players"].values(), 1):
+                out[str(p.get("sleeper_id") or p.get("fantasypros_id") or idx)] = {
+                    "full_name": p.get("name"),
+                    "position": p.get("position"),
+                    "fantasy_positions": p.get("fantasy_positions") or [p.get("position")],
+                    "team": p.get("team") or "FA",
+                    "status": p.get("status") or "Active",
+                    "age": p.get("age"),
+                    "years_exp": p.get("years_exp"),
+                    "college": p.get("college"),
+                    "injury_status": p.get("injury_status"),
+                    "rookie": p.get("rookie", False),
+                }
+            return out
+    except Exception:
+        pass
+
     try:
         if PLAYER_CACHE_FILE.exists() and (time.time() - PLAYER_CACHE_FILE.stat().st_mtime) < PLAYER_CACHE_TTL:
             cached = json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
@@ -1881,7 +1944,6 @@ def _pr_players():
     except Exception:
         pass
 
-    # Use stale cache if we have one.
     try:
         if PLAYER_CACHE_FILE.exists():
             cached = json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
@@ -1890,50 +1952,7 @@ def _pr_players():
     except Exception:
         pass
 
-    # Final local fallback so the page still works.
-    fallback = {}
-    all_local = []
-    try:
-        all_local.extend(MOCK_PLAYER_POOL)
-    except Exception:
-        pass
-    try:
-        for platform in ("ESPN", "YAHOO"):
-            payload = _platform_2026_adp_data(platform)
-            for item in payload.get("players", {}).values():
-                all_local.append(item)
-    except Exception:
-        pass
-    try:
-        for item in _stats_2025_snapshot().get("players", {}).values():
-            all_local.append(item)
-    except Exception:
-        pass
-
-    seen = set()
-    for idx, item in enumerate(all_local, 1):
-        name = str(item.get("name") or "").strip()
-        if not name:
-            continue
-        norm = _pr_norm(name)
-        if norm in seen:
-            continue
-        seen.add(norm)
-        pos = str(item.get("position") or item.get("pos") or "").upper()
-        if pos == "DST":
-            pos = "DEF"
-        fallback[str(idx)] = {
-            "full_name": name,
-            "position": pos,
-            "fantasy_positions": [pos] if pos else [],
-            "team": item.get("team") or "FA",
-            "status": "Active",
-            "age": item.get("age"),
-            "years_exp": item.get("years_exp"),
-            "college": item.get("college"),
-        }
-
-    return fallback
+    return {}
 
 
 def _pr_search(query, limit=25):
@@ -2231,6 +2250,334 @@ def stats_2025_player_api(player_name):
     if not player:
         return jsonify(ok=False, error="Player not found in 2025 stats database."), 404
     return jsonify(ok=True, season=2025, player=player)
+
+
+
+# ============================================================
+# 2026 MASTER PLAYER DATABASE + REFRESH ENGINE
+# ============================================================
+MASTER_PLAYERS_2026_FILE = DATA_DIR / "nfl_players_2026.json"
+
+def _master_players_2026():
+    try:
+        if MASTER_PLAYERS_2026_FILE.exists():
+            payload = json.loads(MASTER_PLAYERS_2026_FILE.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        pass
+    return {
+        "season": 2026,
+        "updated_at": "",
+        "count": 0,
+        "sources": [],
+        "players": {}
+    }
+
+def _master_player_norm(name):
+    return _pr_norm(name)
+
+def _fp_headers():
+    key = os.getenv("FANTASYPROS_API_KEY", "").strip()
+    return {"x-api-key": key} if key else {}
+
+def _fp_get_json(url, params=None, timeout=25):
+    headers = _fp_headers()
+    if not headers:
+        raise RuntimeError("FANTASYPROS_API_KEY is not configured.")
+    r = requests.get(url, headers=headers, params=params or {}, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+def _fp_player_list_2026():
+    payload = _fp_get_json("https://api.fantasypros.com/v2/json/nfl/players")
+    rows = payload.get("players") or []
+    out = {}
+    for p in rows:
+        name = str(p.get("player_name") or p.get("name") or "").strip()
+        if not name:
+            continue
+        pos = str(
+            p.get("position_id")
+            or p.get("player_position_id")
+            or p.get("player_positions")
+            or ""
+        ).split(",")[0].upper()
+        if pos == "DST":
+            pos = "DEF"
+        team = str(
+            p.get("team_id")
+            or p.get("player_team_id")
+            or p.get("player_team")
+            or p.get("team")
+            or ""
+        ).upper()
+        out[_master_player_norm(name)] = {
+            "name": name,
+            "position": pos,
+            "team": team,
+            "fantasypros_id": p.get("player_id") or p.get("fpid"),
+            "espn_id": p.get("player_espn_id") or p.get("espn_player_id"),
+            "yahoo_id": p.get("player_yahoo_id"),
+            "bye_week": p.get("player_bye_week") or p.get("bye_week"),
+            "source_player": "FantasyPros",
+        }
+    return out
+
+def _fp_projections_2026(scoring="PPR"):
+    payload = _fp_get_json(
+        "https://api.fantasypros.com/v2/json/nfl/2026/projections",
+        params={
+            "week": 0,
+            "positions": "QB:RB:WR:TE:DST:K",
+            "scoring": scoring,
+        },
+    )
+    rows = payload.get("players") or []
+    out = {}
+    for p in rows:
+        name = str(p.get("name") or p.get("player_name") or "").strip()
+        if not name:
+            continue
+        stats = p.get("stats") or {}
+        pos = str(p.get("position_id") or p.get("position") or "").upper()
+        if pos == "DST":
+            pos = "DEF"
+        team = str(p.get("team_id") or p.get("team") or "").upper()
+        out[_master_player_norm(name)] = {
+            "projection": {
+                "fantasy_points": stats.get("points"),
+                "ppr_points": stats.get("points_ppr"),
+                "half_ppr_points": stats.get("points_half"),
+                "pass_yards": stats.get("pass_yds"),
+                "pass_tds": stats.get("pass_tds"),
+                "interceptions": stats.get("pass_ints") or stats.get("pass_int"),
+                "rush_attempts": stats.get("rush_att"),
+                "rush_yards": stats.get("rush_yds"),
+                "rush_tds": stats.get("rush_tds"),
+                "receptions": stats.get("rec_rec"),
+                "receiving_yards": stats.get("rec_yds"),
+                "receiving_tds": stats.get("rec_tds"),
+                "targets": stats.get("rec_tgt") or stats.get("targets"),
+            },
+            "projection_team": team,
+            "projection_position": pos,
+        }
+    return out
+
+def _fp_adp_2026(scoring="PPR"):
+    payload = _fp_get_json(
+        "https://api.fantasypros.com/v2/json/nfl/2026/consensus-rankings",
+        params={"position": "ALL", "scoring": scoring, "type": "ADP", "week": 0},
+    )
+    # FantasyPros responses have varied slightly over time. Accept common shapes.
+    rows = (
+        payload.get("players")
+        or payload.get("rankings")
+        or payload.get("results")
+        or []
+    )
+    if isinstance(rows, dict):
+        flattened = []
+        for value in rows.values():
+            if isinstance(value, list):
+                flattened.extend(value)
+        rows = flattened
+
+    out = {}
+    for p in rows if isinstance(rows, list) else []:
+        name = str(p.get("player_name") or p.get("name") or "").strip()
+        if not name:
+            continue
+        adp = p.get("rank_adp") or p.get("adp") or p.get("rank_ave") or p.get("rank_ecr")
+        try:
+            adp = float(adp)
+        except Exception:
+            adp = None
+        out[_master_player_norm(name)] = {
+            "adp": adp,
+            "adp_position_rank": p.get("pos_rank"),
+        }
+    return out
+
+def _sleeper_active_players_2026():
+    r = requests.get(
+        "https://api.sleeper.app/v1/players/nfl?active=true",
+        timeout=30,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    out = {}
+    for player_id, p in payload.items():
+        name = str(
+            p.get("full_name")
+            or " ".join(x for x in [p.get("first_name"), p.get("last_name")] if x)
+        ).strip()
+        if not name:
+            continue
+        pos = str(p.get("position") or ((p.get("fantasy_positions") or [""])[0]) or "").upper()
+        if pos == "DST":
+            pos = "DEF"
+        out[_master_player_norm(name)] = {
+            "name": name,
+            "position": pos,
+            "team": str(p.get("team") or "").upper(),
+            "sleeper_id": str(player_id),
+            "status": p.get("status"),
+            "active": p.get("active"),
+            "age": p.get("age"),
+            "years_exp": p.get("years_exp"),
+            "college": p.get("college"),
+            "number": p.get("number"),
+            "injury_status": p.get("injury_status"),
+            "depth_chart_position": p.get("depth_chart_position"),
+            "fantasy_positions": p.get("fantasy_positions") or [],
+            "source_player": "Sleeper",
+        }
+    return out
+
+def _build_master_players_2026():
+    warnings = []
+    sources = []
+    merged = {}
+
+    # Sleeper is the broad roster/player directory and catches rookies/depth players.
+    try:
+        sleeper = _sleeper_active_players_2026()
+        merged.update(sleeper)
+        sources.append(f"Sleeper active NFL players ({len(sleeper)})")
+    except Exception as e:
+        warnings.append(f"Sleeper players: {e}")
+
+    # FantasyPros player directory can correct current team/position and IDs.
+    fp_players = {}
+    try:
+        fp_players = _fp_player_list_2026()
+        for norm, row in fp_players.items():
+            current = merged.setdefault(norm, {})
+            # Prefer FP current team when supplied; preserve Sleeper as fallback.
+            for key, value in row.items():
+                if value not in (None, ""):
+                    current[key] = value
+        sources.append(f"FantasyPros NFL players ({len(fp_players)})")
+    except Exception as e:
+        warnings.append(f"FantasyPros players: {e}")
+
+    # FantasyPros preseason projections.
+    try:
+        projections = _fp_projections_2026("PPR")
+        for norm, row in projections.items():
+            current = merged.setdefault(norm, {"name": norm})
+            current.update(row)
+            if row.get("projection_team"):
+                current["team"] = row["projection_team"]
+            if row.get("projection_position"):
+                current["position"] = row["projection_position"]
+        sources.append(f"FantasyPros 2026 projections ({len(projections)})")
+    except Exception as e:
+        warnings.append(f"FantasyPros projections: {e}")
+
+    # FantasyPros ADP / draft rankings.
+    try:
+        adp = _fp_adp_2026("PPR")
+        for norm, row in adp.items():
+            merged.setdefault(norm, {"name": norm}).update(row)
+        sources.append(f"FantasyPros 2026 ADP ({len(adp)})")
+    except Exception as e:
+        warnings.append(f"FantasyPros ADP: {e}")
+
+    # Merge 2025 veteran stats from the existing local stats engine.
+    stats_2025 = _stats_2025_snapshot().get("players", {})
+    for norm, stats in stats_2025.items():
+        if norm in merged:
+            merged[norm]["stats_2025"] = stats
+
+    # Clean fantasy pool and identify likely rookies.
+    fantasy_positions = {"QB", "RB", "WR", "TE", "K", "DEF"}
+    clean = {}
+    for norm, p in merged.items():
+        name = str(p.get("name") or "").strip()
+        pos = str(p.get("position") or "").upper()
+        if pos == "DST":
+            pos = "DEF"
+        if not name or pos not in fantasy_positions:
+            continue
+
+        years_exp = p.get("years_exp")
+        try:
+            rookie = int(years_exp) == 0
+        except Exception:
+            rookie = False
+
+        p["position"] = pos
+        p["rookie"] = rookie
+        p["season"] = 2026
+        clean[norm] = p
+
+    payload = {
+        "season": 2026,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "count": len(clean),
+        "rookie_count": sum(1 for p in clean.values() if p.get("rookie")),
+        "sources": sources,
+        "warnings": warnings,
+        "players": clean,
+    }
+
+    MASTER_PLAYERS_2026_FILE.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return payload
+
+@app.get("/player-database-2026")
+def player_database_2026_page():
+    return page("player_database_2026.html")
+
+@app.post("/api/data/refresh-2026-players")
+def refresh_2026_players():
+    try:
+        payload = _build_master_players_2026()
+        return jsonify(
+            ok=True,
+            count=payload.get("count", 0),
+            rookie_count=payload.get("rookie_count", 0),
+            updated_at=payload.get("updated_at"),
+            sources=payload.get("sources", []),
+            warnings=payload.get("warnings", []),
+        )
+    except Exception as e:
+        return jsonify(ok=False, error=str(e)), 500
+
+@app.get("/api/data/2026-players/status")
+def status_2026_players():
+    payload = _master_players_2026()
+    return jsonify(
+        ok=bool(payload.get("players")),
+        season=2026,
+        count=payload.get("count", 0),
+        rookie_count=payload.get("rookie_count", 0),
+        updated_at=payload.get("updated_at", ""),
+        sources=payload.get("sources", []),
+        warnings=payload.get("warnings", []),
+        fantasypros_api_configured=bool(os.getenv("FANTASYPROS_API_KEY", "").strip()),
+    )
+
+@app.get("/api/data/2026-players")
+def list_2026_players():
+    payload = _master_players_2026()
+    pos = str(request.args.get("position") or "").upper()
+    rookies_only = str(request.args.get("rookies") or "").lower() in {"1","true","yes"}
+    rows = list(payload.get("players", {}).values())
+    if pos:
+        rows = [p for p in rows if p.get("position") == pos]
+    if rookies_only:
+        rows = [p for p in rows if p.get("rookie")]
+    rows.sort(key=lambda p: (
+        p.get("adp") if isinstance(p.get("adp"), (int,float)) else 9999,
+        p.get("name","")
+    ))
+    return jsonify(ok=True, count=len(rows), players=rows)
 
 
 @app.get("/player-research")
