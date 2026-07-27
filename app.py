@@ -1054,6 +1054,256 @@ def _manual_finalize_if_complete(mock):
     mock["updated_at"] = datetime.now(timezone.utc).isoformat()
     return mock
 
+
+# ============================================================
+# ADVANCED AI MOCK DRAFT ENGINE
+# FantasyPros-style fast simulator for ESPN/Yahoo league profiles
+# ============================================================
+
+def _mock_platform_adp(context):
+    platform = "YAHOO" if "YAHOO" in str(context.get("platform", "")).upper() else "ESPN"
+    data = _platform_2026_adp_data(platform)
+    return platform, data
+
+def _mock_roster_template(context):
+    # Use connected league settings if available, otherwise sensible defaults.
+    scoring = str(context.get("scoring") or "")
+    return {
+        "QB": 1,
+        "RB": 2,
+        "WR": 2 if "Half" in scoring else 3,
+        "TE": 1,
+        "FLEX": 1,
+        "K": 1,
+        "DEF": 1,
+        "BENCH": 6,
+    }
+
+def _mock_team_counts(team_roster):
+    return Counter(p.get("pos") for p in team_roster)
+
+def _mock_position_need_score(pos, roster, round_no, total_rounds):
+    counts = _mock_team_counts(roster)
+
+    # Starter requirements / practical depth.
+    targets = {
+        "QB": 1,
+        "RB": 4,
+        "WR": 5,
+        "TE": 1,
+        "K": 1,
+        "DEF": 1,
+    }
+
+    current = counts.get(pos, 0)
+    target = targets.get(pos, 99)
+
+    if current == 0 and pos in {"QB","RB","WR","TE"}:
+        score = 10
+    elif current < target:
+        score = 5
+    else:
+        score = -5
+
+    # Avoid unrealistic early K/DST and excessive QB/TE hoarding.
+    if pos in {"K","DEF"} and round_no < max(8, total_rounds - 4):
+        score -= 18
+    if pos == "QB" and counts.get("QB", 0) >= 1 and round_no <= 8:
+        score -= 9
+    if pos == "TE" and counts.get("TE", 0) >= 1 and round_no <= 8:
+        score -= 7
+
+    return score
+
+def _mock_strategy_archetype(team_slot):
+    # Deterministic mix of opponent personalities.
+    styles = [
+        "balanced",
+        "rb-heavy",
+        "wr-heavy",
+        "late-qb",
+        "early-qb",
+        "balanced",
+        "hero-rb",
+        "best-player",
+        "balanced",
+        "zero-rb",
+        "balanced",
+        "best-player",
+    ]
+    return styles[(int(team_slot)-1) % len(styles)]
+
+def _mock_strategy_bonus_for_ai(player, style, round_no):
+    pos = player["pos"]
+    if style == "rb-heavy" and pos == "RB" and round_no <= 5:
+        return 8
+    if style == "wr-heavy" and pos == "WR" and round_no <= 6:
+        return 8
+    if style == "late-qb" and pos == "QB" and round_no <= 7:
+        return -12
+    if style == "early-qb" and pos == "QB" and round_no <= 4:
+        return 8
+    if style == "hero-rb":
+        if pos == "RB" and round_no <= 2:
+            return 10
+        if pos == "WR" and 2 <= round_no <= 6:
+            return 5
+    if style == "zero-rb":
+        if pos == "WR" and round_no <= 5:
+            return 9
+        if pos == "RB" and round_no <= 4:
+            return -8
+    return 0
+
+def _mock_ai_score(player, context, team_roster, overall_pick, round_no, total_rounds, style):
+    platform, adp_data = _mock_platform_adp(context)
+    adp_row = adp_data.get("players", {}).get(_pr_norm(player["name"]), {})
+    platform_adp = adp_row.get("adp")
+    try:
+        platform_adp = float(platform_adp)
+    except Exception:
+        platform_adp = float(player.get("adp", 999))
+
+    projection = float(player.get("projection", 0) or 0)
+    prior = _stats_2025_for_name(player["name"]) or {}
+    prior_points = float(prior.get("fantasy_points_ppr") or prior.get("fantasy_points") or 0)
+
+    # Base: market ADP + talent/projection + previous production.
+    adp_distance = abs(platform_adp - overall_pick) if platform_adp < 999 else 50
+    score = 100 - min(30, adp_distance * 0.9)
+    score += min(12, projection / 28)
+    score += min(10, prior_points / 32)
+
+    score += _mock_position_need_score(
+        player["pos"], team_roster, round_no, total_rounds
+    )
+    score += _mock_strategy_bonus_for_ai(player, style, round_no)
+
+    # Controlled randomness prevents all mocks from being identical.
+    score += random.uniform(-7.5, 7.5)
+
+    return score, platform_adp
+
+def _mock_ai_pick(mock, order_row):
+    available = _manual_available(mock)
+    if not available:
+        return None
+
+    slot = int(order_row["slot"])
+    round_no = int(order_row["round"])
+    overall = int(order_row["overall"])
+    total_rounds = int(mock["rounds"])
+    context = dict(CONTEXTS.get(mock["league_key"], CONTEXTS["espn-gramps"]))
+
+    roster = [
+        p for p in mock.get("picks", [])
+        if int(p.get("slot", 0)) == slot
+    ]
+    style = _mock_strategy_archetype(slot)
+
+    scored = []
+    for player in available:
+        score, platform_adp = _mock_ai_score(
+            player, context, roster, overall, round_no, total_rounds, style
+        )
+        scored.append((score, platform_adp, player))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    _, platform_adp, chosen = scored[0]
+
+    return {
+        "overall": overall,
+        "round": round_no,
+        "slot": slot,
+        "player": chosen["name"],
+        "pos": chosen["pos"],
+        "team": chosen["team"],
+        "adp": round(platform_adp, 1) if platform_adp < 999 else chosen.get("adp", 999),
+        "projection": chosen.get("projection", 0),
+        "user_pick": False,
+        "manager": f"Team {slot}",
+        "ai_style": style,
+    }
+
+def _manual_autopick_until_user(mock):
+    while True:
+        row = _manual_current_order_row(mock)
+        if row is None:
+            mock["status"] = "complete"
+            break
+
+        if int(row["slot"]) == int(mock["draft_slot"]):
+            mock["status"] = "your_pick"
+            break
+
+        pick = _mock_ai_pick(mock, row)
+        if not pick:
+            mock["status"] = "complete"
+            break
+
+        mock.setdefault("picks", []).append(pick)
+
+    mock["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return mock
+
+@app.post("/api/mock-draft/manual/autodraft-rest")
+def manual_mock_autodraft_rest():
+    data = request.get_json(silent=True) or {}
+    mock_id = str(data.get("mock_id") or "")
+    mock = _manual_mock_get(mock_id)
+    if not mock:
+        return jsonify(ok=False, error="Mock draft not found."), 404
+
+    while mock.get("status") != "complete":
+        row = _manual_current_order_row(mock)
+        if row is None:
+            mock["status"] = "complete"
+            break
+
+        if int(row["slot"]) == int(mock["draft_slot"]):
+            available = _manual_available(mock)
+            if not available:
+                mock["status"] = "complete"
+                break
+
+            context = dict(CONTEXTS.get(mock["league_key"], CONTEXTS["espn-gramps"]))
+            roster = [
+                p for p in mock.get("picks", [])
+                if int(p.get("slot", 0)) == int(mock["draft_slot"])
+            ]
+            scored = []
+            for player in available:
+                score, platform_adp = _mock_ai_score(
+                    player, context, roster, row["overall"], row["round"],
+                    mock["rounds"], "balanced"
+                )
+                scored.append((score, platform_adp, player))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            _, platform_adp, player = scored[0]
+            mock.setdefault("picks", []).append({
+                "overall": row["overall"],
+                "round": row["round"],
+                "slot": row["slot"],
+                "player": player["name"],
+                "pos": player["pos"],
+                "team": player["team"],
+                "adp": round(platform_adp, 1) if platform_adp < 999 else player.get("adp", 999),
+                "projection": player.get("projection", 0),
+                "user_pick": True,
+                "manager": "Your Team (Auto)",
+                "ai_style": "balanced",
+            })
+        else:
+            pick = _mock_ai_pick(mock, row)
+            if not pick:
+                mock["status"] = "complete"
+                break
+            mock.setdefault("picks", []).append(pick)
+
+    _manual_finalize_if_complete(mock)
+    _manual_mock_save(mock)
+    return jsonify(ok=True, mock=mock, grade=mock.get("grade"))
+
 @app.post("/api/mock-draft/manual/start")
 def manual_mock_start():
     data = request.get_json(silent=True) or {}
@@ -1083,6 +1333,27 @@ def manual_mock_start():
     _manual_mock_save(mock)
 
     return jsonify(ok=True, mock=mock)
+
+
+@app.get("/api/mock-draft/manual/<mock_id>/board")
+def manual_mock_board(mock_id):
+    mock = _manual_mock_get(mock_id)
+    if not mock:
+        return jsonify(ok=False, error="Mock draft not found."), 404
+
+    teams = {}
+    for slot in range(1, int(mock["teams"]) + 1):
+        teams[str(slot)] = {
+            "slot": slot,
+            "label": "Your Team" if slot == int(mock["draft_slot"]) else f"Team {slot}",
+            "strategy": "you" if slot == int(mock["draft_slot"]) else _mock_strategy_archetype(slot),
+            "roster": [],
+        }
+
+    for pick in mock.get("picks", []):
+        teams[str(pick["slot"])]["roster"].append(pick)
+
+    return jsonify(ok=True, mock=mock, teams=list(teams.values()))
 
 @app.get("/api/mock-draft/manual/<mock_id>")
 def manual_mock_state(mock_id):
