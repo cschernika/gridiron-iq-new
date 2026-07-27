@@ -73,6 +73,72 @@ PLAYERS = [
     {"rank":20,"name":"Sam LaPorta","pos":"TE","team":"DET","tier":4,"adp":35.1,"projection":218.3},
 ]
 
+
+MOCK_EXTRA_PLAYERS = [
+    {"rank":21,"name":"A.J. Brown","pos":"WR","team":"PHI","tier":4,"adp":20.4,"projection":245.0},
+    {"rank":22,"name":"Garrett Wilson","pos":"WR","team":"NYJ","tier":4,"adp":23.3,"projection":242.0},
+    {"rank":23,"name":"Kyren Williams","pos":"RB","team":"LAR","tier":4,"adp":24.5,"projection":238.0},
+    {"rank":24,"name":"Marvin Harrison Jr.","pos":"WR","team":"ARI","tier":4,"adp":25.6,"projection":240.0},
+    {"rank":25,"name":"James Cook","pos":"RB","team":"BUF","tier":4,"adp":26.5,"projection":234.0},
+    {"rank":26,"name":"Brian Thomas Jr.","pos":"WR","team":"JAX","tier":4,"adp":28.2,"projection":236.0},
+    {"rank":27,"name":"Josh Jacobs","pos":"RB","team":"GB","tier":4,"adp":29.1,"projection":231.0},
+    {"rank":28,"name":"Mike Evans","pos":"WR","team":"TB","tier":4,"adp":30.2,"projection":229.0},
+    {"rank":29,"name":"Davante Adams","pos":"WR","team":"LAR","tier":4,"adp":31.4,"projection":226.0},
+    {"rank":30,"name":"Kenneth Walker III","pos":"RB","team":"SEA","tier":4,"adp":32.5,"projection":224.0},
+    {"rank":31,"name":"Jayden Daniels","pos":"QB","team":"WAS","tier":4,"adp":33.0,"projection":340.0},
+    {"rank":32,"name":"Terry McLaurin","pos":"WR","team":"WAS","tier":5,"adp":34.3,"projection":222.0},
+    {"rank":33,"name":"DJ Moore","pos":"WR","team":"CHI","tier":5,"adp":36.4,"projection":218.0},
+    {"rank":34,"name":"Isiah Pacheco","pos":"RB","team":"KC","tier":5,"adp":37.6,"projection":216.0},
+    {"rank":35,"name":"George Kittle","pos":"TE","team":"SF","tier":5,"adp":38.8,"projection":205.0},
+    {"rank":36,"name":"Chris Olave","pos":"WR","team":"NO","tier":5,"adp":39.6,"projection":214.0},
+    {"rank":37,"name":"Joe Burrow","pos":"QB","team":"CIN","tier":5,"adp":40.5,"projection":332.0},
+    {"rank":38,"name":"DK Metcalf","pos":"WR","team":"PIT","tier":5,"adp":41.3,"projection":211.0},
+    {"rank":39,"name":"Alvin Kamara","pos":"RB","team":"NO","tier":5,"adp":42.7,"projection":208.0},
+    {"rank":40,"name":"Xavier Worthy","pos":"WR","team":"KC","tier":5,"adp":44.0,"projection":207.0},
+    {"rank":41,"name":"Rashee Rice","pos":"WR","team":"KC","tier":5,"adp":45.2,"projection":205.0},
+    {"rank":42,"name":"David Montgomery","pos":"RB","team":"DET","tier":5,"adp":46.0,"projection":201.0},
+    {"rank":43,"name":"Zay Flowers","pos":"WR","team":"BAL","tier":5,"adp":47.4,"projection":203.0},
+    {"rank":44,"name":"George Pickens","pos":"WR","team":"DAL","tier":5,"adp":48.7,"projection":201.0},
+    {"rank":45,"name":"James Conner","pos":"RB","team":"ARI","tier":5,"adp":49.4,"projection":198.0},
+    {"rank":46,"name":"Rome Odunze","pos":"WR","team":"CHI","tier":6,"adp":50.8,"projection":199.0},
+    {"rank":47,"name":"DeVonta Smith","pos":"WR","team":"PHI","tier":6,"adp":52.1,"projection":197.0},
+    {"rank":48,"name":"Travis Kelce","pos":"TE","team":"KC","tier":6,"adp":53.0,"projection":191.0},
+    {"rank":49,"name":"Aaron Jones","pos":"RB","team":"MIN","tier":6,"adp":54.5,"projection":194.0},
+    {"rank":50,"name":"Calvin Ridley","pos":"WR","team":"TEN","tier":6,"adp":55.4,"projection":193.0},
+    {"rank":51,"name":"Tee Higgins","pos":"WR","team":"CIN","tier":6,"adp":56.2,"projection":191.0},
+    {"rank":52,"name":"D'Andre Swift","pos":"RB","team":"CHI","tier":6,"adp":57.6,"projection":189.0},
+    {"rank":53,"name":"Patrick Mahomes","pos":"QB","team":"KC","tier":6,"adp":58.1,"projection":326.0},
+    {"rank":54,"name":"Jaylen Waddle","pos":"WR","team":"MIA","tier":6,"adp":59.5,"projection":188.0},
+    {"rank":55,"name":"Tony Pollard","pos":"RB","team":"TEN","tier":6,"adp":60.7,"projection":186.0},
+    {"rank":56,"name":"Mark Andrews","pos":"TE","team":"BAL","tier":6,"adp":62.0,"projection":184.0},
+    {"rank":57,"name":"Jordan Addison","pos":"WR","team":"MIN","tier":6,"adp":63.2,"projection":185.0},
+    {"rank":58,"name":"Rhamondre Stevenson","pos":"RB","team":"NE","tier":6,"adp":64.8,"projection":181.0},
+    {"rank":59,"name":"Ladd McConkey","pos":"WR","team":"LAC","tier":6,"adp":65.5,"projection":183.0},
+    {"rank":60,"name":"Kyler Murray","pos":"QB","team":"ARI","tier":6,"adp":66.7,"projection":318.0},
+    {"rank":61,"name":"Ricky Pearsall","pos":"WR","team":"SF","tier":7,"adp":68.1,"projection":178.0},
+    {"rank":62,"name":"Najee Harris","pos":"RB","team":"LAC","tier":7,"adp":69.4,"projection":176.0},
+    {"rank":63,"name":"David Njoku","pos":"TE","team":"CLE","tier":7,"adp":70.2,"projection":172.0},
+    {"rank":64,"name":"Chris Godwin","pos":"WR","team":"TB","tier":7,"adp":71.8,"projection":176.0},
+    {"rank":65,"name":"Bo Nix","pos":"QB","team":"DEN","tier":7,"adp":73.0,"projection":311.0},
+    {"rank":66,"name":"Javonte Williams","pos":"RB","team":"DAL","tier":7,"adp":74.5,"projection":171.0},
+    {"rank":67,"name":"Jerry Jeudy","pos":"WR","team":"CLE","tier":7,"adp":75.8,"projection":173.0},
+    {"rank":68,"name":"Evan Engram","pos":"TE","team":"DEN","tier":7,"adp":77.2,"projection":168.0},
+    {"rank":69,"name":"Dak Prescott","pos":"QB","team":"DAL","tier":7,"adp":78.4,"projection":306.0},
+    {"rank":70,"name":"Tyjae Spears","pos":"RB","team":"TEN","tier":7,"adp":79.6,"projection":169.0},
+    {"rank":71,"name":"Jakobi Meyers","pos":"WR","team":"LV","tier":7,"adp":81.0,"projection":170.0},
+    {"rank":72,"name":"Tucker Kraft","pos":"TE","team":"GB","tier":7,"adp":82.5,"projection":164.0},
+    {"rank":73,"name":"Rachaad White","pos":"RB","team":"TB","tier":7,"adp":84.0,"projection":165.0},
+    {"rank":74,"name":"Jordan Love","pos":"QB","team":"GB","tier":7,"adp":85.4,"projection":302.0},
+    {"rank":75,"name":"Keon Coleman","pos":"WR","team":"BUF","tier":7,"adp":86.9,"projection":166.0},
+    {"rank":76,"name":"Zach Charbonnet","pos":"RB","team":"SEA","tier":8,"adp":88.1,"projection":161.0},
+    {"rank":77,"name":"Christian Kirk","pos":"WR","team":"HOU","tier":8,"adp":89.7,"projection":163.0},
+    {"rank":78,"name":"Dallas Goedert","pos":"TE","team":"PHI","tier":8,"adp":91.0,"projection":158.0},
+    {"rank":79,"name":"Trevor Lawrence","pos":"QB","team":"JAX","tier":8,"adp":92.5,"projection":297.0},
+    {"rank":80,"name":"Jaylen Warren","pos":"RB","team":"PIT","tier":8,"adp":94.0,"projection":159.0},
+]
+
+MOCK_PLAYER_POOL = PLAYERS + MOCK_EXTRA_PLAYERS
+
 CONTEXTS = {
     "espn-gramps":{"key":"espn-gramps","league_name":"Gramp's Gridiron","platform":"ESPN","scoring":"Full PPR","teams":12,"draft_type":"Snake","draft_slot":7,"round":1,"pick_in_round":7,"starters":{"QB":1,"RB":2,"WR":2,"TE":1,"FLEX":1}},
     "yahoo-westrockers":{"key":"yahoo-westrockers","league_name":"WestRockers","platform":"Yahoo","scoring":"Half PPR","teams":12,"draft_type":"Snake","draft_slot":7,"round":1,"pick_in_round":7,"starters":{"QB":1,"RB":2,"WR":2,"TE":1,"FLEX":1}},
@@ -239,12 +305,183 @@ def draft_leagues():
         })
     return [{"key":"espn-gramps","name":CONTEXTS["espn-gramps"]["league_name"],"platform":"ESPN"},{"key":"yahoo-westrockers","name":"WestRockers","platform":"Yahoo"}]
 
+
+# ============================================================
+# MOCK DRAFT LAB
+# ============================================================
+
+import random
+
+def mock_history():
+    return session.get("mock_draft_history", [])
+
+def save_mock_history(history):
+    session["mock_draft_history"] = history[-100:]
+
+def mock_pick_order(teams, rounds):
+    order = []
+    overall = 1
+    for rnd in range(1, rounds + 1):
+        slots = range(1, teams + 1) if rnd % 2 else range(teams, 0, -1)
+        for slot in slots:
+            order.append({"overall":overall,"round":rnd,"slot":slot})
+            overall += 1
+    return order
+
+def mock_strategy_score(player, strategy, round_no, roster_counts):
+    score = 100 - abs(player["adp"] - max(1, round_no * 12 - 5)) * 0.20
+    pos = player["pos"]
+
+    if strategy == "zero-rb":
+        if pos == "WR" and round_no <= 5: score += 9
+        if pos == "RB" and round_no <= 4: score -= 8
+    elif strategy == "hero-rb":
+        if pos == "RB" and round_no <= 2 and roster_counts.get("RB", 0) == 0: score += 12
+        if pos == "WR" and 2 <= round_no <= 6: score += 5
+    elif strategy == "robust-rb":
+        if pos == "RB" and round_no <= 4: score += 8
+    elif strategy == "late-qb":
+        if pos == "QB" and round_no <= 6: score -= 12
+    elif strategy == "balanced":
+        if pos in ("RB","WR") and round_no <= 5: score += 4
+
+    # Roster construction pressure.
+    targets = {"QB":1,"RB":4,"WR":5,"TE":1}
+    if roster_counts.get(pos, 0) < targets.get(pos, 99):
+        score += 3
+
+    # Mild premium on higher projected players.
+    score += float(player.get("projection", 0)) / 100.0
+    return score
+
+def run_one_mock(context, draft_slot, strategy, rounds=12):
+    teams = int(context.get("teams", 12) or 12)
+    scoring = context.get("scoring", "Full PPR")
+    order = mock_pick_order(teams, rounds)
+    available = [dict(p) for p in MOCK_PLAYER_POOL]
+    user_roster = []
+    user_counts = Counter()
+    all_picks = []
+
+    for pick in order:
+        if not available:
+            break
+
+        if pick["slot"] == draft_slot:
+            candidates = []
+            for player in available:
+                s = mock_strategy_score(player, strategy, pick["round"], user_counts)
+                # Scoring-format adjustment.
+                s += scoring_bonus(player, scoring)
+                candidates.append((s, player))
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            chosen = candidates[0][1]
+            user_roster.append(chosen)
+            user_counts[chosen["pos"]] += 1
+        else:
+            # Simulate opponent picks around ADP with controlled randomness.
+            overall = pick["overall"]
+            candidates = sorted(
+                available,
+                key=lambda p: abs(float(p["adp"]) - overall) + random.random() * 7.0
+            )
+            chosen = candidates[0]
+
+        available = [p for p in available if p["name"] != chosen["name"]]
+        all_picks.append({
+            "overall":pick["overall"],
+            "round":pick["round"],
+            "slot":pick["slot"],
+            "player":chosen["name"],
+            "pos":chosen["pos"],
+            "team":chosen["team"],
+            "user_pick":pick["slot"] == draft_slot,
+        })
+
+    # Grade roster balance + player quality.
+    quality = sum(max(0, 110 - p["rank"]) for p in user_roster)
+    balance = 0
+    desired = {"QB":1,"RB":4,"WR":5,"TE":1}
+    for pos, target in desired.items():
+        balance += max(0, 20 - abs(user_counts.get(pos,0)-target)*5)
+
+    grade_score = max(50, min(99, round(55 + quality / max(1,len(user_roster)) * .25 + balance * .18)))
+    sequence = "-".join(p["pos"] for p in user_roster[:6])
+
+    return {
+        "strategy":strategy,
+        "draft_slot":draft_slot,
+        "rounds":rounds,
+        "score":grade_score,
+        "sequence":sequence,
+        "roster":[{"round":i+1, **p} for i,p in enumerate(user_roster)],
+        "counts":dict(user_counts),
+        "picks":all_picks,
+    }
+
+def summarize_mock_batch(results):
+    if not results:
+        return {}
+
+    seq_counts = Counter(r["sequence"] for r in results)
+    avg_score = round(sum(r["score"] for r in results) / len(results), 1)
+    best = max(results, key=lambda r:r["score"])
+
+    round_players = {}
+    for r in results:
+        for p in r["roster"]:
+            rnd = p["round"]
+            round_players.setdefault(rnd, Counter())
+            round_players[rnd][p["name"]] += 1
+
+    common_by_round = []
+    for rnd in sorted(round_players):
+        name, count = round_players[rnd].most_common(1)[0]
+        common_by_round.append({
+            "round":rnd,
+            "player":name,
+            "frequency":round(count / len(results) * 100),
+        })
+
+    top_sequences = [
+        {"sequence":seq,"count":count,"percent":round(count/len(results)*100)}
+        for seq,count in seq_counts.most_common(5)
+    ]
+
+    return {
+        "runs":len(results),
+        "average_score":avg_score,
+        "best_score":best["score"],
+        "best_sequence":best["sequence"],
+        "top_sequences":top_sequences,
+        "common_by_round":common_by_round[:8],
+    }
+
+
 @app.get("/")
 def home(): return redirect(url_for("dashboard"))
 
 @app.get("/app")
 @app.get("/dashboard")
 def dashboard(): return page("dashboard.html")
+
+
+@app.get("/mock-draft")
+def mock_draft():
+    key = request.args.get("league") or session.get("active_draft_league") or "espn-gramps"
+    if key not in CONTEXTS:
+        key = "espn-gramps"
+    context = dict(CONTEXTS[key])
+    history = mock_history()
+    summary = summarize_mock_batch(history[-25:]) if history else {}
+    return page(
+        "mock_draft.html",
+        draft_leagues=draft_leagues(),
+        active_league_key=key,
+        mock_context=context,
+        mock_history=history[-20:][::-1],
+        mock_summary=summary,
+    )
 
 @app.get("/draft-center")
 def draft_center():
@@ -351,6 +588,49 @@ def yahoo_callback():
         return redirect(url_for("league_sync",yahoo="connected"))
     except Exception as exc:
         return page("error.html",code=502,message=f"Yahoo authorization failed: {exc}"),502
+
+
+@app.post("/api/mock-draft/run")
+def mock_draft_run():
+    data = request.get_json(silent=True) or {}
+    key = data.get("league_key") or "espn-gramps"
+    context = dict(CONTEXTS.get(key, CONTEXTS["espn-gramps"]))
+    draft_slot = int(data.get("draft_slot") or context.get("draft_slot", 7))
+    strategy = str(data.get("strategy") or "balanced")
+    runs = max(1, min(100, int(data.get("runs") or 10)))
+    rounds = max(6, min(15, int(data.get("rounds") or 12)))
+
+    results = [run_one_mock(context, draft_slot, strategy, rounds) for _ in range(runs)]
+    summary = summarize_mock_batch(results)
+
+    history = mock_history()
+    for r in results:
+        history.append({
+            "strategy":r["strategy"],
+            "draft_slot":r["draft_slot"],
+            "rounds":r["rounds"],
+            "score":r["score"],
+            "sequence":r["sequence"],
+            "roster":r["roster"],
+        })
+    save_mock_history(history)
+
+    return jsonify(
+        ok=True,
+        summary=summary,
+        best=max(results,key=lambda r:r["score"]),
+        latest=results[-1],
+    )
+
+@app.get("/api/mock-draft/history")
+def mock_draft_history_api():
+    history = mock_history()
+    return jsonify(ok=True, history=history[-100:], summary=summarize_mock_batch(history[-100:]))
+
+@app.post("/api/mock-draft/reset")
+def mock_draft_reset():
+    session["mock_draft_history"] = []
+    return jsonify(ok=True)
 
 @app.get("/api/draft/pro/context")
 def draft_context_api():
