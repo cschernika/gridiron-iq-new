@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json, os
+import json, os, uuid
 from collections import Counter
 from datetime import datetime, timezone
 from math import exp
@@ -481,6 +481,7 @@ def mock_draft():
         mock_context=context,
         mock_history=history[-20:][::-1],
         mock_summary=summary,
+        manual_mocks=_manual_mock_list(20),
     )
 
 @app.get("/draft-center")
@@ -588,6 +589,394 @@ def yahoo_callback():
         return redirect(url_for("league_sync",yahoo="connected"))
     except Exception as exc:
         return page("error.html",code=502,message=f"Yahoo authorization failed: {exc}"),502
+
+
+
+# ============================================================
+# MANUAL MOCK DRAFT LAB
+# ============================================================
+
+MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
+
+def _manual_mock_store():
+    try:
+        if MANUAL_MOCK_FILE.exists():
+            data = json.loads(MANUAL_MOCK_FILE.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+def _save_manual_mock_store(store):
+    MANUAL_MOCK_FILE.write_text(json.dumps(store, indent=2), encoding="utf-8")
+
+def _manual_mock_get(mock_id):
+    return _manual_mock_store().get(str(mock_id))
+
+def _manual_mock_save(mock):
+    store = _manual_mock_store()
+    store[str(mock["id"])] = mock
+    _save_manual_mock_store(store)
+
+def _manual_mock_list(limit=30):
+    rows = list(_manual_mock_store().values())
+    rows.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+    return rows[:limit]
+
+def _manual_player_lookup():
+    return {p["name"]: p for p in MOCK_PLAYER_POOL}
+
+def _manual_available(mock):
+    drafted = {p["player"] for p in mock.get("picks", [])}
+    return [dict(p) for p in MOCK_PLAYER_POOL if p["name"] not in drafted]
+
+def _manual_order(mock):
+    return mock_pick_order(int(mock["teams"]), int(mock["rounds"]))
+
+def _manual_current_order_row(mock):
+    order = _manual_order(mock)
+    idx = len(mock.get("picks", []))
+    return order[idx] if idx < len(order) else None
+
+def _manual_user_roster(mock):
+    lookup = _manual_player_lookup()
+    roster = []
+    for pick in mock.get("picks", []):
+        if pick.get("user_pick"):
+            player = lookup.get(pick.get("player"))
+            if player:
+                roster.append({"round": pick["round"], "overall": pick["overall"], **player})
+    return roster
+
+def _manual_opponent_pick(mock, order_row):
+    available = _manual_available(mock)
+    if not available:
+        return None
+
+    overall = order_row["overall"]
+    # Opponents draft mostly around ADP, with enough randomness to make mocks different.
+    candidates = sorted(
+        available,
+        key=lambda p: abs(float(p.get("adp", 999)) - overall) + random.random() * 9.0
+    )
+    chosen = candidates[0]
+    return {
+        "overall": overall,
+        "round": order_row["round"],
+        "slot": order_row["slot"],
+        "player": chosen["name"],
+        "pos": chosen["pos"],
+        "team": chosen["team"],
+        "adp": chosen["adp"],
+        "projection": chosen["projection"],
+        "user_pick": False,
+        "manager": f"Team {order_row['slot']}",
+    }
+
+def _manual_autopick_until_user(mock):
+    while True:
+        row = _manual_current_order_row(mock)
+        if row is None:
+            mock["status"] = "complete"
+            break
+        if int(row["slot"]) == int(mock["draft_slot"]):
+            mock["status"] = "your_pick"
+            break
+
+        pick = _manual_opponent_pick(mock, row)
+        if not pick:
+            mock["status"] = "complete"
+            break
+        mock.setdefault("picks", []).append(pick)
+
+    mock["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return mock
+
+def _manual_need_bonus(pos, roster_counts, round_no):
+    targets = {"QB": 1, "RB": 4, "WR": 5, "TE": 1}
+    current = roster_counts.get(pos, 0)
+    target = targets.get(pos, 99)
+
+    if current < target:
+        bonus = 6
+    else:
+        bonus = -3
+
+    if pos == "QB" and round_no <= 4:
+        bonus -= 5
+    if pos == "TE" and round_no <= 2:
+        bonus -= 2
+
+    return bonus
+
+def _manual_player_pick_score(mock, player):
+    roster = _manual_user_roster(mock)
+    counts = Counter(p["pos"] for p in roster)
+    row = _manual_current_order_row(mock)
+    overall = row["overall"] if row else len(mock.get("picks", [])) + 1
+    round_no = row["round"] if row else int(mock["rounds"])
+
+    adp_value = float(player.get("adp", overall)) - overall
+    projection = float(player.get("projection", 0) or 0)
+
+    score = 70
+    score += min(12, max(-12, adp_value)) * 1.1
+    score += projection / 75.0
+    score += _manual_need_bonus(player["pos"], counts, round_no)
+
+    return round(max(35, min(99, score)))
+
+def _manual_2025_points_map(names):
+    # Uses the Player Research/nflverse helpers when available.
+    result = {name: 0.0 for name in names}
+    try:
+        if "_pr_rows" not in globals() or "_pr_aggregate" not in globals():
+            return result
+        rows = _pr_rows(2025)
+        for name in names:
+            stats = _pr_aggregate(rows, name) or {}
+            result[name] = round(float(stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0), 1)
+    except Exception:
+        pass
+    return result
+
+def _manual_grade(mock):
+    roster = _manual_user_roster(mock)
+    if not roster:
+        return {
+            "overall": 0,
+            "projection_score": 0,
+            "stats_score": 0,
+            "value_score": 0,
+            "balance_score": 0,
+            "depth_score": 0,
+            "projected_points": 0,
+            "previous_year_points": 0,
+            "summary": "No user picks yet.",
+        }
+
+    counts = Counter(p["pos"] for p in roster)
+    projected_points = round(sum(float(p.get("projection", 0) or 0) for p in roster), 1)
+    previous_map = _manual_2025_points_map([p["name"] for p in roster])
+    previous_points = round(sum(previous_map.values()), 1)
+
+    # Projection score: normalize around a strong 12-round fantasy roster.
+    projection_score = round(max(45, min(99, 55 + projected_points / max(1, len(roster)) / 6.0)))
+
+    # Historical production rewards proven production, but does not punish rookies/new players too harshly.
+    if previous_points > 0:
+        stats_score = round(max(45, min(99, 55 + previous_points / max(1, len(roster)) / 5.5)))
+    else:
+        stats_score = 70
+
+    # Value score based on where the user selected players relative to ADP.
+    values = []
+    for p in roster:
+        values.append(float(p.get("adp", p["overall"])) - float(p["overall"]))
+    avg_value = sum(values) / max(1, len(values))
+    value_score = round(max(40, min(99, 72 + avg_value * 1.8)))
+
+    # Balance score.
+    desired_min = {"QB": 1, "RB": 3, "WR": 4, "TE": 1}
+    penalties = 0
+    for pos, minimum in desired_min.items():
+        if counts.get(pos, 0) < minimum:
+            penalties += (minimum - counts.get(pos, 0)) * 7
+    if counts.get("QB", 0) > 2:
+        penalties += (counts["QB"] - 2) * 5
+    if counts.get("TE", 0) > 2:
+        penalties += (counts["TE"] - 2) * 5
+    balance_score = max(40, 96 - penalties)
+
+    # Depth score rewards useful RB/WR depth.
+    rbwr = counts.get("RB", 0) + counts.get("WR", 0)
+    depth_score = max(45, min(99, 55 + rbwr * 5))
+
+    overall = round(
+        projection_score * 0.30
+        + stats_score * 0.20
+        + value_score * 0.20
+        + balance_score * 0.20
+        + depth_score * 0.10
+    )
+
+    strengths = []
+    concerns = []
+    if value_score >= 80:
+        strengths.append("strong value versus ADP")
+    if projection_score >= 80:
+        strengths.append("high projected production")
+    if balance_score >= 85:
+        strengths.append("balanced roster construction")
+    if counts.get("RB", 0) < 3:
+        concerns.append("running-back depth")
+    if counts.get("WR", 0) < 4:
+        concerns.append("wide-receiver depth")
+    if counts.get("QB", 0) == 0:
+        concerns.append("quarterback still open")
+    if counts.get("TE", 0) == 0:
+        concerns.append("tight end still open")
+
+    summary = f"Overall draft grade: {overall}/100."
+    if strengths:
+        summary += " Strengths: " + ", ".join(strengths) + "."
+    if concerns:
+        summary += " Watch: " + ", ".join(concerns) + "."
+
+    return {
+        "overall": overall,
+        "projection_score": projection_score,
+        "stats_score": stats_score,
+        "value_score": value_score,
+        "balance_score": balance_score,
+        "depth_score": depth_score,
+        "projected_points": projected_points,
+        "previous_year_points": previous_points,
+        "summary": summary,
+    }
+
+def _manual_finalize_if_complete(mock):
+    row = _manual_current_order_row(mock)
+    if row is None:
+        mock["status"] = "complete"
+        mock["grade"] = _manual_grade(mock)
+        mock["completed_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        mock["grade"] = _manual_grade(mock)
+    mock["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return mock
+
+@app.post("/api/mock-draft/manual/start")
+def manual_mock_start():
+    data = request.get_json(silent=True) or {}
+    key = data.get("league_key") or "espn-gramps"
+    context = dict(CONTEXTS.get(key, CONTEXTS["espn-gramps"]))
+
+    draft_slot = max(1, min(int(context.get("teams", 12)), int(data.get("draft_slot") or context.get("draft_slot", 7))))
+    rounds = max(6, min(15, int(data.get("rounds") or 12)))
+
+    mock = {
+        "id": uuid.uuid4().hex[:10],
+        "league_key": key,
+        "league_name": context.get("league_name", "League"),
+        "platform": context.get("platform", ""),
+        "scoring": context.get("scoring", ""),
+        "teams": int(context.get("teams", 12)),
+        "draft_slot": draft_slot,
+        "rounds": rounds,
+        "status": "starting",
+        "picks": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    _manual_autopick_until_user(mock)
+    _manual_finalize_if_complete(mock)
+    _manual_mock_save(mock)
+
+    return jsonify(ok=True, mock=mock)
+
+@app.get("/api/mock-draft/manual/<mock_id>")
+def manual_mock_state(mock_id):
+    mock = _manual_mock_get(mock_id)
+    if not mock:
+        return jsonify(ok=False, error="Mock draft not found."), 404
+
+    row = _manual_current_order_row(mock)
+    available = _manual_available(mock)
+
+    # Score the most relevant available players for the user's current pick.
+    scored = []
+    for p in available:
+        item = dict(p)
+        item["pick_score"] = _manual_player_pick_score(mock, p)
+        scored.append(item)
+    scored.sort(key=lambda x: (x["pick_score"], -x["rank"]), reverse=True)
+
+    return jsonify(
+        ok=True,
+        mock=mock,
+        current_pick=row,
+        roster=_manual_user_roster(mock),
+        available=scored,
+        grade=_manual_grade(mock),
+    )
+
+@app.post("/api/mock-draft/manual/<mock_id>/pick")
+def manual_mock_pick(mock_id):
+    mock = _manual_mock_get(mock_id)
+    if not mock:
+        return jsonify(ok=False, error="Mock draft not found."), 404
+
+    if mock.get("status") == "complete":
+        return jsonify(ok=False, error="This mock draft is already complete."), 400
+
+    row = _manual_current_order_row(mock)
+    if not row or int(row["slot"]) != int(mock["draft_slot"]):
+        return jsonify(ok=False, error="It is not your pick right now."), 400
+
+    data = request.get_json(silent=True) or {}
+    player_name = str(data.get("player") or "").strip()
+    lookup = {p["name"]: p for p in _manual_available(mock)}
+    player = lookup.get(player_name)
+    if not player:
+        return jsonify(ok=False, error="That player is no longer available."), 400
+
+    pick = {
+        "overall": row["overall"],
+        "round": row["round"],
+        "slot": row["slot"],
+        "player": player["name"],
+        "pos": player["pos"],
+        "team": player["team"],
+        "adp": player["adp"],
+        "projection": player["projection"],
+        "pick_score": _manual_player_pick_score(mock, player),
+        "user_pick": True,
+        "manager": "Your Team",
+    }
+    mock.setdefault("picks", []).append(pick)
+
+    _manual_autopick_until_user(mock)
+    _manual_finalize_if_complete(mock)
+    _manual_mock_save(mock)
+
+    return jsonify(ok=True, mock=mock, grade=mock.get("grade"))
+
+@app.post("/api/mock-draft/manual/<mock_id>/undo")
+def manual_mock_undo(mock_id):
+    mock = _manual_mock_get(mock_id)
+    if not mock:
+        return jsonify(ok=False, error="Mock draft not found."), 404
+
+    picks = mock.get("picks", [])
+    user_indexes = [i for i, p in enumerate(picks) if p.get("user_pick")]
+    if not user_indexes:
+        return jsonify(ok=False, error="There is no user pick to undo."), 400
+
+    # Roll back to just before the most recent user selection.
+    last_user_index = user_indexes[-1]
+    mock["picks"] = picks[:last_user_index]
+    mock.pop("completed_at", None)
+    mock["status"] = "your_pick"
+    mock["grade"] = _manual_grade(mock)
+    mock["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _manual_mock_save(mock)
+
+    return jsonify(ok=True, mock=mock)
+
+@app.get("/mock-draft/review/<mock_id>")
+def manual_mock_review(mock_id):
+    mock = _manual_mock_get(mock_id)
+    if not mock:
+        return page("error.html", code=404, message="Mock draft not found."), 404
+
+    return page(
+        "mock_draft_review.html",
+        mock=mock,
+        roster=_manual_user_roster(mock),
+        grade=mock.get("grade") or _manual_grade(mock),
+    )
 
 
 @app.post("/api/mock-draft/run")
