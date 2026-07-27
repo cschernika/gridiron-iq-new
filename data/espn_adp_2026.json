@@ -1,0 +1,52 @@
+{
+  "season": 2026,
+  "platform": "ESPN",
+  "scoring": "PPR",
+  "source": "Local ESPN 2026 PPR ADP dataset",
+  "source_note": "Seeded with currently verified ESPN values. Replace this JSON file to update/expand ADP without changing app.py.",
+  "updated_at": "2026-07-27",
+  "players": {
+    "jahmyrgibbs": {
+      "name": "Jahmyr Gibbs",
+      "adp": 1.0,
+      "position": "RB",
+      "source": "ESPN"
+    },
+    "bijanrobinson": {
+      "name": "Bijan Robinson",
+      "adp": 2.0,
+      "position": "RB",
+      "source": "ESPN"
+    },
+    "pukanacua": {
+      "name": "Puka Nacua",
+      "adp": 3.0,
+      "position": "WR",
+      "source": "ESPN"
+    },
+    "jamarrchase": {
+      "name": "Ja'Marr Chase",
+      "adp": 4.0,
+      "position": "WR",
+      "source": "ESPN"
+    },
+    "jaxonsmithnjigba": {
+      "name": "Jaxon Smith-Njigba",
+      "adp": 6.0,
+      "position": "WR",
+      "source": "ESPN"
+    },
+    "georgekittle": {
+      "name": "George Kittle",
+      "adp": 70.0,
+      "position": "TE",
+      "source": "ESPN"
+    },
+    "tonypollard": {
+      "name": "Tony Pollard",
+      "adp": 76.0,
+      "position": "RB",
+      "source": "ESPN"
+    }
+  }
+}

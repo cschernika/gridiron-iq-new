@@ -1,0 +1,40 @@
+{
+  "season": 2026,
+  "platform": "YAHOO",
+  "scoring": "Half PPR",
+  "source": "Local Yahoo 2026 Half-PPR ADP dataset",
+  "source_note": "Seeded with currently verified Yahoo values. Replace this JSON file to update/expand ADP without changing app.py.",
+  "updated_at": "2026-07-27",
+  "players": {
+    "bijanrobinson": {
+      "name": "Bijan Robinson",
+      "adp": 1.0,
+      "position": "RB",
+      "source": "Yahoo"
+    },
+    "jahmyrgibbs": {
+      "name": "Jahmyr Gibbs",
+      "adp": 2.0,
+      "position": "RB",
+      "source": "Yahoo"
+    },
+    "jamarrchase": {
+      "name": "Ja'Marr Chase",
+      "adp": 3.0,
+      "position": "WR",
+      "source": "Yahoo"
+    },
+    "pukanacua": {
+      "name": "Puka Nacua",
+      "adp": 4.0,
+      "position": "WR",
+      "source": "Yahoo"
+    },
+    "christianmccaffrey": {
+      "name": "Christian McCaffrey",
+      "adp": 5.0,
+      "position": "RB",
+      "source": "Yahoo"
+    }
+  }
+}
