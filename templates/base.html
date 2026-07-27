@@ -8,26 +8,18 @@
 <body>
 <div class="shell">
 <aside class="sidebar">
-  <a class="brand" href="/app"><div class="shield">GI</div><div><b>GRIDIRON IQ</b><small>FANTASY INTELLIGENCE</small></div></a>
-  <div class="nav-label">OVERVIEW</div>
-  <a class="nav active" href="/app">⌂ Dashboard Home</a>
-  <a class="nav" href="/reports">✣ Daily AI Coach</a>
-  <div class="nav-label">LEAGUE TOOLS</div>
-  <a class="nav" href="/league-intelligence">◫ League Analyzer</a>
-  <a class="nav" href="/trade-analyzer">⇄ Trade Analyzer</a>
-  <a class="nav" href="/waiver-assistant">♙ Waiver Wire</a>
-  <a class="nav" href="/lineup-optimizer">⚙ Start / Sit Optimizer</a>
-  <a class="nav" href="/matchup-analyzer">▣ Matchup Analyzer</a>
-  <div class="nav-label">DRAFT</div>
-  <a class="nav" href="/draft-center">♙ Draft Center</a>
-  <a class="nav" href="/draft-center">◧ Player Research</a>
-  <div class="nav-label">CONNECTIONS</div>
-  <a class="nav" href="/league-sync">⊕ Connect League</a>
-  <a class="nav" href="/league-sync">⇄ League Sync</a>
-  <div class="nav-label">SETTINGS</div>
-  <a class="nav" href="/settings">⚙ Settings</a>
-  <a class="nav" href="/help">? Help & Support</a>
-  <div class="user"><div class="avatar">{{ user.name[0] if user else "C" }}</div><div><b>{{ user.name if user else "Chad" }}</b><small>Single-user mode</small></div></div>
+<a class="brand" href="/app"><div class="shield">GI</div><div><b>GRIDIRON IQ</b><small>FANTASY INTELLIGENCE</small></div></a>
+<div class="nav-label">OVERVIEW</div>
+<a class="nav" href="/app">⌂ Dashboard Home</a><a class="nav" href="/reports">✣ Daily AI Coach</a>
+<div class="nav-label">LEAGUE TOOLS</div>
+<a class="nav" href="/league-intelligence">◫ League Analyzer</a><a class="nav" href="/trade-analyzer">⇄ Trade Analyzer</a><a class="nav" href="/waiver-assistant">♙ Waiver Wire</a><a class="nav" href="/lineup-optimizer">⚙ Start / Sit Optimizer</a><a class="nav" href="/matchup-analyzer">▣ Matchup Analyzer</a>
+<div class="nav-label">DRAFT</div>
+<a class="nav" href="/draft-center">♙ Draft Center</a><a class="nav" href="/mock-draft">◫ Mock Draft Lab</a><a class="nav" href="/player-research">▣ Player Research</a>
+<div class="nav-label">CONNECTIONS</div>
+<a class="nav" href="/league-sync">⊕ Connect League</a><a class="nav" href="/league-sync">⇄ League Sync</a>
+<div class="nav-label">SETTINGS</div>
+<a class="nav" href="/settings">⚙ Settings</a><a class="nav" href="/help">? Help & Support</a>
+<div class="user"><div class="avatar">{{ user.name[0] if user else "C" }}</div><div><b>{{ user.name if user else "Chad" }}</b><small>Single-user mode</small></div></div>
 </aside>
 <main class="main">{% block body %}{% endblock %}</main>
 </div>
