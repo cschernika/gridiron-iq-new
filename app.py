@@ -1383,95 +1383,128 @@ def _load_espn_native_adp():
         pass
     return None
 
-def _fetch_espn_native_adp(league_id, season, swid, espn_s2):
+def _fetch_espn_native_adp(league_id=None, season=2026, swid=None, espn_s2=None):
     """
-    Pull ESPN's own Average Draft Position from the ESPN Fantasy player feed.
+    Pull ESPN's own PPR Average Draft Position from ESPN Fantasy's
+    default PPR player pool (leaguedefaults/3).
 
-    This uses the same private-league credentials supplied during ESPN sync,
-    but saves only the safe player ADP snapshot — never the SWID/espn_s2 values.
+    This endpoint is better for market ADP than the private-league endpoint.
+    Cookies are optional; they are used only as a fallback if ESPN requires them.
     """
-    url = (
-        f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{int(season)}"
-        f"/segments/0/leagues/{int(league_id)}?view=kona_player_info"
-    )
+    season = int(season or 2026)
+
+    urls = [
+        # ESPN default PPR player pool.
+        f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3?view=kona_player_info",
+    ]
+    if league_id:
+        urls.append(
+            f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leagues/{int(league_id)}?view=kona_player_info"
+        )
 
     fantasy_filter = {
         "players": {
             "limit": 2000,
+            "filterActive": {"value": True},
+            "sortPercOwned": {
+                "sortPriority": 4,
+                "sortAsc": False
+            },
             "sortDraftRanks": {
                 "sortPriority": 100,
                 "sortAsc": True,
-                "value": "PPR",
-            },
+                "value": "PPR"
+            }
         }
     }
 
     headers = {
         "Accept": "application/json",
         "X-Fantasy-Filter": json.dumps(fantasy_filter),
-        "User-Agent": "Mozilla/5.0 (compatible; GridironIQ/1.0)",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
     }
 
-    cookies = {
-        "SWID": str(swid).strip(),
-        "espn_s2": str(espn_s2).strip(),
-    }
+    cookies = {}
+    if swid:
+        cookies["SWID"] = str(swid).strip()
+    if espn_s2:
+        cookies["espn_s2"] = str(espn_s2).strip()
 
-    response = requests.get(url, headers=headers, cookies=cookies, timeout=35)
-    response.raise_for_status()
-    payload = response.json()
+    errors = []
 
-    players = {}
-    for wrapper in payload.get("players", []):
-        p = wrapper.get("player") or {}
-        name = str(p.get("fullName") or "").strip()
-        if not name:
-            continue
-
-        ownership = p.get("ownership") or {}
-        adp = ownership.get("averageDraftPosition")
-        if adp in (None, ""):
-            continue
-
+    for url in urls:
         try:
-            adp = round(float(adp), 2)
-        except Exception:
-            continue
+            response = requests.get(
+                url,
+                headers=headers,
+                cookies=cookies or None,
+                timeout=35
+            )
+            response.raise_for_status()
+            payload = response.json()
 
-        rank_type = p.get("draftRanksByRankType") or {}
-        ppr_rank = None
-        for key in ("PPR", "STANDARD"):
-            info = rank_type.get(key) or {}
-            if info.get("rank") is not None:
+            wrappers = payload.get("players") or []
+            players = {}
+
+            for wrapper in wrappers:
+                p = wrapper.get("player") or wrapper
+                name = str(p.get("fullName") or "").strip()
+                if not name:
+                    continue
+
+                ownership = p.get("ownership") or {}
+                adp = ownership.get("averageDraftPosition")
+
+                # Some ESPN payloads expose ADP on the wrapper.
+                if adp in (None, ""):
+                    adp = (wrapper.get("ownership") or {}).get("averageDraftPosition")
+
+                if adp in (None, ""):
+                    continue
+
                 try:
-                    ppr_rank = int(info.get("rank"))
+                    adp = round(float(adp), 2)
                 except Exception:
-                    pass
-                break
+                    continue
 
-        players[_pr_norm(name)] = {
-            "name": name,
-            "adp": adp,
-            "rank": ppr_rank,
-            "position_adp": "",
-            "source": "ESPN",
-        }
+                rank = None
+                rank_sets = p.get("draftRanksByRankType") or {}
+                for rank_key in ("PPR", "STANDARD"):
+                    rank_info = rank_sets.get(rank_key) or {}
+                    if rank_info.get("rank") is not None:
+                        try:
+                            rank = int(rank_info["rank"])
+                        except Exception:
+                            pass
+                        break
 
-    result = {
-        "season": int(season),
-        "platform": "ESPN",
-        "scoring": "PPR",
-        "source": "ESPN native fantasy ADP",
-        "source_url": url,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "status": "live",
-        "players": players,
-    }
+                players[_pr_norm(name)] = {
+                    "name": name,
+                    "adp": adp,
+                    "rank": rank,
+                    "position_adp": "",
+                    "source": "ESPN",
+                }
 
-    if players:
-        _save_espn_native_adp(result)
+            if players:
+                result = {
+                    "season": season,
+                    "platform": "ESPN",
+                    "scoring": "PPR",
+                    "source": "ESPN native PPR fantasy ADP",
+                    "source_url": url,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "live",
+                    "players": players,
+                }
+                _save_espn_native_adp(result)
+                return result
 
-    return result
+            errors.append(f"{url}: ESPN returned {len(wrappers)} players but none had averageDraftPosition.")
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+
+    raise RuntimeError(" | ".join(errors) or "ESPN ADP request returned no usable players.")
 
 ADP_2026_CACHE_TTL = 6 * 60 * 60
 ADP_2026_SOURCES = {
@@ -1583,16 +1616,38 @@ def _adp_cache_file(platform):
     return DATA_DIR / f"adp_2026_{str(platform).lower()}_cache.json"
 
 def _platform_2026_adp_data(platform="ESPN", force=False):
-    # ESPN leagues use ESPN's own fantasy API snapshot captured during league sync.
-    if str(platform or "").upper() == "ESPN":
-        native = _load_espn_native_adp()
-        if native and native.get("players"):
-            return native
-
     platform = str(platform or "ESPN").upper()
-    if platform not in ADP_2026_SOURCES:
-        platform = "ESPN"
 
+    # ESPN must come from ESPN itself, not a scraped third-party table.
+    if platform == "ESPN":
+        if not force:
+            native = _load_espn_native_adp()
+            if native and native.get("players"):
+                return native
+
+        try:
+            return _fetch_espn_native_adp(season=2026)
+        except Exception as exc:
+            native = _load_espn_native_adp()
+            if native and native.get("players"):
+                native["status"] = "cached"
+                native["warning"] = str(exc)
+                return native
+
+            return {
+                "season": 2026,
+                "platform": "ESPN",
+                "scoring": "PPR",
+                "source": "ESPN native PPR fantasy ADP",
+                "source_url": "",
+                "updated_at": "",
+                "players": {},
+                "status": "unavailable",
+                "warning": str(exc),
+            }
+
+    # Yahoo continues to use the Yahoo-specific source/parser.
+    platform = "YAHOO"
     spec = ADP_2026_SOURCES[platform]
     cache_file = _adp_cache_file(platform)
 
@@ -1625,7 +1680,7 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
                 "season": 2026,
                 "platform": platform,
                 "scoring": spec["scoring"],
-                "source": f"{platform} 2026 {spec['scoring']} ADP",
+                "source": "Yahoo 2026 Half-PPR ADP",
                 "source_url": spec["url"],
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "players": players,
@@ -1634,7 +1689,7 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
             cache_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             return payload
 
-        errors.append("The platform ADP column could not be parsed from the source page.")
+        errors.append("Yahoo ADP column could not be parsed.")
     except Exception as exc:
         errors.append(str(exc))
 
@@ -1650,9 +1705,9 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
 
     return {
         "season": 2026,
-        "platform": platform,
-        "scoring": spec["scoring"],
-        "source": f"{platform} 2026 ADP unavailable",
+        "platform": "YAHOO",
+        "scoring": "Half PPR",
+        "source": "Yahoo 2026 ADP unavailable",
         "source_url": spec["url"],
         "updated_at": "",
         "players": {},
@@ -1774,15 +1829,18 @@ def player_research_adp_refresh():
     platform = str(body.get("platform") or _league_platform()).upper()
     if platform not in {"ESPN", "YAHOO"}:
         platform = "ESPN"
+
     data = _platform_2026_adp_data(platform, force=True)
+
     return jsonify(
-        ok=True,
+        ok=bool(data.get("players")),
         season=2026,
         platform=platform,
         scoring=data.get("scoring"),
         source=data.get("source"),
         updated_at=data.get("updated_at"),
         player_count=len(data.get("players", {})),
+        warning=data.get("warning", ""),
     )
 
 @app.get("/api/player-research/position")
