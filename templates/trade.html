@@ -1,1 +1,19 @@
-{% extends "base.html" %}{% block title %}Trade Analyzer | Gridiron IQ{% endblock %}{% block heading %}Trade Analyzer{% endblock %}{% block body %}<section class="page-intro"><span class="pill">Trade Lab</span><h2>Compare trade value and team fit</h2><p>The next upgrade will compare your roster against the other 11 teams.</p></section><section class="panel"><p>{{ "ESPN connected: " + league.league_name if connected else "Connect ESPN to activate league-specific analysis." }}</p></section>{% endblock %}
+{% extends "base.html" %}
+{% block title %}Trade Analyzer | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+.ta{--p:#5d3df5;--t:#132033;--m:#68778e;--l:#dfe5ef;color:var(--t)}.ta h1{font-size:34px;margin:5px 0}.ta-k{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}.ta-sub{color:var(--m)}.ta-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.ta-card{background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px}.ta-select{width:100%;border:1px solid var(--l);border-radius:10px;padding:11px;background:#fff}.ta-roster{margin-top:12px}.ta-player{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e8ebf1;font-size:11px}.ta-note{background:#fff7e6;color:#855a00;padding:12px;border-radius:10px;margin-top:14px;font-size:11px}@media(max-width:800px){.ta-grid{grid-template-columns:1fr}}
+</style>
+<div class="ta"><div class="ta-k">TRADE INTELLIGENCE</div><h1>Trade Analyzer</h1><p class="ta-sub">Compare teams and rosters from your connected ESPN league.</p>
+{% if league_data.pre_draft %}<div class="ta-note">Your ESPN teams are synced, but the league has not drafted yet. Trade Analyzer will become fully active after the draft when player rosters exist. Run ESPN Sync again after your draft.</div>{% endif %}
+<div class="ta-grid">
+<div class="ta-card"><h2>Your Team</h2><select id="team-a" class="ta-select">{% for t in league_data.teams %}<option value="{{ loop.index0 }}" {% if league_data.user_team and t.team_name == league_data.user_team.team_name %}selected{% endif %}>{{ t.team_name }}</option>{% endfor %}</select><div id="roster-a" class="ta-roster"></div></div>
+<div class="ta-card"><h2>Trade Partner</h2><select id="team-b" class="ta-select">{% for t in league_data.teams %}<option value="{{ loop.index0 }}">{{ t.team_name }}</option>{% endfor %}</select><div id="roster-b" class="ta-roster"></div></div>
+</div></div>
+<script>
+const teams={{ league_data.teams|tojson }};
+function roster(id,box){const t=teams[+document.getElementById(id).value];document.getElementById(box).innerHTML=(t.roster||[]).map(p=>`<div class="ta-player"><b>${p.name}</b><span>${p.position} · ${p.pro_team}</span></div>`).join("")||'<div class="ta-note">No roster players synced yet.</div>';}
+["team-a","team-b"].forEach((id,i)=>document.getElementById(id).addEventListener("change",()=>roster(id,i?"roster-b":"roster-a")));
+roster("team-a","roster-a");roster("team-b","roster-b");
+</script>
+{% endblock %}

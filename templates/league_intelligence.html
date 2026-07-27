@@ -1,1 +1,30 @@
-{% extends "base.html" %}{% block title %}League Intelligence | Gridiron IQ{% endblock %}{% block heading %}League Intelligence{% endblock %}{% block body %}<section class="page-intro"><span class="pill">League Analyzer</span><h2>Power rankings and playoff outlook</h2><p>The Command Center now uses real ESPN teams and records when available.</p></section><section class="panel"><p>{{ "ESPN connected: " + league.league_name if connected else "Connect ESPN to activate league-specific analysis." }}</p></section>{% endblock %}
+{% extends "base.html" %}
+{% block title %}League Analyzer | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+.li{--p:#5d3df5;--t:#132033;--m:#68778e;--l:#dfe5ef;color:var(--t)}
+.li h1{font-size:34px;margin:5px 0}.li-k{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}.li-sub{color:var(--m);margin:0 0 18px}
+.li-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}.li-card{background:#fff;border:1px solid var(--l);border-radius:15px;padding:16px}.li-card span,.li-card strong{display:block}.li-card span{font-size:9px;color:var(--m);text-transform:uppercase}.li-card strong{font-size:23px;margin-top:4px}
+.li-table{width:100%;border-collapse:collapse}.li-table th,.li-table td{padding:10px 8px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:11px}.li-table th{font-size:9px;color:var(--m)}
+.li-team{font-weight:900}.li-note{margin-top:14px;background:#f7f8fc;border-radius:11px;padding:12px;color:var(--m);font-size:11px}
+@media(max-width:800px){.li-stats{grid-template-columns:1fr 1fr}}
+</style>
+<div class="li">
+<div class="li-k">LEAGUE INTELLIGENCE</div><h1>{{ league_data.league.league_name or "League Analyzer" }}</h1>
+<p class="li-sub">Live league teams and standings from the most recent ESPN sync.</p>
+<div class="li-stats">
+<div class="li-card"><span>Platform</span><strong>{{ league_data.league.platform or "—" }}</strong></div>
+<div class="li-card"><span>Teams Loaded</span><strong>{{ league_data.team_count }}</strong></div>
+<div class="li-card"><span>Rostered Players</span><strong>{{ league_data.rostered_players }}</strong></div>
+<div class="li-card"><span>Season</span><strong>{{ league_data.league.season or "2026" }}</strong></div>
+</div>
+<div class="li-card">
+<table class="li-table"><thead><tr><th>RANK</th><th>TEAM</th><th>OWNER</th><th>RECORD</th><th>POINTS</th><th>ROSTER</th></tr></thead><tbody>
+{% for t in league_data.standings %}
+<tr><td>{{ loop.index }}</td><td class="li-team">{{ t.team_name }}</td><td>{{ t.owner or "—" }}</td><td>{{ t.wins }}-{{ t.losses }}{% if t.ties %}-{{ t.ties }}{% endif %}</td><td>{{ t.points_for }}</td><td>{{ t.roster_size }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% if league_data.pre_draft %}<div class="li-note"><b>Your teams are loaded correctly.</b> All roster sizes are 0 because the ESPN league has not drafted yet. Once the draft occurs, run ESPN sync again and player rosters will populate.</div>{% endif %}
+</div>
+</div>
+{% endblock %}

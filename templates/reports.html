@@ -1,1 +1,11 @@
-{% extends "base.html" %}{% block title %}Reports | Gridiron IQ{% endblock %}{% block heading %}Reports{% endblock %}{% block body %}<section class="page-intro"><span class="pill">Weekly Reports</span><h2>Your fantasy decision report</h2><p>Weekly reports will be generated from the synced league snapshot.</p></section><section class="panel"><p>{{ "ESPN connected: " + league.league_name if connected else "Connect ESPN to activate league-specific analysis." }}</p></section>{% endblock %}
+{% extends "base.html" %}
+{% block title %}Daily AI Coach | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+.dc{--p:#5d3df5;--t:#132033;--m:#68778e;--l:#dfe5ef;color:var(--t)}.dc h1{font-size:34px;margin:5px 0}.dc-k{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}.dc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin:16px 0}.dc-card{background:#fff;border:1px solid var(--l);border-radius:15px;padding:16px}.dc-card span,.dc-card strong{display:block}.dc-card span{font-size:9px;color:var(--m)}.dc-card strong{font-size:22px;margin-top:4px}.dc-priority{display:grid;grid-template-columns:80px 1fr auto;gap:12px;align-items:center;padding:12px;border-bottom:1px solid #e7eaf1}.dc-priority p{font-size:11px;color:var(--m);margin:3px 0}.dc-go{color:#4938e7;font-weight:900;text-decoration:none;font-size:11px}.dc-badge{font-size:9px;font-weight:900;border-radius:999px;padding:6px 8px;background:#fff1d8;color:#956100}.dc-badge.high{background:#fdecec;color:#b42f2f}@media(max-width:850px){.dc-grid{grid-template-columns:1fr}}
+</style>
+<div class="dc"><div class="dc-k">DAILY FANTASY INTELLIGENCE</div><h1>Daily AI Coach</h1>
+<div class="dc-grid"><div class="dc-card"><span>CONNECTED LEAGUE</span><strong>{{ coach.league.league_name or "None" }}</strong></div><div class="dc-card"><span>TEAMS LOADED</span><strong>{{ coach.team_count }}</strong></div><div class="dc-card"><span>ROSTERED PLAYERS</span><strong>{{ coach.rostered_players }}</strong></div></div>
+<div class="dc-card"><h2>Today's Priorities</h2>{% for item in coach.priorities %}<div class="dc-priority"><span class="dc-badge {% if item.priority == 'High' %}high{% endif %}">{{ item.priority }}</span><div><b>{{ item.title }}</b><p>{{ item.detail }}</p></div><a class="dc-go" href="{{ item.action }}">Open →</a></div>{% endfor %}</div>
+</div>
+{% endblock %}
