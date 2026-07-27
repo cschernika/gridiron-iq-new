@@ -1,329 +1,204 @@
 {% extends "base.html" %}
 {% block title %}Draft Center | Gridiron IQ{% endblock %}
-
 {% block body %}
-<section class="dc-topbar">
-  <div>
-    <div class="dc-kicker">LIVE DRAFT WAR ROOM</div>
-    <h1>Draft Center</h1>
-    <p>League-aware rankings, roster construction, pick strategy, and live recommendations.</p>
-  </div>
-  <div class="dc-top-actions">
-    <select id="dc-league-select" class="dc-select">
-      {% if draft_leagues %}
-        {% for item in draft_leagues %}
-          <option
-            value="{{ item.key }}"
-            data-platform="{{ item.platform }}"
-            {% if item.key == active_league_key %}selected{% endif %}
-          >
-            {{ item.name }} — {{ item.platform }}
-          </option>
-        {% endfor %}
-      {% else %}
-        <option value="espn-demo">Gramp's Gridiron — ESPN</option>
-        <option value="yahoo-demo">WestRockers — Yahoo</option>
-      {% endif %}
-    </select>
-    <a class="dc-btn secondary" href="/league-sync">Sync League</a>
-  </div>
-</section>
+<style>
+  :root{
+    --dcx-bg:#f5f7fb;
+    --dcx-card:#fff;
+    --dcx-text:#122033;
+    --dcx-muted:#68788f;
+    --dcx-line:#dde4ee;
+    --dcx-nav:#0d2032;
+    --dcx-blue:#2477f3;
+    --dcx-purple:#5c3df4;
+    --dcx-green:#16a64b;
+    --dcx-orange:#f39a00;
+  }
+  .dcx-shell{min-height:100vh;display:grid;grid-template-columns:272px minmax(0,1fr);background:var(--dcx-bg);color:var(--dcx-text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+  .dcx-sidebar{background:linear-gradient(180deg,#0d2032,#0a1b2b);color:white;padding:20px 12px;min-height:100vh;position:sticky;top:0;height:100vh;overflow-y:auto}
+  .dcx-brand{display:flex;align-items:center;gap:12px;padding:0 12px 26px;color:white;text-decoration:none}
+  .dcx-shield{width:42px;height:48px;border:2px solid #fff;border-radius:10px 10px 16px 16px;display:grid;place-items:center;font-weight:900}
+  .dcx-brand b,.dcx-brand small{display:block}.dcx-brand b{font-size:18px}.dcx-brand small{font-size:11px;color:#bcc9d8}
+  .dcx-nav-label{padding:15px 12px 8px;color:#8095aa;font-size:11px;letter-spacing:.11em;font-weight:800}
+  .dcx-nav{display:block;padding:11px 13px;margin:3px 0;color:#f5f7fb;border-radius:10px;text-decoration:none;font-size:14px}
+  .dcx-nav:hover,.dcx-nav.active{background:linear-gradient(90deg,#174d96,#303080)}
+  .dcx-user{margin-top:30px;padding:18px 12px;border-top:1px solid rgba(255,255,255,.12);display:flex;gap:10px;align-items:center}
+  .dcx-avatar{width:40px;height:40px;border-radius:50%;background:#6240f6;display:grid;place-items:center;font-weight:900}
+  .dcx-user b,.dcx-user small{display:block}.dcx-user small{color:#bdc9d7;font-size:11px}
+  .dcx-main{padding:24px 28px 42px;min-width:0}
+  .dcx-topbar{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:18px}
+  .dcx-kicker{color:var(--dcx-purple);font-size:11px;font-weight:900;letter-spacing:.09em}
+  .dcx-topbar h1{font-size:35px;margin:4px 0}.dcx-topbar p{margin:0;color:var(--dcx-muted)}
+  .dcx-actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+  .dcx-select,.dcx-input{border:1px solid var(--dcx-line);background:white;color:var(--dcx-text);border-radius:10px;padding:10px 11px;font:inherit}
+  .dcx-btn{border:1px solid var(--dcx-line);background:white;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;text-decoration:none;color:var(--dcx-text)}
+  .dcx-btn.primary{background:linear-gradient(90deg,#2c70f3,#6137f2);border:0;color:white}
+  .dcx-btn.secondary{color:#4b39e7}
+  .dcx-context{display:grid;grid-template-columns:2fr repeat(4,1fr);gap:1px;background:var(--dcx-line);border:1px solid var(--dcx-line);border-radius:14px;overflow:hidden;margin-bottom:18px}
+  .dcx-context>div{background:white;padding:14px}.dcx-context span,.dcx-context strong{display:block}.dcx-context span{font-size:10px;color:var(--dcx-muted);font-weight:800;text-transform:uppercase}.dcx-context strong{font-size:14px;margin-top:3px}
+  .dcx-grid-top,.dcx-grid-mid,.dcx-grid-bottom{display:grid;grid-template-columns:1.25fr .75fr;gap:17px;margin-bottom:17px}
+  .dcx-grid-mid,.dcx-grid-bottom{grid-template-columns:1fr 1fr}
+  .dcx-card{background:white;border:1px solid var(--dcx-line);border-radius:16px;padding:20px;box-shadow:0 7px 22px rgba(29,48,78,.04)}
+  .dcx-card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.dcx-card-head h2{font-size:22px;margin:4px 0 0}
+  .dcx-confidence{background:#e7f8ec;color:#138c39;padding:7px 10px;border-radius:999px;font-size:11px;font-weight:900}
+  .dcx-best{display:grid;grid-template-columns:58px 1fr auto;gap:14px;align-items:center;margin-top:15px;padding:15px;border:1px solid #e4e9f1;background:#f8f9fd;border-radius:13px}
+  .dcx-pos{width:54px;height:54px;border-radius:13px;background:#ebe7ff;color:#5d3bf0;display:grid;place-items:center;font-weight:900}
+  .dcx-best h3{margin:0;font-size:23px}.dcx-best p{margin:3px 0 0;color:var(--dcx-muted)}
+  .dcx-score{text-align:right}.dcx-score span,.dcx-score strong{display:block}.dcx-score span{font-size:10px;color:var(--dcx-muted)}.dcx-score strong{font-size:31px;color:var(--dcx-purple)}
+  .dcx-factors{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.dcx-factors div{border:1px solid #e4e9f1;border-radius:10px;padding:10px}.dcx-factors span,.dcx-factors strong{display:block}.dcx-factors span{font-size:9px;color:var(--dcx-muted);text-transform:uppercase}.dcx-factors strong{font-size:13px;margin-top:3px}
+  .dcx-rationale{color:#5f6e83;line-height:1.5;font-size:14px}.dcx-next{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.dcx-next>span{font-size:11px;color:var(--dcx-muted);font-weight:800}.dcx-chip{background:#efecff;color:#5a3bec;border:0;border-radius:999px;padding:7px 9px;font-weight:700}
+  .dcx-form{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}.dcx-form label{font-size:11px;color:#61718a;font-weight:800}.dcx-form input,.dcx-form select{width:100%;margin-top:5px;border:1px solid var(--dcx-line);border-radius:9px;padding:10px;background:white;color:var(--dcx-text)}
+  .dcx-upcoming{margin-top:14px}.dcx-upcoming>span{font-size:11px;color:var(--dcx-muted)}.dcx-picks{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}.dcx-picks b{background:#edf3ff;color:#2c64d9;padding:6px 9px;border-radius:8px;font-size:11px}
+  .dcx-full{width:100%;margin-top:14px}
+  .dcx-slots{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:13px}.dcx-slot{border:1px solid #e3e8f0;border-radius:10px;padding:9px;min-height:74px}.dcx-slot span,.dcx-slot strong,.dcx-slot small{display:block}.dcx-slot span{font-size:9px;color:var(--dcx-muted);font-weight:900}.dcx-slot strong{font-size:12px;margin-top:4px}.dcx-slot small{font-size:10px;color:#8592a3;margin-top:4px}
+  .dcx-needs{margin-top:15px}.dcx-need{display:grid;grid-template-columns:32px 1fr 55px;gap:8px;align-items:center;margin-top:8px}.dcx-need b,.dcx-need strong{font-size:11px}.dcx-meter{height:7px;background:#edf0f5;border-radius:99px;overflow:hidden}.dcx-meter i{display:block;height:100%;background:linear-gradient(90deg,#5c3cf0,#2878f3)}
+  .dcx-alerts{display:grid;gap:8px;margin-top:13px}.dcx-alert{display:flex;justify-content:space-between;gap:12px;border:1px solid #e3e8f0;border-left:4px solid #35ad66;border-radius:10px;padding:10px}.dcx-alert.high{border-left-color:#ef625f}.dcx-alert.medium{border-left-color:#f0a421}.dcx-alert b,.dcx-alert span{display:block}.dcx-alert span{font-size:11px;color:var(--dcx-muted);margin-top:2px}.dcx-alert>strong{font-size:11px;white-space:nowrap}
+  .dcx-prob{margin-top:12px;background:#f7f8fc;border-radius:11px;padding:13px;display:flex;justify-content:space-between;align-items:center;gap:10px}.dcx-prob span{font-size:11px;color:var(--dcx-muted)}.dcx-prob strong{font-size:24px;color:var(--dcx-purple)}
+  .dcx-board-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px}.dcx-tools{display:flex;gap:7px;flex-wrap:wrap}.dcx-tools input,.dcx-tools select{border:1px solid var(--dcx-line);border-radius:9px;padding:9px;background:white}
+  .dcx-table-wrap{overflow:auto;margin-top:14px}.dcx-table{width:100%;border-collapse:collapse;min-width:1020px}.dcx-table th,.dcx-table td{padding:10px 7px;border-bottom:1px solid #e5eaf1;text-align:left;font-size:11px}.dcx-table th{font-size:9px;color:#718096;text-transform:uppercase}.dcx-iq{display:inline-grid;place-items:center;min-width:32px;height:26px;border-radius:7px;background:#eeeaff;color:#5d3cf2;font-weight:900}
+  .dcx-toggle{border:0;border-radius:999px;padding:6px 9px;background:#e8f8ee;color:#148439;font-size:10px;font-weight:900;cursor:pointer}.dcx-toggle.is-drafted{background:#eef0f4;color:#8893a2}.dcx-table tr.is-drafted{opacity:.4;text-decoration:line-through}
+  .dcx-sim-row{display:flex;gap:8px;margin-top:12px}.dcx-result{margin-top:12px;background:#f7f8fc;border-radius:11px;padding:13px}.dcx-result b,.dcx-result span{display:block}.dcx-result span{font-size:11px;color:var(--dcx-muted);margin-top:3px}
+  .dcx-log{display:grid;gap:7px;margin-top:12px}.dcx-log>div{display:grid;grid-template-columns:45px 1fr auto;gap:8px;padding:7px 0;border-bottom:1px solid #e6eaf0}.dcx-log span,.dcx-log small{font-size:11px}.dcx-log small{color:var(--dcx-muted)}
+  .dcx-reset{border:0;background:none;color:#3a6fe5;font-weight:800;cursor:pointer}
+  @media(max-width:1100px){.dcx-context{grid-template-columns:repeat(3,1fr)}.dcx-grid-top,.dcx-grid-mid,.dcx-grid-bottom{grid-template-columns:1fr}}
+  @media(max-width:900px){.dcx-shell{grid-template-columns:1fr}.dcx-sidebar{position:relative;height:auto;min-height:auto}.dcx-main{padding:20px}}
+  @media(max-width:650px){.dcx-topbar{align-items:flex-start;flex-direction:column}.dcx-context{grid-template-columns:1fr 1fr}.dcx-factors,.dcx-slots{grid-template-columns:1fr 1fr}.dcx-form{grid-template-columns:1fr}}
+</style>
 
-<section class="dc-settings-strip">
-  <div>
-    <span>League</span>
-    <strong id="dc-league-name">{{ draft_context.league_name }}</strong>
-  </div>
-  <div>
-    <span>Platform</span>
-    <strong id="dc-platform">{{ draft_context.platform }}</strong>
-  </div>
-  <div>
-    <span>Scoring</span>
-    <strong id="dc-scoring">{{ draft_context.scoring }}</strong>
-  </div>
-  <div>
-    <span>Teams</span>
-    <strong id="dc-teams">{{ draft_context.teams }}</strong>
-  </div>
-  <div>
-    <span>Draft</span>
-    <strong id="dc-draft-type">{{ draft_context.draft_type }}</strong>
-  </div>
-</section>
+<div class="dcx-shell">
+  <aside class="dcx-sidebar">
+    <a class="dcx-brand" href="/app"><div class="dcx-shield">GI</div><div><b>GRIDIRON IQ</b><small>FANTASY INTELLIGENCE</small></div></a>
+    <div class="dcx-nav-label">OVERVIEW</div>
+    <a class="dcx-nav" href="/app">⌂ Dashboard Home</a>
+    <a class="dcx-nav" href="/reports">✣ Daily AI Coach</a>
+    <div class="dcx-nav-label">LEAGUE TOOLS</div>
+    <a class="dcx-nav" href="/league-intelligence">◫ League Analyzer</a>
+    <a class="dcx-nav" href="/trade-analyzer">⇄ Trade Analyzer</a>
+    <a class="dcx-nav" href="/waiver-assistant">♙ Waiver Wire</a>
+    <a class="dcx-nav" href="/lineup-optimizer">⚙ Start / Sit Optimizer</a>
+    <a class="dcx-nav" href="/matchup-analyzer">▣ Matchup Analyzer</a>
+    <div class="dcx-nav-label">DRAFT</div>
+    <a class="dcx-nav active" href="/draft-center">♙ Draft Center</a>
+    <a class="dcx-nav" href="/draft-center">◧ Player Research</a>
+    <div class="dcx-nav-label">CONNECTIONS</div>
+    <a class="dcx-nav" href="/league-sync">⊕ Connect League</a>
+    <a class="dcx-nav" href="/league-sync">⇄ League Sync</a>
+    <div class="dcx-nav-label">SETTINGS</div>
+    <a class="dcx-nav" href="/settings">⚙ Settings</a>
+    <a class="dcx-nav" href="/help">? Help & Support</a>
+    <div class="dcx-user"><div class="dcx-avatar">{{ user.name[0] if user else "C" }}</div><div><b>{{ user.name if user else "Chad" }}</b><small>Single-user mode</small></div></div>
+  </aside>
 
-<section class="dc-grid-top">
-
-  <article class="dc-panel dc-recommendation">
-    <div class="dc-panel-head">
-      <div>
-        <div class="dc-kicker">GRIDIRON IQ RECOMMENDATION</div>
-        <h2>Best Pick Right Now</h2>
-      </div>
-      <span class="dc-confidence" id="dc-confidence">{{ recommendation.confidence }}% confidence</span>
-    </div>
-
-    <div class="dc-best-pick">
-      <div class="dc-player-badge" id="dc-best-position">{{ recommendation.player.pos }}</div>
-      <div class="dc-best-copy">
-        <h3 id="dc-best-player">{{ recommendation.player.name }}</h3>
-        <p id="dc-best-team">{{ recommendation.player.team }} · Tier {{ recommendation.player.tier }}</p>
-      </div>
-      <div class="dc-iq-score">
-        <span>IQ Score</span>
-        <strong id="dc-best-score">{{ recommendation.score }}</strong>
-      </div>
-    </div>
-
-    <div class="dc-reason-grid">
-      <div><span>Value vs ADP</span><strong id="dc-adp-value">{{ recommendation.adp_value }}</strong></div>
-      <div><span>Roster Fit</span><strong id="dc-roster-fit">{{ recommendation.roster_fit }}</strong></div>
-      <div><span>Scarcity</span><strong id="dc-scarcity">{{ recommendation.scarcity }}</strong></div>
-      <div><span>Tier Risk</span><strong id="dc-tier-risk">{{ recommendation.tier_risk }}</strong></div>
-    </div>
-
-    <p class="dc-rationale" id="dc-rationale">{{ recommendation.rationale }}</p>
-
-    <div class="dc-next-best">
-      <span>Next best:</span>
-      <div id="dc-next-best-list">
-        {% for p in recommendation.next_best %}
-          <button type="button" class="dc-chip">{{ p.name }} · {{ p.pos }}</button>
-        {% endfor %}
-      </div>
-    </div>
-  </article>
-
-  <article class="dc-panel">
-    <div class="dc-panel-head">
-      <div>
-        <div class="dc-kicker">YOUR DRAFT</div>
-        <h2>Pick Strategy</h2>
-      </div>
-    </div>
-
-    <div class="dc-form-grid">
-      <label>
-        Draft Slot
-        <input id="dc-draft-slot" type="number" min="1" max="{{ draft_context.teams }}" value="{{ draft_context.draft_slot }}">
-      </label>
-      <label>
-        Current Round
-        <input id="dc-round" type="number" min="1" max="20" value="{{ draft_context.round }}">
-      </label>
-      <label>
-        Current Pick
-        <input id="dc-pick" type="number" min="1" max="{{ draft_context.teams }}" value="{{ draft_context.pick_in_round }}">
-      </label>
-      <label>
-        Strategy
-        <select id="dc-strategy">
-          <option value="balanced" selected>Balanced</option>
-          <option value="value">Best Value</option>
-          <option value="zero-rb">Zero RB</option>
-          <option value="hero-rb">Hero RB</option>
-          <option value="robust-rb">Robust RB</option>
-          <option value="late-qb">Late QB</option>
+  <main class="dcx-main">
+    <section class="dcx-topbar">
+      <div><div class="dcx-kicker">LIVE DRAFT WAR ROOM</div><h1>Draft Center</h1><p>League-aware rankings, roster construction, pick strategy, and live recommendations.</p></div>
+      <div class="dcx-actions">
+        <select id="dcx-league" class="dcx-select">
+          {% for item in draft_leagues %}
+          <option value="{{ item.key }}" {% if item.key == active_league_key %}selected{% endif %}>{{ item.name }} — {{ item.platform }}</option>
+          {% endfor %}
         </select>
-      </label>
-    </div>
-
-    <div class="dc-next-picks">
-      <span>Your upcoming picks</span>
-      <div id="dc-next-picks-list">
-        {% for pick in draft_context.next_picks %}
-          <b>{{ pick }}</b>
-        {% endfor %}
+        <a class="dcx-btn secondary" href="/league-sync">Sync League</a>
       </div>
-    </div>
+    </section>
 
-    <button class="dc-btn primary full" id="dc-refresh-recommendation">Recalculate Recommendation</button>
-  </article>
+    <section class="dcx-context">
+      <div><span>League</span><strong id="dcx-league-name">{{ draft_context.league_name }}</strong></div>
+      <div><span>Platform</span><strong>{{ draft_context.platform }}</strong></div>
+      <div><span>Scoring</span><strong>{{ draft_context.scoring }}</strong></div>
+      <div><span>Teams</span><strong>{{ draft_context.teams }}</strong></div>
+      <div><span>Draft</span><strong>{{ draft_context.draft_type }}</strong></div>
+    </section>
 
-</section>
-
-<section class="dc-grid-mid">
-
-  <article class="dc-panel">
-    <div class="dc-panel-head">
-      <div>
-        <div class="dc-kicker">ROSTER CONSTRUCTION</div>
-        <h2>Your Drafted Roster</h2>
-      </div>
-      <span class="dc-small-muted" id="dc-roster-count">{{ roster|length }} drafted</span>
-    </div>
-
-    <div class="dc-roster-slots" id="dc-roster-slots">
-      {% for slot in roster_slots %}
-        <div class="dc-roster-slot">
-          <span>{{ slot.slot }}</span>
-          <strong>{{ slot.player or "—" }}</strong>
-          <small>{{ slot.status }}</small>
+    <section class="dcx-grid-top">
+      <article class="dcx-card">
+        <div class="dcx-card-head"><div><div class="dcx-kicker">GRIDIRON IQ RECOMMENDATION</div><h2>Best Pick Right Now</h2></div><span id="dcx-confidence" class="dcx-confidence">{{ recommendation.confidence }}% confidence</span></div>
+        <div class="dcx-best">
+          <div id="dcx-best-pos" class="dcx-pos">{{ recommendation.player.pos }}</div>
+          <div><h3 id="dcx-best-name">{{ recommendation.player.name }}</h3><p id="dcx-best-meta">{{ recommendation.player.team }} · Tier {{ recommendation.player.tier }}</p></div>
+          <div class="dcx-score"><span>IQ Score</span><strong id="dcx-best-score">{{ recommendation.score }}</strong></div>
         </div>
-      {% endfor %}
-    </div>
-
-    <div class="dc-needs">
-      <span>Roster Need</span>
-      {% for need in roster_needs %}
-        <div class="dc-need-row">
-          <b>{{ need.position }}</b>
-          <div class="dc-meter"><span style="width:{{ need.score }}%"></span></div>
-          <strong>{{ need.label }}</strong>
+        <div class="dcx-factors">
+          <div><span>Value vs ADP</span><strong id="dcx-value">{{ recommendation.adp_value }}</strong></div>
+          <div><span>Roster Fit</span><strong id="dcx-fit">{{ recommendation.roster_fit }}</strong></div>
+          <div><span>Scarcity</span><strong id="dcx-scarcity">{{ recommendation.scarcity }}</strong></div>
+          <div><span>Tier Risk</span><strong id="dcx-risk">{{ recommendation.tier_risk }}</strong></div>
         </div>
-      {% endfor %}
-    </div>
-  </article>
+        <p id="dcx-rationale" class="dcx-rationale">{{ recommendation.rationale }}</p>
+        <div class="dcx-next"><span>Next best:</span><div id="dcx-next">{% for p in recommendation.next_best %}<button class="dcx-chip">{{ p.name }} · {{ p.pos }}</button>{% endfor %}</div></div>
+      </article>
 
-  <article class="dc-panel">
-    <div class="dc-panel-head">
-      <div>
-        <div class="dc-kicker">TIER WATCH</div>
-        <h2>Positional Scarcity</h2>
-      </div>
-    </div>
-
-    <div class="dc-tier-alerts" id="dc-tier-alerts">
-      {% for alert in tier_alerts %}
-        <div class="dc-tier-alert {{ alert.level|lower }}">
-          <div>
-            <strong>{{ alert.position }} · Tier {{ alert.tier }}</strong>
-            <span>{{ alert.message }}</span>
-          </div>
-          <b>{{ alert.remaining }} left</b>
+      <article class="dcx-card">
+        <div class="dcx-card-head"><div><div class="dcx-kicker">YOUR DRAFT</div><h2>Pick Strategy</h2></div></div>
+        <div class="dcx-form">
+          <label>Draft Slot<input id="dcx-slot" type="number" min="1" max="{{ draft_context.teams }}" value="{{ draft_context.draft_slot }}"></label>
+          <label>Current Round<input id="dcx-round" type="number" min="1" max="20" value="{{ draft_context.round }}"></label>
+          <label>Current Pick<input id="dcx-pick" type="number" min="1" max="{{ draft_context.teams }}" value="{{ draft_context.pick_in_round }}"></label>
+          <label>Strategy<select id="dcx-strategy"><option value="balanced">Balanced</option><option value="zero-rb">Zero RB</option><option value="hero-rb">Hero RB</option><option value="robust-rb">Robust RB</option><option value="late-qb">Late QB</option></select></label>
         </div>
-      {% endfor %}
-    </div>
+        <div class="dcx-upcoming"><span>Your upcoming picks</span><div id="dcx-picks" class="dcx-picks">{% for pick in draft_context.next_picks %}<b>{{ pick }}</b>{% endfor %}</div></div>
+        <button id="dcx-refresh" class="dcx-btn primary dcx-full">Recalculate Recommendation</button>
+      </article>
+    </section>
 
-    <div class="dc-probability-box">
-      <span>Chance your preferred target survives to your next pick</span>
-      <strong id="dc-survival-probability">{{ recommendation.survival_probability }}%</strong>
-    </div>
-  </article>
+    <section class="dcx-grid-mid">
+      <article class="dcx-card">
+        <div class="dcx-card-head"><div><div class="dcx-kicker">ROSTER CONSTRUCTION</div><h2>Your Drafted Roster</h2></div><span>{{ roster|length }} drafted</span></div>
+        <div class="dcx-slots">{% for slot in roster_slots %}<div class="dcx-slot"><span>{{ slot.slot }}</span><strong>{{ slot.player or "—" }}</strong><small>{{ slot.status }}</small></div>{% endfor %}</div>
+        <div class="dcx-needs">{% for need in roster_needs %}<div class="dcx-need"><b>{{ need.position }}</b><div class="dcx-meter"><i style="width:{{ need.score }}%"></i></div><strong>{{ need.label }}</strong></div>{% endfor %}</div>
+      </article>
+      <article class="dcx-card">
+        <div class="dcx-card-head"><div><div class="dcx-kicker">TIER WATCH</div><h2>Positional Scarcity</h2></div></div>
+        <div class="dcx-alerts">{% for alert in tier_alerts %}<div class="dcx-alert {{ alert.level|lower }}"><div><b>{{ alert.position }} · Tier {{ alert.tier }}</b><span>{{ alert.message }}</span></div><strong>{{ alert.remaining }} left</strong></div>{% endfor %}</div>
+        <div class="dcx-prob"><span>Chance your preferred target survives to your next pick</span><strong id="dcx-survival">{{ recommendation.survival_probability }}%</strong></div>
+      </article>
+    </section>
 
-</section>
-
-<section class="dc-panel dc-board-panel">
-  <div class="dc-panel-head dc-board-head">
-    <div>
-      <div class="dc-kicker">LIVE DRAFT BOARD</div>
-      <h2>Available Players</h2>
-    </div>
-    <div class="dc-board-tools">
-      <input id="dc-player-search" placeholder="Search player">
-      <select id="dc-position-filter">
-        <option value="">All Positions</option>
-        <option>QB</option>
-        <option>RB</option>
-        <option>WR</option>
-        <option>TE</option>
-      </select>
-      <select id="dc-tier-filter">
-        <option value="">All Tiers</option>
-        <option value="1">Tier 1</option>
-        <option value="2">Tier 2</option>
-        <option value="3">Tier 3</option>
-        <option value="4">Tier 4</option>
-        <option value="5">Tier 5</option>
-      </select>
-    </div>
-  </div>
-
-  <div class="dc-board-wrap">
-    <table class="dc-table" id="dc-player-table">
-      <thead>
-        <tr>
-          <th>IQ</th>
-          <th>Rank</th>
-          <th>Player</th>
-          <th>Pos</th>
-          <th>NFL</th>
-          <th>Tier</th>
-          <th>ADP</th>
-          <th>Proj</th>
-          <th>Value</th>
-          <th>Fit</th>
-          <th>Scarcity</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="dc-player-body">
-        {% for p in players %}
-          <tr
-            data-name="{{ p.name|lower }}"
-            data-pos="{{ p.pos }}"
-            data-tier="{{ p.tier }}"
-            class="{% if p.drafted %}drafted{% endif %}"
-          >
-            <td><span class="dc-score-pill">{{ p.iq_score }}</span></td>
-            <td>{{ p.rank }}</td>
-            <td class="dc-player-name"><strong>{{ p.name }}</strong></td>
-            <td>{{ p.pos }}</td>
-            <td>{{ p.team }}</td>
-            <td>{{ p.tier }}</td>
-            <td>{{ p.adp }}</td>
-            <td>{{ p.projection }}</td>
-            <td>{{ p.adp_value }}</td>
-            <td>{{ p.roster_fit }}</td>
-            <td>{{ p.scarcity }}</td>
-            <td>
-              <button
-                type="button"
-                class="dc-draft-toggle {% if p.drafted %}is-drafted{% endif %}"
-                data-player="{{ p.name }}"
-              >
-                {{ "Drafted" if p.drafted else "Available" }}
-              </button>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="dc-grid-bottom">
-  <article class="dc-panel">
-    <div class="dc-panel-head">
-      <div>
-        <div class="dc-kicker">DRAFT SIMULATOR</div>
-        <h2>Strategy Lab</h2>
+    <section class="dcx-card" style="margin-bottom:17px">
+      <div class="dcx-board-head">
+        <div><div class="dcx-kicker">LIVE DRAFT BOARD</div><h2 style="margin:4px 0 0">Available Players</h2></div>
+        <div class="dcx-tools"><input id="dcx-search" placeholder="Search player"><select id="dcx-pos"><option value="">All Positions</option><option>QB</option><option>RB</option><option>WR</option><option>TE</option></select><select id="dcx-tier"><option value="">All Tiers</option><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option><option value="4">Tier 4</option></select></div>
       </div>
-    </div>
-    <p>Run quick simulations using your league size, scoring, draft slot, and strategy profile.</p>
-    <div class="dc-sim-actions">
-      <select id="dc-sim-strategy">
-        <option value="balanced">Balanced</option>
-        <option value="hero-rb">Hero RB</option>
-        <option value="zero-rb">Zero RB</option>
-        <option value="late-qb">Late QB</option>
-      </select>
-      <button class="dc-btn primary" id="dc-run-sim">Run Simulation</button>
-    </div>
-    <div class="dc-sim-result" id="dc-sim-result">
-      <strong>Ready to simulate.</strong>
-      <span>Compare roster builds before draft night.</span>
-    </div>
-  </article>
+      <div class="dcx-table-wrap"><table class="dcx-table"><thead><tr><th>IQ</th><th>Rank</th><th>Player</th><th>Pos</th><th>NFL</th><th>Tier</th><th>ADP</th><th>Proj</th><th>Value</th><th>Fit</th><th>Scarcity</th><th>Status</th></tr></thead><tbody id="dcx-body">
+      {% for p in players %}<tr data-name="{{ p.name|lower }}" data-pos="{{ p.pos }}" data-tier="{{ p.tier }}" class="{% if p.drafted %}is-drafted{% endif %}"><td><span class="dcx-iq">{{ p.iq_score }}</span></td><td>{{ p.rank }}</td><td><b>{{ p.name }}</b></td><td>{{ p.pos }}</td><td>{{ p.team }}</td><td>{{ p.tier }}</td><td>{{ p.adp }}</td><td>{{ p.projection }}</td><td>{{ p.adp_value }}</td><td>{{ p.roster_fit }}</td><td>{{ p.scarcity }}</td><td><button class="dcx-toggle {% if p.drafted %}is-drafted{% endif %}" data-player="{{ p.name }}">{{ "Drafted" if p.drafted else "Available" }}</button></td></tr>{% endfor %}
+      </tbody></table></div>
+    </section>
 
-  <article class="dc-panel">
-    <div class="dc-panel-head">
-      <div>
-        <div class="dc-kicker">DRAFT LOG</div>
-        <h2>Recent Picks</h2>
-      </div>
-      <button class="dc-text-button" id="dc-reset-draft">Reset Draft</button>
-    </div>
-    <div class="dc-draft-log" id="dc-draft-log">
-      {% if draft_log %}
-        {% for pick in draft_log[-8:]|reverse %}
-          <div><b>#{{ pick.overall }}</b><span>{{ pick.player }}</span><small>{{ pick.team_label }}</small></div>
-        {% endfor %}
-      {% else %}
-        <div class="dc-empty-log">No picks have been tracked yet.</div>
-      {% endif %}
-    </div>
-  </article>
-</section>
+    <section class="dcx-grid-bottom">
+      <article class="dcx-card">
+        <div class="dcx-card-head"><div><div class="dcx-kicker">DRAFT SIMULATOR</div><h2>Strategy Lab</h2></div></div>
+        <p class="dcx-rationale">Run quick strategy comparisons for your active league.</p>
+        <div class="dcx-sim-row"><select id="dcx-sim-strategy" class="dcx-select"><option value="balanced">Balanced</option><option value="hero-rb">Hero RB</option><option value="zero-rb">Zero RB</option><option value="late-qb">Late QB</option></select><button id="dcx-sim" class="dcx-btn primary">Run Simulation</button></div>
+        <div id="dcx-result" class="dcx-result"><b>Ready to simulate.</b><span>Compare roster builds before draft night.</span></div>
+      </article>
+      <article class="dcx-card">
+        <div class="dcx-card-head"><div><div class="dcx-kicker">DRAFT LOG</div><h2>Recent Picks</h2></div><button id="dcx-reset" class="dcx-reset">Reset Draft</button></div>
+        <div class="dcx-log">{% if draft_log %}{% for pick in draft_log[-8:]|reverse %}<div><b>#{{ pick.overall }}</b><span>{{ pick.player }}</span><small>{{ pick.team_label }}</small></div>{% endfor %}{% else %}<div><span>No picks tracked yet.</span></div>{% endif %}</div>
+      </article>
+    </section>
+  </main>
+</div>
 
+<script>
+(()=> {
+  const $=id=>document.getElementById(id);
+  async function api(url,options={}){const r=await fetch(url,{headers:{"Content-Type":"application/json"},...options});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||d.detail||`Request failed (${r.status})`);return d}
+  function state(){return{league_key:$("dcx-league").value,draft_slot:+$("dcx-slot").value,round:+$("dcx-round").value,pick_in_round:+$("dcx-pick").value,strategy:$("dcx-strategy").value}}
+  async function refresh(){
+    const d=await api("/api/draft/pro/recommend",{method:"POST",body:JSON.stringify(state())}),r=d.recommendation;
+    $("dcx-best-name").textContent=r.player.name;$("dcx-best-pos").textContent=r.player.pos;$("dcx-best-meta").textContent=`${r.player.team} · Tier ${r.player.tier}`;$("dcx-best-score").textContent=r.score;$("dcx-confidence").textContent=`${r.confidence}% confidence`;
+    $("dcx-value").textContent=r.adp_value;$("dcx-fit").textContent=r.roster_fit;$("dcx-scarcity").textContent=r.scarcity;$("dcx-risk").textContent=r.tier_risk;$("dcx-rationale").textContent=r.rationale;$("dcx-survival").textContent=`${r.survival_probability}%`;
+    $("dcx-next").innerHTML=r.next_best.map(p=>`<button class="dcx-chip">${p.name} · ${p.pos}</button>`).join("");
+    $("dcx-picks").innerHTML=d.context.next_picks.map(x=>`<b>${x}</b>`).join("");
+  }
+  $("dcx-refresh").addEventListener("click",refresh);
+  $("dcx-league").addEventListener("change",()=>location.href=`/draft-center?league=${encodeURIComponent($("dcx-league").value)}`);
+  ["dcx-slot","dcx-round","dcx-pick","dcx-strategy"].forEach(id=>$(id).addEventListener("change",refresh));
+  function filter(){const q=$("dcx-search").value.toLowerCase(),p=$("dcx-pos").value,t=$("dcx-tier").value;document.querySelectorAll("#dcx-body tr").forEach(row=>row.style.display=(!q||row.dataset.name.includes(q))&&(!p||row.dataset.pos===p)&&(!t||row.dataset.tier===t)?"":"none")}
+  $("dcx-search").addEventListener("input",filter);$("dcx-pos").addEventListener("change",filter);$("dcx-tier").addEventListener("change",filter);
+  document.querySelectorAll(".dcx-toggle").forEach(btn=>btn.addEventListener("click",async()=>{const drafted=!btn.classList.contains("is-drafted");await api("/api/draft/pro/mark",{method:"POST",body:JSON.stringify({league_key:$("dcx-league").value,player:btn.dataset.player,drafted})});location.reload()}));
+  $("dcx-reset").addEventListener("click",async()=>{if(confirm("Reset all tracked draft picks?")){await api("/api/draft/pro/reset",{method:"POST",body:JSON.stringify({league_key:$("dcx-league").value})});location.reload()}});
+  $("dcx-sim").addEventListener("click",async()=>{const d=await api("/api/draft/pro/simulate",{method:"POST",body:JSON.stringify({...state(),strategy:$("dcx-sim-strategy").value})});$("dcx-result").innerHTML=`<b>${d.result.headline}</b><span>${d.result.summary}</span>`});
+})();
+</script>
 {% endblock %}
