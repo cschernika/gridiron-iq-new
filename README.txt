@@ -1,17 +1,17 @@
-Upload/replace:
+PLAYER RESEARCH — SERVER-RENDERED VERSION
+
+Replace:
 - app.py
-- templates/base.html
 - templates/player_research.html
 
-This separates Player Research from Draft Center.
+Why this version is different:
+The player list is rendered directly by Flask before the page loads.
+It does NOT depend on JavaScript successfully calling the position endpoint just to display players.
 
-Player Research now provides:
-- Player search
-- 2025 stats
-- 2022-2025 career trend data when available
-- 2026 Gridiron IQ projection
-- Bio, team, position, age, college, experience
-- Depth chart information
-- Current player/injury/practice status
+When you open /player-research:
+- All fantasy players are listed immediately.
+- Click QB, RB, WR, TE, K, or DEF to reload the page with that position.
+- Position pages display position-specific 2025 stats.
+- Click any player row to open the detailed research panel.
 
-The running app uses public Sleeper player metadata and nflverse historical player-stat files. The first lookup can be slower while caches are created.
+This specifically addresses the problem where Player Research kept appearing unchanged.

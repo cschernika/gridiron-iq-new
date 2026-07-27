@@ -901,12 +901,111 @@ def _pr_profile(player_id):
 
 @app.get("/player-research")
 def player_research():
-    return page("player_research.html")
+    selected_position = request.args.get("position", "").strip().upper()
+    if selected_position not in {"", "QB", "RB", "WR", "TE", "K", "DEF"}:
+        selected_position = ""
+
+    player_rows = _pr_position_rows(selected_position, limit=2000)
+
+    return page(
+        "player_research.html",
+        selected_position=selected_position,
+        player_rows=player_rows,
+        player_count=len(player_rows),
+    )
 
 @app.get("/api/player-research/search")
 def player_research_search():
     q = request.args.get("q", "").strip()
     return jsonify(ok=True, players=_pr_search(q) if len(q) >= 2 else [])
+
+
+def _pr_position_rows(position="", limit=500):
+    position = str(position or "").upper().strip()
+    sleeper = _pr_players()
+    season_rows = _pr_rows(2025)
+
+    # Build one stats lookup so we do not scan the CSV separately for every player.
+    by_name = {}
+    for row in season_rows:
+        name = _pr_row_name(row)
+        key = _pr_norm(name)
+        if not key:
+            continue
+        by_name.setdefault(key, []).append(row)
+
+    rows = []
+    allowed = {"QB","RB","WR","TE","K","DEF"}
+
+    for player_id, p in sleeper.items():
+        name = p.get("full_name") or " ".join(
+            x for x in [p.get("first_name"), p.get("last_name")] if x
+        )
+        pos = p.get("position") or ((p.get("fantasy_positions") or [""])[0])
+        if not name or not pos:
+            continue
+
+        pos = str(pos).upper()
+        if pos not in allowed:
+            continue
+        if position and pos != position:
+            continue
+
+        stats = _pr_aggregate(by_name.get(_pr_norm(name), []), name) or {}
+
+        fantasy = stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0
+        total_tds = (
+            _pr_num(stats.get("passing_tds"))
+            + _pr_num(stats.get("rushing_tds"))
+            + _pr_num(stats.get("receiving_tds"))
+        )
+
+        rows.append({
+            "player_id": str(player_id),
+            "name": name,
+            "team": p.get("team") or "FA",
+            "position": pos,
+            "status": p.get("status") or "",
+            "age": p.get("age"),
+            "years_exp": p.get("years_exp"),
+            "games": stats.get("games", 0),
+            "fantasy_points_ppr": round(_pr_num(fantasy), 1),
+            "passing_yards": round(_pr_num(stats.get("passing_yards")), 1),
+            "passing_tds": round(_pr_num(stats.get("passing_tds")), 1),
+            "interceptions": round(_pr_num(stats.get("interceptions")), 1),
+            "carries": round(_pr_num(stats.get("carries")), 1),
+            "rushing_yards": round(_pr_num(stats.get("rushing_yards")), 1),
+            "rushing_tds": round(_pr_num(stats.get("rushing_tds")), 1),
+            "targets": round(_pr_num(stats.get("targets")), 1),
+            "receptions": round(_pr_num(stats.get("receptions")), 1),
+            "receiving_yards": round(_pr_num(stats.get("receiving_yards")), 1),
+            "receiving_tds": round(_pr_num(stats.get("receiving_tds")), 1),
+            "total_tds": round(total_tds, 1),
+        })
+
+    rows.sort(
+        key=lambda x: (
+            -x["fantasy_points_ppr"],
+            x["position"],
+            x["name"],
+        )
+    )
+    return rows[:limit]
+
+@app.get("/api/player-research/position")
+def player_research_position():
+    position = request.args.get("position", "").strip().upper()
+    allowed = {"", "QB", "RB", "WR", "TE", "K", "DEF"}
+    if position not in allowed:
+        return jsonify(ok=False, error="Unsupported position."), 400
+
+    rows = _pr_position_rows(position)
+    return jsonify(
+        ok=True,
+        position=position or "ALL",
+        count=len(rows),
+        players=rows,
+    )
 
 @app.get("/api/player-research/profile/<player_id>")
 def player_research_profile(player_id):
