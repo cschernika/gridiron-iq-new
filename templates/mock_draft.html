@@ -56,7 +56,7 @@
   <section id="ml-live" class="ml-board-layout" style="display:none">
     <article class="ml-card">
       <div class="ml-player-tools">
-        <input id="ml-search" placeholder="Search available players — ranked by 2026 ADP...">
+        <input id="ml-search" placeholder="Search available players — ranked by {{ mock_context.platform }} 2026 ADP...">
         <div id="ml-tabs" class="ml-tabs">
           <button class="active" data-pos="">All</button><button data-pos="QB">QB</button><button data-pos="RB">RB</button><button data-pos="WR">WR</button><button data-pos="TE">TE</button>
         </div>
@@ -64,7 +64,7 @@
 
       <div class="ml-table-wrap">
         <table class="ml-table">
-          <thead><tr><th>2026 ADP</th><th>Player</th><th>Pos</th><th>NFL</th><th>2026 ADP</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead>
+          <thead><tr><th>{{ mock_context.platform }} 2026 ADP</th><th>Player</th><th>Pos</th><th>NFL</th><th>2026 ADP</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead>
           <tbody id="ml-player-body"></tbody>
         </table>
       </div>

@@ -101,21 +101,28 @@
         and click any player for career history, 2026 projections, and current information.
       </p>
     </div>
-    <input id="pr-filter" class="pr-search" placeholder="Filter this list by player name...">
+    <div style="display:grid;gap:8px;min-width:330px">
+      <select id="pr-league" class="pr-search">
+        {% for item in draft_leagues %}
+        <option value="{{ item.key }}" {% if item.key == active_league_key %}selected{% endif %}>{{ item.name }} — {{ item.platform }}</option>
+        {% endfor %}
+      </select>
+      <input id="pr-filter" class="pr-search" placeholder="Filter this list by player name...">
+    </div>
   </section>
 
   <section class="pr-position-bar">
     <div class="pr-tabs">
-      <a class="pr-tab {% if not selected_position %}active{% endif %}" href="/player-research">All Players</a>
-      <a class="pr-tab {% if selected_position == 'QB' %}active{% endif %}" href="/player-research?position=QB">QB</a>
-      <a class="pr-tab {% if selected_position == 'RB' %}active{% endif %}" href="/player-research?position=RB">RB</a>
-      <a class="pr-tab {% if selected_position == 'WR' %}active{% endif %}" href="/player-research?position=WR">WR</a>
-      <a class="pr-tab {% if selected_position == 'TE' %}active{% endif %}" href="/player-research?position=TE">TE</a>
-      <a class="pr-tab {% if selected_position == 'K' %}active{% endif %}" href="/player-research?position=K">K</a>
-      <a class="pr-tab {% if selected_position == 'DEF' %}active{% endif %}" href="/player-research?position=DEF">DEF</a>
+      <a class="pr-tab {% if not selected_position %}active{% endif %}" href="/player-research?league={{ active_league_key }}">All Players</a>
+      <a class="pr-tab {% if selected_position == 'QB' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=QB">QB</a>
+      <a class="pr-tab {% if selected_position == 'RB' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=RB">RB</a>
+      <a class="pr-tab {% if selected_position == 'WR' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=WR">WR</a>
+      <a class="pr-tab {% if selected_position == 'TE' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=TE">TE</a>
+      <a class="pr-tab {% if selected_position == 'K' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=K">K</a>
+      <a class="pr-tab {% if selected_position == 'DEF' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=DEF">DEF</a>
     </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <div class="pr-count">{{ player_count }} players shown · {{ adp_source }}</div>
+      <div class="pr-count">{{ player_count }} players shown · {{ active_platform }} {{ active_scoring }} · {{ adp_source }}</div>
       <button id="pr-refresh-adp" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer">Refresh 2026 ADP</button>
     </div>
   </section>
@@ -198,7 +205,7 @@
             <th>Player</th>
             <th>Pos</th>
             <th>Team</th>
-            <th>2026 ADP</th>
+            <th>{{ active_platform }} 2026 ADP</th>
             <th>Status</th>
 
             {% if selected_position == 'QB' %}
@@ -272,6 +279,13 @@
 (() => {
   const $ = id => document.getElementById(id);
 
+  const leagueSelector = $("pr-league");
+  if(leagueSelector){
+    leagueSelector.addEventListener("change", () => {
+      location.href = `/player-research?league=${encodeURIComponent(leagueSelector.value)}`;
+    });
+  }
+
   const refreshAdpButton = $("pr-refresh-adp");
   if(refreshAdpButton){
     refreshAdpButton.addEventListener("click", async () => {
@@ -282,7 +296,7 @@
         const response = await fetch("/api/player-research/adp/refresh", {
           method:"POST",
           headers:{"Content-Type":"application/json"},
-          body:"{}"
+          body:JSON.stringify({platform:"{{ active_platform }}"})
         });
         const data = await response.json();
         if(!response.ok) throw new Error(data.error || "Refresh failed");
