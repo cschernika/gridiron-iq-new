@@ -124,7 +124,7 @@
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div class="pr-count">{{ player_count }} players shown · {{ active_platform }} {{ active_scoring }} · {{ adp_source }}</div>
       <button id="pr-refresh-adp" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer">Refresh FantasyPros Data</button>
-      <a href="/api/player-research/adp/status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none">Check ADP Status</a> <a href="/api/player-research/data-status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none;margin-left:10px">Check All Data</a>
+      <a href="/api/player-research/adp/status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none">Check ADP Status</a> <a href="/api/player-research/data-status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none;margin-left:10px">Check All Data</a> <button id="pr-refresh-stats" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer;margin-left:8px">Load 2025 Stats</button>
     </div>
   </section>
 
@@ -292,7 +292,65 @@
       </table>
     </div>
   </section>
+
+<div id="pr-news-section" style="display:none;margin-top:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
+    <div>
+      <div style="font-size:9px;font-weight:900;color:#5d3df5;letter-spacing:.08em">CURRENT PLAYER NEWS</div>
+      <h3 style="margin:3px 0 0">News, Injuries & Practice Updates</h3>
+    </div>
+    <span id="pr-news-updated" style="font-size:9px;color:#7b8798"></span>
+  </div>
+  <div id="pr-injury-card" style="display:none;border:1px solid #f1d7d7;background:#fff8f8;border-radius:10px;padding:10px;margin-bottom:9px;font-size:10px"></div>
+  <div id="pr-news-list"></div>
+</div>
+
 <script>
+
+  function renderPlayerNews(data){
+    const section = document.getElementById("pr-news-section");
+    const list = document.getElementById("pr-news-list");
+    const injuryCard = document.getElementById("pr-injury-card");
+    const updated = document.getElementById("pr-news-updated");
+    if(!section || !list) return;
+
+    section.style.display = "block";
+    updated.textContent = data.news_updated_at ? `Updated ${data.news_updated_at}` : "";
+
+    const injury = data.injury || {};
+    const injuryBits = [];
+    if(injury.status) injuryBits.push(`<b>Status:</b> ${injury.status}`);
+    if(injury.body_part) injuryBits.push(`<b>Injury:</b> ${injury.body_part}`);
+    if(injury.practice) injuryBits.push(`<b>Practice:</b> ${injury.practice}`);
+    if(injury.description) injuryBits.push(injury.description);
+
+    if(injuryBits.length){
+      injuryCard.style.display = "block";
+      injuryCard.innerHTML = injuryBits.join(" &nbsp; · &nbsp; ");
+    } else {
+      injuryCard.style.display = "none";
+      injuryCard.innerHTML = "";
+    }
+
+    const news = data.news || [];
+    if(!news.length){
+      list.innerHTML = `<div style="border:1px solid #e3e7ee;border-radius:10px;padding:11px;font-size:10px;color:#778397">No recent FantasyPros news was returned for this player.</div>`;
+      return;
+    }
+
+    list.innerHTML = news.map(item => `
+      <div style="border:1px solid #e3e7ee;border-radius:10px;padding:11px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;gap:12px">
+          <b style="font-size:11px">${item.title || "Player update"}</b>
+          <span style="font-size:8px;color:#8995a6">${item.published || ""}</span>
+        </div>
+        ${item.summary ? `<div style="font-size:10px;color:#546274;line-height:1.45;margin-top:6px">${item.summary}</div>` : ""}
+        ${item.analysis ? `<div style="font-size:10px;line-height:1.45;margin-top:6px"><b>Fantasy impact:</b> ${item.analysis}</div>` : ""}
+        <div style="font-size:8px;color:#8995a6;margin-top:6px">${item.source || "FantasyPros"}${item.category ? " · " + item.category : ""}</div>
+      </div>
+    `).join("");
+  }
+
 (() => {
   const $ = id => document.getElementById(id);
 
@@ -316,6 +374,7 @@
           body:JSON.stringify({platform:"{{ active_platform }}"})
         });
         const data = await response.json();
+    renderPlayerNews(data);
         if(!response.ok) throw new Error(data.error || "Refresh failed");
         location.reload();
       }catch(error){
@@ -457,6 +516,28 @@
     }
   }
 })();
+
+  const refreshStatsButton = document.getElementById("pr-refresh-stats");
+  if(refreshStatsButton){
+    refreshStatsButton.addEventListener("click", async () => {
+      const old = refreshStatsButton.textContent;
+      refreshStatsButton.disabled = true;
+      refreshStatsButton.textContent = "Loading 2025 Stats…";
+      try{
+        const response = await fetch("/api/player-research/refresh-2025-stats", {method:"POST"});
+        const data = await response.json();
+        if(!response.ok || !data.ok) throw new Error(data.error || "2025 stats refresh failed.");
+        alert(`2025 stats loaded for ${data.player_count} players.`);
+        location.reload();
+      }catch(error){
+        alert(error.message);
+      }finally{
+        refreshStatsButton.disabled = false;
+        refreshStatsButton.textContent = old;
+      }
+    });
+  }
+
 </script>
 
 {% endblock %}
