@@ -2783,6 +2783,166 @@ def _player_research_projection_2026(player_name, position):
     history = _pr_history(player_name)
     return _pr_projection(history, position)
 
+
+PLAYER_NEWS_CACHE_DIR = DATA_DIR / "player_news_cache"
+PLAYER_NEWS_CACHE_TTL = 15 * 60
+
+def _news_cache_path(player_name):
+    PLAYER_NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^a-z0-9]+", "_", str(player_name).lower()).strip("_")
+    return PLAYER_NEWS_CACHE_DIR / f"{safe}.json"
+
+def _fp_public_get(path, params=None):
+    key = str(os.getenv("FANTASYPROS_API_KEY", "") or "").strip()
+    if not key:
+        raise RuntimeError("FANTASYPROS_API_KEY is not configured.")
+
+    url = "https://api.fantasypros.com/public/v2/json/" + str(path).lstrip("/")
+    response = requests.get(
+        url,
+        params=params or {},
+        headers={
+            "x-api-key": key,
+            "Accept": "application/json",
+            "User-Agent": "GridironIQ/2026",
+        },
+        timeout=25,
+    )
+    response.raise_for_status()
+    try:
+        return response.json()
+    except Exception:
+        raise RuntimeError("FantasyPros returned a non-JSON response.")
+
+def _extract_fp_list(payload, keys):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            for inner in keys:
+                inner_value = value.get(inner)
+                if isinstance(inner_value, list):
+                    return inner_value
+    return []
+
+def _player_news_matches(row, player_name, player_id=None):
+    target = _pr_norm(player_name)
+    for key in ("player_name","name","player","title","headline"):
+        text = str(row.get(key) or "")
+        if target and target in _pr_norm(text):
+            return True
+
+    if player_id:
+        for key in ("player_id","player_fantasypros_id","fpid"):
+            if str(row.get(key) or "") == str(player_id):
+                return True
+    return False
+
+def _normalize_player_news(row):
+    return {
+        "title": row.get("title") or row.get("headline") or row.get("news_title") or "Player update",
+        "summary": row.get("description") or row.get("summary") or row.get("news") or row.get("note") or "",
+        "analysis": row.get("analysis") or row.get("fantasy_analysis") or row.get("impact") or "",
+        "published": row.get("published_at") or row.get("published") or row.get("date") or row.get("created_at") or "",
+        "source": row.get("source") or row.get("source_name") or "FantasyPros",
+        "category": row.get("category") or row.get("type") or "",
+        "url": row.get("url") or row.get("source_url") or "",
+    }
+
+def _player_research_news(player_name):
+    cache = _news_cache_path(player_name)
+
+    try:
+        if cache.exists() and (time.time() - cache.stat().st_mtime) < PLAYER_NEWS_CACHE_TTL:
+            return json.loads(cache.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    master = _player_research_master_row(player_name)
+    fp_id = master.get("fantasypros_id")
+    warnings = []
+    news = []
+
+    queries = []
+    if fp_id:
+        queries.append({"player_id": fp_id, "limit": 15})
+    queries.append({"player": player_name, "limit": 15})
+    queries.append({"limit": 100})
+
+    for params in queries:
+        try:
+            payload = _fp_public_get("nfl/news", params=params)
+            rows = _extract_fp_list(payload, ("news","articles","results","data"))
+            matched = [
+                _normalize_player_news(row)
+                for row in rows
+                if _player_news_matches(row, player_name, fp_id)
+            ]
+            if matched:
+                news = matched[:10]
+                break
+        except Exception as exc:
+            warnings.append(str(exc))
+
+    result = {
+        "player": player_name,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "news": news,
+        "warnings": warnings[-2:],
+    }
+
+    try:
+        cache.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return result
+
+def _player_research_injury(player_name):
+    master = _player_research_master_row(player_name)
+    fp_id = master.get("fantasypros_id")
+
+    result = {
+        "status": master.get("injury_status") or "",
+        "body_part": master.get("injury_body_part") or "",
+        "practice": master.get("practice_participation") or "",
+        "description": "",
+        "updated_at": "",
+        "source": "2026 master player database",
+    }
+
+    try:
+        params = {"season": 2026}
+        if fp_id:
+            params["player_id"] = fp_id
+
+        payload = _fp_public_get("nfl/injuries", params=params)
+        rows = _extract_fp_list(payload, ("injuries","players","results","data"))
+        for row in rows:
+            if not _player_news_matches(row, player_name, fp_id):
+                continue
+            result = {
+                "status": row.get("injury_status") or row.get("status") or row.get("designation") or result["status"],
+                "body_part": row.get("injury_body_part") or row.get("body_part") or row.get("injury") or result["body_part"],
+                "practice": row.get("practice_status") or row.get("practice_participation") or row.get("practice") or result["practice"],
+                "description": row.get("description") or row.get("note") or "",
+                "updated_at": row.get("updated_at") or row.get("date") or "",
+                "source": "FantasyPros injuries",
+            }
+            break
+    except Exception:
+        pass
+
+    return result
+
+@app.get("/api/player-research/news/<path:player_name>")
+def player_research_news_api(player_name):
+    return jsonify(ok=True, **_player_research_news(player_name))
+
 def _player_research_data_status(platform="ESPN"):
     platform = str(platform or "ESPN").upper()
     master = _master_players_2026()
@@ -2813,6 +2973,99 @@ def _player_research_data_status(platform="ESPN"):
         "adp_source": adp.get("source", ""),
         "fantasypros_api_configured": bool(os.getenv("FANTASYPROS_API_KEY", "").strip()),
     }
+
+
+NFLVERSE_2025_STATS_URLS = [
+    "https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_reg_2025.csv",
+    "https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_2025.csv",
+]
+
+def _download_2025_stats_rows():
+    errors = []
+    headers = {
+        "User-Agent": "GridironIQ/2026",
+        "Accept": "text/csv,text/plain,*/*",
+    }
+    for url in NFLVERSE_2025_STATS_URLS:
+        try:
+            response = requests.get(url, headers=headers, timeout=45)
+            response.raise_for_status()
+            text = response.text
+            if not text or "," not in text:
+                raise RuntimeError("Downloaded response did not look like CSV.")
+            rows = list(csv.DictReader(io.StringIO(text)))
+            if rows:
+                return rows, url
+        except Exception as exc:
+            errors.append(f"{url}: {exc}")
+    raise RuntimeError("Could not download 2025 nflverse stats. " + " | ".join(errors))
+
+def _build_2025_stats_snapshot_direct():
+    rows, source_url = _download_2025_stats_rows()
+
+    regular = [
+        row for row in rows
+        if str(row.get("season_type") or "REG").upper() == "REG"
+    ]
+    if regular:
+        rows = regular
+
+    grouped = {}
+    for row in rows:
+        name = _pr_row_name(row)
+        norm = _pr_norm(name)
+        if not norm:
+            continue
+        grouped.setdefault(norm, {"name": name, "rows": []})
+        grouped[norm]["rows"].append(row)
+
+    players = {}
+    position_counts = {}
+    for norm, bundle in grouped.items():
+        record = _stats_2025_player_record(bundle["name"], bundle["rows"])
+        pos = str(record.get("position") or "").upper()
+        if pos == "DST":
+            pos = "DEF"
+        if pos not in {"QB","RB","WR","TE","K","FB"}:
+            continue
+        record["position"] = pos
+        players[norm] = record
+        position_counts[pos] = position_counts.get(pos, 0) + 1
+
+    if not players:
+        raise RuntimeError("2025 stats downloaded but no fantasy-relevant player rows were built.")
+
+    payload = {
+        "season": 2025,
+        "season_type": "REG",
+        "source": "nflverse Player Summary Stats",
+        "source_url": source_url,
+        "status": "local",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "player_count": len(players),
+        "position_counts": position_counts,
+        "players": players,
+    }
+    STATS_2025_SNAPSHOT_FILE.write_text(
+        json.dumps(payload, indent=2),
+        encoding="utf-8",
+    )
+    return payload
+
+@app.post("/api/player-research/refresh-2025-stats")
+def player_research_refresh_2025_stats():
+    try:
+        payload = _build_2025_stats_snapshot_direct()
+        return jsonify(
+            ok=True,
+            player_count=payload.get("player_count", 0),
+            position_counts=payload.get("position_counts", {}),
+            source=payload.get("source"),
+            source_url=payload.get("source_url"),
+            updated_at=payload.get("updated_at"),
+        )
+    except Exception as exc:
+        return jsonify(ok=False, error=str(exc)), 500
 
 @app.get("/api/player-research/data-status")
 def player_research_data_status_api():
@@ -3714,12 +3967,18 @@ def _pr_profile(player_id):
         "adp_source": adp_info.get("source"),
     }
 
+    current_news = _player_research_news(name)
+    injury = _player_research_injury(name)
+
     return {
         "bio": bio,
         "previous_year": stats_2025,
         "history": history,
         "projection": projection,
         "trend": _pr_trend(history),
+        "news": current_news.get("news", []),
+        "news_updated_at": current_news.get("updated_at", ""),
+        "injury": injury,
         "data_notes": [
             "2026 current team: 2026 master player database.",
             "ADP: selected ESPN/Yahoo platform dataset.",
