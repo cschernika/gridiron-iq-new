@@ -884,12 +884,16 @@ def manual_mock_state(mock_id):
 
     row = _manual_current_order_row(mock)
     available = _manual_available(mock)
+    platform = "YAHOO" if "YAHOO" in str(mock.get("platform", "")).upper() else "ESPN"
+    platform_adp = _pr_adp_lookup(platform)
 
-    # Score the most relevant available players for the user's current pick.
+    # Apply the ADP that matches the selected league platform.
     scored = []
     for p in available:
         item = dict(p)
-        item["pick_score"] = _manual_player_pick_score(mock, p)
+        item["adp"] = platform_adp.get(_pr_norm(item["name"]), item.get("adp", 999))
+        item["adp_source"] = platform
+        item["pick_score"] = _manual_player_pick_score(mock, item)
         scored.append(item)
     # Draft board is ranked by ADP (lowest/best ADP first).
     # Pick Score remains visible as Gridiron IQ's roster-aware recommendation.
@@ -923,6 +927,11 @@ def manual_mock_pick(mock_id):
     player = lookup.get(player_name)
     if not player:
         return jsonify(ok=False, error="That player is no longer available."), 400
+
+    platform = "YAHOO" if "YAHOO" in str(mock.get("platform", "")).upper() else "ESPN"
+    platform_adp = _pr_adp_lookup(platform)
+    player = dict(player)
+    player["adp"] = platform_adp.get(_pr_norm(player["name"]), player.get("adp", 999))
 
     pick = {
         "overall": row["overall"],
@@ -1297,15 +1306,26 @@ def player_research():
     if selected_position not in {"", "QB", "RB", "WR", "TE", "K", "DEF"}:
         selected_position = ""
 
-    player_rows = _pr_position_rows(selected_position, limit=2000)
-    adp_meta = _pr_2026_adp_data()
+    league_key = request.args.get("league") or session.get("active_league_key") or "espn-gramps"
+    if league_key not in CONTEXTS:
+        league_key = "espn-gramps"
+    session["active_league_key"] = league_key
+    context = CONTEXTS[league_key]
+    platform = "YAHOO" if "YAHOO" in str(context.get("platform", "")).upper() else "ESPN"
+
+    player_rows = _pr_position_rows(selected_position, limit=2000, platform=platform)
+    adp_meta = _platform_2026_adp_data(platform)
 
     return page(
         "player_research.html",
         selected_position=selected_position,
         player_rows=player_rows,
         player_count=len(player_rows),
-        adp_source=adp_meta.get("source", "2026 ADP"),
+        draft_leagues=draft_leagues(),
+        active_league_key=league_key,
+        active_platform=platform,
+        active_scoring=adp_meta.get("scoring", ""),
+        adp_source=adp_meta.get("source", f"{platform} 2026 ADP"),
         adp_updated_at=adp_meta.get("updated_at", ""),
     )
 
@@ -1315,9 +1335,19 @@ def player_research_search():
     return jsonify(ok=True, players=_pr_search(q) if len(q) >= 2 else [])
 
 
-ADP_2026_CACHE_FILE = DATA_DIR / "adp_2026_cache.json"
 ADP_2026_CACHE_TTL = 6 * 60 * 60
-ADP_2026_URL = "https://www.fantasypros.com/nfl/adp/overall.php"
+ADP_2026_SOURCES = {
+    "ESPN": {
+        "url": "https://www.fantasypros.com/nfl/adp/ppr-overall.php",
+        "column": "ESPN",
+        "scoring": "PPR",
+    },
+    "YAHOO": {
+        "url": "https://www.fantasypros.com/nfl/adp/half-point-ppr-overall.php",
+        "column": "Yahoo",
+        "scoring": "Half PPR",
+    },
+}
 
 class _ADPTableParser(HTMLParser):
     def __init__(self):
@@ -1342,76 +1372,84 @@ class _ADPTableParser(HTMLParser):
 
     def handle_endtag(self, tag):
         if self.in_tr and tag in ("td", "th") and self.in_cell:
-            text = " ".join("".join(self.cell_text).split())
-            self.row.append(text)
+            self.row.append(" ".join("".join(self.cell_text).split()))
             self.in_cell = False
         elif tag == "tr" and self.in_tr:
             if self.row:
                 self.rows.append(self.row)
             self.in_tr = False
 
-def _pr_parse_2026_adp(html):
+def _adp_player_name(raw_player):
+    raw_player = str(raw_player or "").strip()
+    m = re.match(r"^(.+?)\s+[A-Z]\.\s+[A-Za-z'’-]+(?:\s+(?:Jr\.|Sr\.|II|III|IV))?\s+[A-Z]{2,3}\s+\(\d+\)", raw_player)
+    if m:
+        return m.group(1).strip()
+    cleaned = re.sub(r"\s+[A-Z]{2,3}\s+\(\d+\)\s*$", "", raw_player).strip()
+    bits = cleaned.split()
+    for i in range(1, len(bits)):
+        if re.fullmatch(r"[A-Z]\.", bits[i]):
+            return " ".join(bits[:i]).strip()
+    return cleaned
+
+def _parse_platform_adp(html, platform):
+    platform = str(platform or "ESPN").upper()
+    wanted = ADP_2026_SOURCES.get(platform, ADP_2026_SOURCES["ESPN"])["column"].lower()
+
     parser = _ADPTableParser()
     parser.feed(html)
-    result = {}
+    if not parser.rows:
+        return {}
 
+    header = None
     for row in parser.rows:
-        if len(row) < 4:
-            continue
-        try:
-            rank = float(str(row[0]).replace("#", "").strip())
-        except Exception:
-            continue
+        lower = [c.lower() for c in row]
+        if "player (bye)" in lower and wanted in lower:
+            header = lower
+            break
+    if not header:
+        return {}
 
-        raw_player = str(row[1]).strip()
-        if not raw_player:
+    player_idx = header.index("player (bye)")
+    platform_idx = header.index(wanted)
+    pos_idx = header.index("pos") if "pos" in header else None
+
+    result = {}
+    for row in parser.rows:
+        if len(row) <= max(player_idx, platform_idx):
             continue
-
-        # FantasyPros commonly renders:
-        # "Bijan Robinson B. Robinson ATL (11)"
-        # Prefer the full name before the abbreviated duplicate.
-        m = re.match(r"^(.+?)\s+[A-Z]\.\s+[A-Za-z'’-]+(?:\s+(?:Jr\.|Sr\.|II|III|IV))?\s+[A-Z]{2,3}\s+\(\d+\)", raw_player)
-        if m:
-            player_name = m.group(1).strip()
-        else:
-            # Fallback: remove trailing team/bye and abbreviated duplicate where possible.
-            cleaned = re.sub(r"\s+[A-Z]{2,3}\s+\(\d+\)\s*$", "", raw_player).strip()
-            bits = cleaned.split()
-            player_name = cleaned
-            for i in range(1, len(bits)):
-                if re.fullmatch(r"[A-Z]\.", bits[i]):
-                    player_name = " ".join(bits[:i]).strip()
-                    break
-
+        player_name = _adp_player_name(row[player_idx])
         if not player_name:
             continue
-
-        # AVG is normally the last cell. If unavailable, overall rank is still useful.
-        avg = rank
-        for cell in reversed(row[3:]):
-            try:
-                avg = float(cell)
-                break
-            except Exception:
-                continue
-
+        raw_adp = str(row[platform_idx]).strip().replace("#", "")
+        try:
+            adp = float(raw_adp)
+        except Exception:
+            continue
+        pos = row[pos_idx] if pos_idx is not None and len(row) > pos_idx else ""
         result[_pr_norm(player_name)] = {
-            "adp": round(avg, 1),
-            "rank": int(rank),
-            "source": "FantasyPros / Sleeper",
+            "adp": round(adp, 1),
+            "position_adp": pos,
+            "source": platform,
         }
-
     return result
 
-def _pr_2026_adp_data(force=False):
-    # Cache live 2026 ADP because it changes throughout draft season.
+def _adp_cache_file(platform):
+    return DATA_DIR / f"adp_2026_{str(platform).lower()}_cache.json"
+
+def _platform_2026_adp_data(platform="ESPN", force=False):
+    platform = str(platform or "ESPN").upper()
+    if platform not in ADP_2026_SOURCES:
+        platform = "ESPN"
+    spec = ADP_2026_SOURCES[platform]
+    cache_file = _adp_cache_file(platform)
+
     try:
         if (
             not force
-            and ADP_2026_CACHE_FILE.exists()
-            and (time.time() - ADP_2026_CACHE_FILE.stat().st_mtime) < ADP_2026_CACHE_TTL
+            and cache_file.exists()
+            and (time.time() - cache_file.stat().st_mtime) < ADP_2026_CACHE_TTL
         ):
-            cached = json.loads(ADP_2026_CACHE_FILE.read_text(encoding="utf-8"))
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
             if cached.get("players"):
                 return cached
     except Exception:
@@ -1422,67 +1460,57 @@ def _pr_2026_adp_data(force=False):
             "User-Agent": "Mozilla/5.0 (compatible; GridironIQ/1.0)",
             "Accept": "text/html,application/xhtml+xml",
         }
-        r = requests.get(ADP_2026_URL, headers=headers, timeout=25)
+        r = requests.get(spec["url"], headers=headers, timeout=25)
         r.raise_for_status()
-        players = _pr_parse_2026_adp(r.text)
-
+        players = _parse_platform_adp(r.text, platform)
         if players:
             payload = {
                 "season": 2026,
-                "source": "FantasyPros consensus ADP (currently sourced from Sleeper when available)",
-                "source_url": ADP_2026_URL,
+                "platform": platform,
+                "scoring": spec["scoring"],
+                "source": f"{platform} 2026 {spec['scoring']} ADP",
+                "source_url": spec["url"],
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "players": players,
             }
-            ADP_2026_CACHE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            cache_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             return payload
     except Exception:
         pass
 
-    # If live refresh fails, preserve the last successful cache.
     try:
-        if ADP_2026_CACHE_FILE.exists():
-            cached = json.loads(ADP_2026_CACHE_FILE.read_text(encoding="utf-8"))
+        if cache_file.exists():
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
             if cached.get("players"):
                 return cached
     except Exception:
         pass
 
-    # Final fallback: use the app's internal ADP so the page remains usable,
-    # but label it clearly as fallback data.
-    fallback = {}
-    try:
-        for p in MOCK_PLAYER_POOL:
-            name = str(p.get("name") or "").strip()
-            if name and p.get("adp") is not None:
-                fallback[_pr_norm(name)] = {
-                    "adp": float(p["adp"]),
-                    "rank": int(p.get("rank") or round(float(p["adp"]))),
-                    "source": "Gridiron IQ fallback",
-                }
-    except Exception:
-        pass
-
     return {
         "season": 2026,
-        "source": "Gridiron IQ fallback ADP",
-        "source_url": "",
+        "platform": platform,
+        "scoring": spec["scoring"],
+        "source": f"{platform} 2026 ADP unavailable",
+        "source_url": spec["url"],
         "updated_at": "",
-        "players": fallback,
+        "players": {},
     }
 
-def _pr_adp_lookup():
-    data = _pr_2026_adp_data()
-    return {
-        key: float(value.get("adp", 999.0))
-        for key, value in data.get("players", {}).items()
-    }
+def _league_platform(league_key=None):
+    key = league_key or request.args.get("league") or session.get("active_league_key") or "espn-gramps"
+    context = CONTEXTS.get(key, CONTEXTS.get("espn-gramps", {}))
+    platform = str(context.get("platform") or "ESPN").upper()
+    return "YAHOO" if "YAHOO" in platform else "ESPN"
 
-def _pr_position_rows(position="", limit=500):
+def _pr_adp_lookup(platform="ESPN"):
+    data = _platform_2026_adp_data(platform)
+    return {key: float(value.get("adp", 999.0)) for key, value in data.get("players", {}).items()}
+
+def _pr_position_rows(position="", limit=500, platform="ESPN"):
     position = str(position or "").upper().strip()
     sleeper = _pr_players()
     season_rows = _pr_rows(2025)
-    adp_lookup = _pr_adp_lookup()
+    adp_lookup = _pr_adp_lookup(platform)
 
     # Build one stats lookup so we do not scan the CSV separately for every player.
     by_name = {}
@@ -1555,10 +1583,16 @@ def _pr_position_rows(position="", limit=500):
 
 @app.post("/api/player-research/adp/refresh")
 def player_research_adp_refresh():
-    data = _pr_2026_adp_data(force=True)
+    body = request.get_json(silent=True) or {}
+    platform = str(body.get("platform") or _league_platform()).upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+    data = _platform_2026_adp_data(platform, force=True)
     return jsonify(
         ok=True,
         season=2026,
+        platform=platform,
+        scoring=data.get("scoring"),
         source=data.get("source"),
         updated_at=data.get("updated_at"),
         player_count=len(data.get("players", {})),
@@ -1571,7 +1605,8 @@ def player_research_position():
     if position not in allowed:
         return jsonify(ok=False, error="Unsupported position."), 400
 
-    rows = _pr_position_rows(position)
+    platform = str(request.args.get("platform") or _league_platform()).upper()
+    rows = _pr_position_rows(position, platform=platform)
     return jsonify(
         ok=True,
         position=position or "ALL",
