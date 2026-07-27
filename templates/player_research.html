@@ -97,7 +97,7 @@
       <div class="pr-kicker">PLAYER DATABASE</div>
       <h1>Player Research</h1>
       <p>
-        Browse all fantasy players ranked by ADP, choose a position, compare 2025 stats side-by-side,
+        Browse all fantasy players ranked by 2026 ADP, choose a position, compare 2025 stats side-by-side,
         and click any player for career history, 2026 projections, and current information.
       </p>
     </div>
@@ -114,7 +114,10 @@
       <a class="pr-tab {% if selected_position == 'K' %}active{% endif %}" href="/player-research?position=K">K</a>
       <a class="pr-tab {% if selected_position == 'DEF' %}active{% endif %}" href="/player-research?position=DEF">DEF</a>
     </div>
-    <div class="pr-count">{{ player_count }} players shown</div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="pr-count">{{ player_count }} players shown · {{ adp_source }}</div>
+      <button id="pr-refresh-adp" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer">Refresh 2026 ADP</button>
+    </div>
   </section>
 
 <div id="pr-loading" class="pr-loading" style="display:none">Loading full player research…</div>
@@ -179,9 +182,9 @@
         </div>
         <h2>
           {% if selected_position %}
-            {{ selected_position }} Rankings by ADP & 2025 Stats
+            {{ selected_position }} Rankings by 2026 ADP & 2025 Stats
           {% else %}
-            All Fantasy Players — Ranked by ADP
+            All Fantasy Players — Ranked by 2026 ADP
           {% endif %}
         </h2>
       </div>
@@ -195,7 +198,7 @@
             <th>Player</th>
             <th>Pos</th>
             <th>Team</th>
-            <th>ADP Rank</th>
+            <th>2026 ADP</th>
             <th>Status</th>
 
             {% if selected_position == 'QB' %}
@@ -268,6 +271,29 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
+
+  const refreshAdpButton = $("pr-refresh-adp");
+  if(refreshAdpButton){
+    refreshAdpButton.addEventListener("click", async () => {
+      const original = refreshAdpButton.textContent;
+      refreshAdpButton.disabled = true;
+      refreshAdpButton.textContent = "Refreshing…";
+      try{
+        const response = await fetch("/api/player-research/adp/refresh", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:"{}"
+        });
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.error || "Refresh failed");
+        location.reload();
+      }catch(error){
+        alert(error.message);
+        refreshAdpButton.disabled = false;
+        refreshAdpButton.textContent = original;
+      }
+    });
+  }
 
   const fmt = value => {
     if(value === null || value === undefined || value === "") return "—";
