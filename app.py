@@ -800,12 +800,105 @@ def _manual_mock_list(limit=30):
     rows.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     return rows[:limit]
 
-def _manual_player_lookup():
-    return {p["name"]: p for p in MOCK_PLAYER_POOL}
+def _mock_projection_from_stats(stats, pos):
+    ppr = float(stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0)
+    if ppr > 0:
+        # modest growth/mean-reversion heuristic for simulator depth players
+        return round(ppr * 1.03, 1)
+    defaults = {"QB": 240, "RB": 150, "WR": 145, "TE": 110, "K": 120, "DEF": 120}
+    return defaults.get(pos, 100)
+
+def _build_dynamic_mock_pool(context):
+    """
+    Produce enough draftable players for a full 12-team, 15-round mock.
+    Uses the app's known player pool first, then augments from the player
+    directory + 2025 stats + platform ADP.
+    """
+    platform = "YAHOO" if "YAHOO" in str(context.get("platform","")).upper() else "ESPN"
+    adp_data = _platform_2026_adp_data(platform)
+    adp_map = adp_data.get("players", {})
+    stats_map = _stats_2025_snapshot().get("players", {})
+    directory = _pr_players()
+
+    pool = {}
+    rank_counter = 1
+
+    # Keep original curated pool.
+    for p in MOCK_PLAYER_POOL:
+        item = dict(p)
+        norm = _pr_norm(item["name"])
+        adp_row = adp_map.get(norm, {})
+        try:
+            item["adp"] = float(adp_row.get("adp", item.get("adp", 999)))
+        except Exception:
+            item["adp"] = float(item.get("adp", 999))
+        stats = stats_map.get(norm, {})
+        if not item.get("projection"):
+            item["projection"] = _mock_projection_from_stats(stats, item.get("pos"))
+        pool[norm] = item
+
+    # Add active fantasy players from Player Research directory.
+    for pid, p in directory.items():
+        name = p.get("full_name") or " ".join(x for x in [p.get("first_name"),p.get("last_name")] if x)
+        pos = str(p.get("position") or ((p.get("fantasy_positions") or [""])[0]) or "").upper()
+        if pos == "DST":
+            pos = "DEF"
+        if not name or pos not in {"QB","RB","WR","TE","K","DEF"}:
+            continue
+
+        norm = _pr_norm(name)
+        if norm in pool:
+            continue
+
+        adp_row = adp_map.get(norm, {})
+        try:
+            adp = float(adp_row.get("adp", 999))
+        except Exception:
+            adp = 999.0
+
+        stats = stats_map.get(norm, {})
+        projection = _mock_projection_from_stats(stats, pos)
+
+        # Exclude extremely low-information players only after the pool is deep.
+        pool[norm] = {
+            "rank": 999,
+            "name": name,
+            "pos": pos,
+            "team": p.get("team") or stats.get("team") or "FA",
+            "tier": 9,
+            "adp": adp,
+            "projection": projection,
+        }
+
+    players = list(pool.values())
+
+    # Rank: platform ADP first, then 2025 production/projection.
+    def sort_key(p):
+        norm = _pr_norm(p["name"])
+        stats = stats_map.get(norm, {})
+        ppr = float(stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0)
+        adp = float(p.get("adp", 999))
+        return (adp if adp < 999 else 2000 - min(ppr, 500), -ppr, -float(p.get("projection",0)))
+
+    players.sort(key=sort_key)
+    for idx, p in enumerate(players, 1):
+        p["rank"] = idx
+        if p.get("adp", 999) >= 999:
+            # Synthetic fallback draft cost for simulator-only depth players.
+            p["adp"] = round(max(1, idx + 8), 1)
+
+    # 220 is enough for 12 teams x 15 rounds (180 picks) plus buffer.
+    return players[:240]
+
+def _manual_player_lookup(mock=None):
+    pool = (mock or {}).get("player_pool") if mock else None
+    pool = pool or MOCK_PLAYER_POOL
+    return {p["name"]: p for p in pool}
 
 def _manual_available(mock):
     drafted = {p["player"] for p in mock.get("picks", [])}
-    return [dict(p) for p in MOCK_PLAYER_POOL if p["name"] not in drafted]
+    pool = mock.get("player_pool") or MOCK_PLAYER_POOL
+    return [dict(p) for p in pool if p["name"] not in drafted]
 
 def _manual_order(mock):
     return mock_pick_order(int(mock["teams"]), int(mock["rounds"]))
@@ -816,7 +909,7 @@ def _manual_current_order_row(mock):
     return order[idx] if idx < len(order) else None
 
 def _manual_user_roster(mock):
-    lookup = _manual_player_lookup()
+    lookup = _manual_player_lookup(mock)
     roster = []
     for pick in mock.get("picks", []):
         if pick.get("user_pick"):
@@ -1324,6 +1417,7 @@ def manual_mock_start():
         "rounds": rounds,
         "status": "starting",
         "picks": [],
+        "player_pool": _build_dynamic_mock_pool(context),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1332,7 +1426,7 @@ def manual_mock_start():
     _manual_finalize_if_complete(mock)
     _manual_mock_save(mock)
 
-    return jsonify(ok=True, mock=mock)
+    return jsonify(ok=True, mock=mock, player_pool_count=len(mock.get("player_pool", [])))
 
 
 @app.get("/api/mock-draft/manual/<mock_id>/board")
@@ -1761,22 +1855,86 @@ def _pr_int(value):
         return 0
 
 def _pr_players():
+    """
+    Sleeper is the preferred player directory, but Player Research should not
+    become unusable when Render cannot reach Sleeper. Cache successful results
+    and fall back to the app's own draft/player datasets.
+    """
     try:
         if PLAYER_CACHE_FILE.exists() and (time.time() - PLAYER_CACHE_FILE.stat().st_mtime) < PLAYER_CACHE_TTL:
-            return json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+            cached = json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+            if cached:
+                return cached
     except Exception:
         pass
+
     try:
         r = requests.get("https://api.sleeper.app/v1/players/nfl?active=true", timeout=30)
         r.raise_for_status()
         data = r.json()
-        PLAYER_CACHE_FILE.write_text(json.dumps(data), encoding="utf-8")
-        return data
+        if data:
+            try:
+                PLAYER_CACHE_FILE.write_text(json.dumps(data), encoding="utf-8")
+            except Exception:
+                pass
+            return data
     except Exception:
-        try:
-            return json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8")) if PLAYER_CACHE_FILE.exists() else {}
-        except Exception:
-            return {}
+        pass
+
+    # Use stale cache if we have one.
+    try:
+        if PLAYER_CACHE_FILE.exists():
+            cached = json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+            if cached:
+                return cached
+    except Exception:
+        pass
+
+    # Final local fallback so the page still works.
+    fallback = {}
+    all_local = []
+    try:
+        all_local.extend(MOCK_PLAYER_POOL)
+    except Exception:
+        pass
+    try:
+        for platform in ("ESPN", "YAHOO"):
+            payload = _platform_2026_adp_data(platform)
+            for item in payload.get("players", {}).values():
+                all_local.append(item)
+    except Exception:
+        pass
+    try:
+        for item in _stats_2025_snapshot().get("players", {}).values():
+            all_local.append(item)
+    except Exception:
+        pass
+
+    seen = set()
+    for idx, item in enumerate(all_local, 1):
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        norm = _pr_norm(name)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        pos = str(item.get("position") or item.get("pos") or "").upper()
+        if pos == "DST":
+            pos = "DEF"
+        fallback[str(idx)] = {
+            "full_name": name,
+            "position": pos,
+            "fantasy_positions": [pos] if pos else [],
+            "team": item.get("team") or "FA",
+            "status": "Active",
+            "age": item.get("age"),
+            "years_exp": item.get("years_exp"),
+            "college": item.get("college"),
+        }
+
+    return fallback
+
 
 def _pr_search(query, limit=25):
     q = _pr_norm(query)
@@ -2086,6 +2244,36 @@ def player_research():
         adp_updated_at=adp_meta.get("updated_at", ""),
         adp_status=adp_meta.get("status", "unknown"),
         adp_warning=adp_meta.get("warning", ""),
+    )
+
+@app.get("/api/diagnostics/player-research")
+def diagnostics_player_research():
+    platform = _league_platform()
+    directory = _pr_players()
+    stats = _stats_2025_snapshot()
+    adp = _platform_2026_adp_data(platform)
+    return jsonify(
+        ok=bool(directory),
+        player_directory_count=len(directory),
+        stats_2025_count=len(stats.get("players", {})),
+        adp_player_count=len(adp.get("players", {})),
+        platform=platform,
+        adp_source=adp.get("source"),
+    )
+
+@app.get("/api/diagnostics/mock-draft")
+def diagnostics_mock_draft():
+    key = request.args.get("league") or "espn-gramps"
+    context = dict(CONTEXTS.get(key, CONTEXTS["espn-gramps"]))
+    pool = _build_dynamic_mock_pool(context)
+    counts = Counter(p.get("pos") for p in pool)
+    return jsonify(
+        ok=len(pool) >= int(context.get("teams",12)) * 10,
+        league=key,
+        platform=context.get("platform"),
+        teams=context.get("teams"),
+        player_pool_count=len(pool),
+        position_counts=dict(counts),
     )
 
 @app.get("/api/player-research/search")
