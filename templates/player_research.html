@@ -129,14 +129,14 @@
   </section>
 
   <div style="margin-bottom:14px;padding:10px 12px;border-radius:10px;
-    {% if adp_status == 'live' %}background:#eaf8ee;color:#148c3b;
+    {% if adp_status in ['live','local'] %}background:#eaf8ee;color:#148c3b;
     {% elif adp_status == 'cached' %}background:#fff7e6;color:#9a6400;
     {% else %}background:#fdecec;color:#b83434;{% endif %}">
     <b>{{ active_platform }} 2026 ADP:</b>
-    {% if adp_status == 'live' %}
-      local ADP file loaded
+    {% if adp_status in ['live','local'] %}
+      local ADP file loaded successfully
     {% elif adp_status == 'cached' %}
-      local ADP file loaded
+      using cached ADP data
     {% else %}
       local ADP file did not load
     {% endif %}
