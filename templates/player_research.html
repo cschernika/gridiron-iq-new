@@ -124,8 +124,25 @@
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div class="pr-count">{{ player_count }} players shown · {{ active_platform }} {{ active_scoring }} · {{ adp_source }}</div>
       <button id="pr-refresh-adp" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer">Refresh 2026 ADP</button>
+      <a href="/api/player-research/adp/status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none">Check ADP Status</a>
     </div>
   </section>
+
+  <div style="margin-bottom:14px;padding:10px 12px;border-radius:10px;
+    {% if adp_status == 'live' %}background:#eaf8ee;color:#148c3b;
+    {% elif adp_status == 'cached' %}background:#fff7e6;color:#9a6400;
+    {% else %}background:#fdecec;color:#b83434;{% endif %}">
+    <b>{{ active_platform }} 2026 ADP:</b>
+    {% if adp_status == 'live' %}
+      live data loaded
+    {% elif adp_status == 'cached' %}
+      using cached data
+    {% else %}
+      data did not load
+    {% endif %}
+    {% if adp_updated_at %} · {{ adp_updated_at }}{% endif %}
+    {% if adp_warning %}<div style="font-size:10px;margin-top:4px">{{ adp_warning }}</div>{% endif %}
+  </div>
 
 <div id="pr-loading" class="pr-loading" style="display:none">Loading full player research…</div>
 
@@ -226,7 +243,7 @@
             <td class="pr-player">{{ p.name }}</td>
             <td><span class="pr-position">{{ p.position }}</span></td>
             <td>{{ p.team }}</td>
-            <td class="pr-points">{% if p.adp < 999 %}{{ p.adp }}{% else %}—{% endif %}</td>
+            <td class="pr-points">{% if p.adp < 999 %}{{ p.adp }}{% else %}Not loaded{% endif %}</td>
             <td>
               <span class="pr-status {% if p.status|lower == 'active' %}active{% endif %}">
                 {{ p.status or '—' }}
