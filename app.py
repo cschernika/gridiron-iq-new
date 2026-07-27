@@ -1082,6 +1082,7 @@ def waiver_analyze():
 # PLAYER RESEARCH CENTER
 # ============================================================
 import csv
+from html.parser import HTMLParser
 import io
 import re
 import time
@@ -1297,12 +1298,15 @@ def player_research():
         selected_position = ""
 
     player_rows = _pr_position_rows(selected_position, limit=2000)
+    adp_meta = _pr_2026_adp_data()
 
     return page(
         "player_research.html",
         selected_position=selected_position,
         player_rows=player_rows,
         player_count=len(player_rows),
+        adp_source=adp_meta.get("source", "2026 ADP"),
+        adp_updated_at=adp_meta.get("updated_at", ""),
     )
 
 @app.get("/api/player-research/search")
@@ -1311,18 +1315,168 @@ def player_research_search():
     return jsonify(ok=True, players=_pr_search(q) if len(q) >= 2 else [])
 
 
-def _pr_adp_lookup():
-    """Return normalized player-name -> ADP using the app's draft player pool."""
-    lookup = {}
+ADP_2026_CACHE_FILE = DATA_DIR / "adp_2026_cache.json"
+ADP_2026_CACHE_TTL = 6 * 60 * 60
+ADP_2026_URL = "https://www.fantasypros.com/nfl/adp/overall.php"
+
+class _ADPTableParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.in_tr = False
+        self.in_cell = False
+        self.cell_text = []
+        self.row = []
+        self.rows = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self.in_tr = True
+            self.row = []
+        elif self.in_tr and tag in ("td", "th"):
+            self.in_cell = True
+            self.cell_text = []
+
+    def handle_data(self, data):
+        if self.in_cell:
+            self.cell_text.append(data)
+
+    def handle_endtag(self, tag):
+        if self.in_tr and tag in ("td", "th") and self.in_cell:
+            text = " ".join("".join(self.cell_text).split())
+            self.row.append(text)
+            self.in_cell = False
+        elif tag == "tr" and self.in_tr:
+            if self.row:
+                self.rows.append(self.row)
+            self.in_tr = False
+
+def _pr_parse_2026_adp(html):
+    parser = _ADPTableParser()
+    parser.feed(html)
+    result = {}
+
+    for row in parser.rows:
+        if len(row) < 4:
+            continue
+        try:
+            rank = float(str(row[0]).replace("#", "").strip())
+        except Exception:
+            continue
+
+        raw_player = str(row[1]).strip()
+        if not raw_player:
+            continue
+
+        # FantasyPros commonly renders:
+        # "Bijan Robinson B. Robinson ATL (11)"
+        # Prefer the full name before the abbreviated duplicate.
+        m = re.match(r"^(.+?)\s+[A-Z]\.\s+[A-Za-z'’-]+(?:\s+(?:Jr\.|Sr\.|II|III|IV))?\s+[A-Z]{2,3}\s+\(\d+\)", raw_player)
+        if m:
+            player_name = m.group(1).strip()
+        else:
+            # Fallback: remove trailing team/bye and abbreviated duplicate where possible.
+            cleaned = re.sub(r"\s+[A-Z]{2,3}\s+\(\d+\)\s*$", "", raw_player).strip()
+            bits = cleaned.split()
+            player_name = cleaned
+            for i in range(1, len(bits)):
+                if re.fullmatch(r"[A-Z]\.", bits[i]):
+                    player_name = " ".join(bits[:i]).strip()
+                    break
+
+        if not player_name:
+            continue
+
+        # AVG is normally the last cell. If unavailable, overall rank is still useful.
+        avg = rank
+        for cell in reversed(row[3:]):
+            try:
+                avg = float(cell)
+                break
+            except Exception:
+                continue
+
+        result[_pr_norm(player_name)] = {
+            "adp": round(avg, 1),
+            "rank": int(rank),
+            "source": "FantasyPros / Sleeper",
+        }
+
+    return result
+
+def _pr_2026_adp_data(force=False):
+    # Cache live 2026 ADP because it changes throughout draft season.
+    try:
+        if (
+            not force
+            and ADP_2026_CACHE_FILE.exists()
+            and (time.time() - ADP_2026_CACHE_FILE.stat().st_mtime) < ADP_2026_CACHE_TTL
+        ):
+            cached = json.loads(ADP_2026_CACHE_FILE.read_text(encoding="utf-8"))
+            if cached.get("players"):
+                return cached
+    except Exception:
+        pass
+
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; GridironIQ/1.0)",
+            "Accept": "text/html,application/xhtml+xml",
+        }
+        r = requests.get(ADP_2026_URL, headers=headers, timeout=25)
+        r.raise_for_status()
+        players = _pr_parse_2026_adp(r.text)
+
+        if players:
+            payload = {
+                "season": 2026,
+                "source": "FantasyPros consensus ADP (currently sourced from Sleeper when available)",
+                "source_url": ADP_2026_URL,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "players": players,
+            }
+            ADP_2026_CACHE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            return payload
+    except Exception:
+        pass
+
+    # If live refresh fails, preserve the last successful cache.
+    try:
+        if ADP_2026_CACHE_FILE.exists():
+            cached = json.loads(ADP_2026_CACHE_FILE.read_text(encoding="utf-8"))
+            if cached.get("players"):
+                return cached
+    except Exception:
+        pass
+
+    # Final fallback: use the app's internal ADP so the page remains usable,
+    # but label it clearly as fallback data.
+    fallback = {}
     try:
         for p in MOCK_PLAYER_POOL:
             name = str(p.get("name") or "").strip()
-            adp = p.get("adp")
-            if name and adp is not None:
-                lookup[_pr_norm(name)] = float(adp)
+            if name and p.get("adp") is not None:
+                fallback[_pr_norm(name)] = {
+                    "adp": float(p["adp"]),
+                    "rank": int(p.get("rank") or round(float(p["adp"]))),
+                    "source": "Gridiron IQ fallback",
+                }
     except Exception:
         pass
-    return lookup
+
+    return {
+        "season": 2026,
+        "source": "Gridiron IQ fallback ADP",
+        "source_url": "",
+        "updated_at": "",
+        "players": fallback,
+    }
+
+def _pr_adp_lookup():
+    data = _pr_2026_adp_data()
+    return {
+        key: float(value.get("adp", 999.0))
+        for key, value in data.get("players", {}).items()
+    }
 
 def _pr_position_rows(position="", limit=500):
     position = str(position or "").upper().strip()
@@ -1397,6 +1551,18 @@ def _pr_position_rows(position="", limit=500):
         )
     )
     return rows[:limit]
+
+
+@app.post("/api/player-research/adp/refresh")
+def player_research_adp_refresh():
+    data = _pr_2026_adp_data(force=True)
+    return jsonify(
+        ok=True,
+        season=2026,
+        source=data.get("source"),
+        updated_at=data.get("updated_at"),
+        player_count=len(data.get("players", {})),
+    )
 
 @app.get("/api/player-research/position")
 def player_research_position():
