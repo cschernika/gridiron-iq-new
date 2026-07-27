@@ -163,9 +163,22 @@ def short_scoring(settings):
             if "STD" in text or "STANDARD" in text: return "Standard"
     return "Full PPR"
 
+def player_dict(player):
+    return {
+        "player_id": str(getattr(player, "playerId", "") or getattr(player, "player_id", "") or ""),
+        "name": str(getattr(player, "name", "") or "").strip(),
+        "position": str(getattr(player, "position", "") or "").upper(),
+        "pro_team": str(getattr(player, "proTeam", "") or getattr(player, "pro_team", "") or ""),
+        "lineup_slot": str(getattr(player, "slot_position", "") or getattr(player, "lineupSlot", "") or ""),
+        "projected_points": round(float(getattr(player, "projected_points", 0) or 0), 2),
+        "total_points": round(float(getattr(player, "total_points", 0) or 0), 2),
+        "injury_status": str(getattr(player, "injuryStatus", "") or getattr(player, "injury_status", "") or ""),
+    }
+
 def team_dict(team):
     roster = getattr(team, "roster", None) or []
     return {
+        "team_id": str(getattr(team, "team_id", "") or getattr(team, "teamId", "") or ""),
         "team_name": str(getattr(team,"team_name","Unnamed Team")).strip(),
         "owner": str(getattr(team,"owner","") or ""),
         "wins": int(getattr(team,"wins",0) or 0),
@@ -173,10 +186,18 @@ def team_dict(team):
         "ties": int(getattr(team,"ties",0) or 0),
         "points_for": round(float(getattr(team,"points_for",0) or 0),2),
         "roster_size": len(roster),
+        "roster": [player_dict(p) for p in roster],
     }
 
 def user_team(teams):
-    return next((t for t in teams if "chad" in t["team_name"].lower()), None)
+    # Prefer Chad's named team, then any owner/team containing Chad.
+    for t in teams:
+        if "chad" in str(t.get("team_name","")).lower():
+            return t
+    for t in teams:
+        if "chad" in str(t.get("owner","")).lower():
+            return t
+    return None
 
 def page(template, **ctx):
     snap = load_snapshot()
@@ -503,6 +524,49 @@ def draft_center():
 def league_sync():
     return page("league_sync.html",yahoo_configured=bool(os.getenv("YAHOO_CLIENT_ID") and os.getenv("YAHOO_CLIENT_SECRET")),yahoo_redirect=os.getenv("YAHOO_REDIRECT_URI",""))
 
+
+def connected_league_data():
+    snap = load_snapshot() or {}
+    return {
+        "league": snap.get("league") or {},
+        "settings": snap.get("settings") or {},
+        "teams": snap.get("teams") or [],
+        "user_team": user_team(snap.get("teams") or []),
+    }
+
+def league_standings(teams):
+    return sorted(
+        teams,
+        key=lambda t: (
+            int(t.get("wins", 0)),
+            float(t.get("points_for", 0)),
+        ),
+        reverse=True,
+    )
+
+def league_summary():
+    data = connected_league_data()
+    teams = data["teams"]
+    standings = league_standings(teams)
+    rostered = sum(int(t.get("roster_size", 0) or 0) for t in teams)
+    return {
+        **data,
+        "standings": standings,
+        "team_count": len(teams),
+        "rostered_players": rostered,
+        "pre_draft": rostered == 0,
+    }
+
+@app.get("/api/league/summary")
+def league_summary_api():
+    summary = league_summary()
+    return jsonify(ok=bool(summary["league"]), **summary)
+
+@app.get("/api/league/teams")
+def league_teams_api():
+    data = connected_league_data()
+    return jsonify(ok=bool(data["league"]), league=data["league"], teams=data["teams"])
+
 @app.get("/lineup-optimizer")
 def lineup_optimizer(): return page("lineup.html")
 
@@ -510,16 +574,99 @@ def lineup_optimizer(): return page("lineup.html")
 def waiver_assistant(): return page("waivers.html")
 
 @app.get("/trade-analyzer")
-def trade_analyzer(): return page("trade.html")
+def trade_analyzer(): return page("trade.html", league_data=league_summary())
 
 @app.get("/matchup-analyzer")
 def matchup_analyzer(): return page("matchups.html")
 
 @app.get("/league-intelligence")
-def league_intelligence(): return page("league_intelligence.html")
+def league_intelligence(): return page("league_intelligence.html", league_data=league_summary())
+
+def _daily_ai_priorities():
+    summary = league_summary()
+    league = summary["league"]
+    teams = summary["teams"]
+    my_team = summary["user_team"]
+
+    priorities = []
+    if not league:
+        priorities.append({
+            "type": "connection",
+            "priority": "High",
+            "title": "Connect your league",
+            "detail": "Connect ESPN or Yahoo so Gridiron IQ can load teams and league settings.",
+            "action": "/league-sync",
+        })
+    elif summary["pre_draft"]:
+        priorities.extend([
+            {
+                "type": "league",
+                "priority": "High",
+                "title": f"{summary['team_count']} ESPN teams loaded",
+                "detail": "Your league is connected. Rosters are empty because the league has not drafted yet.",
+                "action": "/league-intelligence",
+            },
+            {
+                "type": "draft",
+                "priority": "High",
+                "title": "Prepare for the draft",
+                "detail": "Use Draft Center and Mock Draft Lab while your ESPN rosters are still empty.",
+                "action": "/draft-center",
+            },
+            {
+                "type": "research",
+                "priority": "Medium",
+                "title": "Research draft targets",
+                "detail": "Compare 2025 stats, 2026 projections and platform ADP before draft night.",
+                "action": "/player-research",
+            },
+        ])
+    else:
+        priorities.extend([
+            {
+                "type": "roster",
+                "priority": "High",
+                "title": "Review your roster",
+                "detail": f"{my_team.get('team_name') if my_team else 'Your team'} has {my_team.get('roster_size',0) if my_team else 0} players synced.",
+                "action": "/lineup-optimizer",
+            },
+            {
+                "type": "trade",
+                "priority": "Medium",
+                "title": "Scan trade opportunities",
+                "detail": "Compare your roster against every team in the league.",
+                "action": "/trade-analyzer",
+            },
+            {
+                "type": "league",
+                "priority": "Medium",
+                "title": "Check league intelligence",
+                "detail": "Review standings, team rosters and league-wide strengths.",
+                "action": "/league-intelligence",
+            },
+        ])
+
+    return {
+        "league": league,
+        "settings": summary["settings"],
+        "teams": teams,
+        "team": my_team,
+        "team_count": summary["team_count"],
+        "rostered_players": summary["rostered_players"],
+        "pre_draft": summary["pre_draft"],
+        "priorities": priorities,
+        "stats_2025": _stats_2025_snapshot(),
+        "fantasypros": _fp_api_status() if "_fp_api_status" in globals() else {"configured": False},
+    }
 
 @app.get("/reports")
-def reports(): return page("reports.html")
+def reports():
+    return page("reports.html", coach=_daily_ai_priorities())
+
+@app.get("/api/ai-coach/daily")
+def daily_ai_coach_api():
+    return jsonify(ok=True, coach=_daily_ai_priorities())
+
 
 @app.get("/settings")
 def settings(): return page("settings.html")
@@ -770,6 +917,37 @@ def _manual_2025_points_map(names):
         pass
     return result
 
+
+def _manual_pick_report(mock):
+    roster = _manual_user_roster(mock)
+    reports = []
+    context = dict(CONTEXTS.get(mock.get("league_key"), CONTEXTS["espn-gramps"]))
+
+    for p in roster:
+        enriched = _draft_player_enrichment(p, context, int(p.get("overall", 1)))
+        grade = round(max(
+            35,
+            min(
+                99,
+                65
+                + max(-12, min(12, enriched["value_vs_adp"])) * 1.1
+                + min(10, enriched["projection_2026"] / 30)
+                + min(8, enriched["points_2025"] / 35),
+            ),
+        ))
+        reports.append({
+            "round": p.get("round"),
+            "overall": p.get("overall"),
+            "name": p.get("name"),
+            "pos": p.get("pos"),
+            "adp": enriched["platform_adp"],
+            "projection_2026": enriched["projection_2026"],
+            "points_2025": enriched["points_2025"],
+            "value_vs_adp": enriched["value_vs_adp"],
+            "pick_grade": grade,
+        })
+    return reports
+
 def _manual_grade(mock):
     roster = _manual_user_roster(mock)
     if not roster:
@@ -936,6 +1114,7 @@ def manual_mock_state(mock_id):
         roster=_manual_user_roster(mock),
         available=scored,
         grade=_manual_grade(mock),
+        pick_report=_manual_pick_report(mock),
     )
 
 @app.post("/api/mock-draft/manual/<mock_id>/pick")
@@ -1069,12 +1248,178 @@ def draft_context_api():
     data=dict(context); data["next_picks"]=next_picks(data["draft_slot"],data["teams"],data["round"])
     return jsonify(ok=True,context=data,state=draft_state(key))
 
+
+def _draft_platform_for_context(context):
+    platform = str(context.get("platform") or "ESPN").upper()
+    return "YAHOO" if "YAHOO" in platform else "ESPN"
+
+def _draft_player_enrichment(player, context, overall_pick):
+    platform = _draft_platform_for_context(context)
+    adp_data = _platform_2026_adp_data(platform)
+    adp_row = adp_data.get("players", {}).get(_pr_norm(player["name"]), {})
+    platform_adp = _fp_float(adp_row.get("adp")) if "_fp_float" in globals() else None
+    if platform_adp is None or platform_adp >= 999:
+        platform_adp = float(player.get("adp", 999))
+
+    stats = _stats_2025_for_name(player["name"]) or {}
+    prior_points = float(stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0)
+    projection = float(player.get("projection", 0) or 0)
+
+    # Prefer FantasyPros projection snapshot if it exists inside the platform dataset.
+    fp_proj = adp_row.get("projection_2026")
+    if isinstance(fp_proj, dict):
+        for key in ("fpts", "fantasy_points", "fantasy_points_ppr", "points"):
+            value = _fp_float(fp_proj.get(key)) if "_fp_float" in globals() else None
+            if value is not None:
+                projection = value
+                break
+
+    value_vs_adp = platform_adp - overall_pick
+
+    return {
+        "platform_adp": round(platform_adp, 1) if platform_adp < 999 else 999,
+        "projection_2026": round(projection, 1),
+        "points_2025": round(prior_points, 1),
+        "value_vs_adp": round(value_vs_adp, 1) if platform_adp < 999 else 0,
+    }
+
+def _draft_survival_probability(adp, next_overall):
+    if adp is None or adp >= 999:
+        return 25
+    distance = next_overall - float(adp)
+    return round(max(5, min(95, 82 * exp(-max(0, distance) / 18))))
+
+def intelligent_recommendation(context, state, round_no, pick_no, strategy):
+    overall = (round_no - 1) * context["teams"] + pick_no
+    next_round = round_no + 1
+    next_overall = (
+        (next_round - 1) * context["teams"]
+        + snake_pick(next_round, context["draft_slot"], context["teams"])
+    )
+
+    counts = position_counts(state["roster"])
+    drafted = set(state["drafted"])
+    scored = []
+
+    for base in PLAYERS:
+        if base["name"] in drafted:
+            continue
+
+        enriched = _draft_player_enrichment(base, context, overall)
+        need = need_score(base["pos"], counts, context)
+        scarcity_label, scarcity_num = scarcity(base["pos"], drafted)
+
+        production_signal = min(12, enriched["projection_2026"] / 28.0)
+        history_signal = min(10, enriched["points_2025"] / 30.0)
+        adp_signal = max(-10, min(14, enriched["value_vs_adp"] * 0.9))
+
+        score = (
+            58
+            + production_signal
+            + history_signal
+            + adp_signal
+            + need * 0.10
+            + scarcity_num * 0.05
+            + scoring_bonus(base, context["scoring"])
+            + strategy_bonus(base, strategy, round_no)
+        )
+
+        survival = _draft_survival_probability(enriched["platform_adp"], next_overall)
+        # Reward players unlikely to make it back to the user.
+        score += (100 - survival) * 0.07
+
+        fit = "Excellent" if need >= 80 else "Good" if need >= 55 else "Depth"
+
+        scored.append({
+            **base,
+            **enriched,
+            "iq_score": round(max(40, min(99, score))),
+            "roster_fit": fit,
+            "scarcity": scarcity_label,
+            "survival_probability": survival,
+        })
+
+    scored.sort(
+        key=lambda x: (
+            x["iq_score"],
+            -x["projection_2026"],
+            -x["points_2025"],
+            -x["rank"],
+        ),
+        reverse=True,
+    )
+
+    if not scored:
+        return recommendation(context, state, round_no, pick_no, strategy)
+
+    best = scored[0]
+    same_tier = [
+        p for p in scored
+        if p["pos"] == best["pos"] and p.get("tier") == best.get("tier")
+    ]
+    tier_risk = "High" if len(same_tier) <= 2 else "Medium" if len(same_tier) <= 4 else "Low"
+
+    rationale = (
+        f"{best['name']} grades as the best current pick using "
+        f"{context['platform']} ADP, 2026 projection, 2025 production, "
+        f"positional need and scarcity. "
+        f"ADP: {best['platform_adp'] if best['platform_adp'] < 999 else 'N/A'}; "
+        f"2025 PPR points: {best['points_2025']}; "
+        f"2026 projection: {best['projection_2026']}; "
+        f"chance of surviving to your next pick: {best['survival_probability']}%."
+    )
+
+    return {
+        "player": best,
+        "score": best["iq_score"],
+        "confidence": min(97, max(60, best["iq_score"] - 2)),
+        "adp_value": f"{best['value_vs_adp']:+.1f}",
+        "platform_adp": best["platform_adp"],
+        "projection_2026": best["projection_2026"],
+        "points_2025": best["points_2025"],
+        "roster_fit": best["roster_fit"],
+        "scarcity": best["scarcity"],
+        "tier_risk": tier_risk,
+        "survival_probability": best["survival_probability"],
+        "rationale": rationale,
+        "next_best": scored[1:4],
+    }
+
+@app.get("/api/draft/intelligence")
+def draft_intelligence_api():
+    key = request.args.get("league_key") or "espn-gramps"
+    context = dict(CONTEXTS.get(key, CONTEXTS["espn-gramps"]))
+    state = draft_state(key)
+    rec = intelligent_recommendation(
+        context,
+        state,
+        int(context.get("round", 1)),
+        int(context.get("pick_in_round", 1)),
+        "balanced",
+    )
+    return jsonify(ok=True, recommendation=rec, context=context)
+
 @app.post("/api/draft/pro/recommend")
 def draft_recommend_api():
-    data=request.get_json(silent=True) or {}; key=data.get("league_key") or "espn-gramps"; context=dict(CONTEXTS.get(key,CONTEXTS["espn-gramps"]))
-    context["draft_slot"]=int(data.get("draft_slot") or context["draft_slot"]); context["round"]=int(data.get("round") or context["round"]); context["pick_in_round"]=int(data.get("pick_in_round") or context["pick_in_round"]); context["next_picks"]=next_picks(context["draft_slot"],context["teams"],context["round"])
-    rec=recommendation(context,draft_state(key),context["round"],context["pick_in_round"],str(data.get("strategy") or "balanced"))
-    return jsonify(ok=True,recommendation=rec,context=context)
+    data = request.get_json(silent=True) or {}
+    key = data.get("league_key") or "espn-gramps"
+    context = dict(CONTEXTS.get(key, CONTEXTS["espn-gramps"]))
+
+    context["draft_slot"] = int(data.get("draft_slot") or context["draft_slot"])
+    context["round"] = int(data.get("round") or context["round"])
+    context["pick_in_round"] = int(data.get("pick_in_round") or context["pick_in_round"])
+    context["next_picks"] = next_picks(
+        context["draft_slot"], context["teams"], context["round"]
+    )
+
+    rec = intelligent_recommendation(
+        context,
+        draft_state(key),
+        context["round"],
+        context["pick_in_round"],
+        str(data.get("strategy") or "balanced"),
+    )
+    return jsonify(ok=True, recommendation=rec, context=context)
 
 @app.post("/api/draft/pro/mark")
 def draft_mark_api():
@@ -1253,82 +1598,193 @@ def _pr_aggregate(rows, player_name):
 
 def _pr_history(player_name):
     out = []
-    for season in (2022, 2023, 2024, 2025):
+    for season in (2022, 2023, 2024):
         stats = _pr_aggregate(_pr_rows(season), player_name)
         if stats:
             out.append({"season": season, **stats})
+
+    stats_2025 = _stats_2025_for_name(player_name)
+    if stats_2025:
+        stats_2025 = {k:v for k,v in stats_2025.items() if k != "name"}
+        out.append({"season": 2025, **stats_2025})
     return out
 
-def _pr_projection(history, position):
-    if not history:
-        return {"method": "Insufficient historical data", "games": 17, "position": position}
-    recent = sorted(history, key=lambda x: x["season"], reverse=True)[:3]
-    raw_weights = [0.60, 0.28, 0.12][:len(recent)]
-    total_weight = sum(raw_weights)
-    weights = [w / total_weight for w in raw_weights]
-    fields = [
-        "passing_yards","passing_tds","interceptions",
-        "rushing_yards","rushing_tds","carries",
-        "receptions","targets","receiving_yards","receiving_tds",
-        "fantasy_points","fantasy_points_ppr",
-    ]
-    proj = {"games": 17, "position": position}
-    for field in fields:
-        per_game = 0.0
-        for weight, season in zip(weights, recent):
-            per_game += weight * (_pr_num(season.get(field)) / max(1, season.get("games", 1)))
-        proj[field] = round(per_game * 17, 1)
-    proj["method"] = "Gridiron IQ weighted recent-production model"
-    return proj
 
-def _pr_trend(history):
-    if len(history) < 2:
-        return {"direction": "Not enough data", "change_pct": 0}
-    ordered = sorted(history, key=lambda x: x["season"])
-    old, new = ordered[-2], ordered[-1]
-    old_pts = old.get("fantasy_points_ppr") or old.get("fantasy_points") or 0
-    new_pts = new.get("fantasy_points_ppr") or new.get("fantasy_points") or 0
-    pct = round((new_pts - old_pts) / old_pts * 100, 1) if old_pts else 0
-    direction = "Rising" if pct > 5 else "Declining" if pct < -5 else "Stable"
-    return {"direction": direction, "change_pct": pct}
+STATS_2025_SNAPSHOT_FILE = DATA_DIR / "nfl_player_stats_2025.json"
 
-def _pr_profile(player_id):
-    p = _pr_players().get(str(player_id))
-    if not p:
-        return None
-    name = p.get("full_name") or " ".join(x for x in [p.get("first_name"), p.get("last_name")] if x)
-    history = _pr_history(name)
-    prior = next((x for x in history if x["season"] == 2025), None)
-    position = p.get("position") or ((p.get("fantasy_positions") or [""])[0])
+STATS_2025_FIELDS = (
+    "games", "completions", "attempts", "passing_yards", "passing_tds",
+    "interceptions", "carries", "rushing_yards", "rushing_tds",
+    "targets", "receptions", "receiving_yards", "receiving_tds",
+    "fantasy_points", "fantasy_points_ppr"
+)
+
+def _stats_2025_snapshot():
+    try:
+        if STATS_2025_SNAPSHOT_FILE.exists():
+            payload = json.loads(STATS_2025_SNAPSHOT_FILE.read_text(encoding="utf-8"))
+            if isinstance(payload.get("players"), dict):
+                return payload
+    except Exception:
+        pass
     return {
-        "bio": {
-            "player_id": str(player_id),
-            "name": name,
-            "position": position,
-            "team": p.get("team") or "FA",
-            "number": p.get("number"),
-            "age": p.get("age"),
-            "height": p.get("height"),
-            "weight": p.get("weight"),
-            "college": p.get("college"),
-            "years_exp": p.get("years_exp"),
-            "status": p.get("status"),
-            "injury_status": p.get("injury_status"),
-            "injury_body_part": p.get("injury_body_part"),
-            "practice_participation": p.get("practice_participation"),
-            "depth_chart_position": p.get("depth_chart_position"),
-            "depth_chart_order": p.get("depth_chart_order"),
-        },
-        "previous_year": prior,
-        "history": history,
-        "projection": _pr_projection(history, position),
-        "trend": _pr_trend(history),
-        "data_notes": [
-            "Player bio/status data: Sleeper read-only NFL player directory.",
-            "Historical production: nflverse public player-stat releases when available.",
-            "2026 projections: Gridiron IQ model estimates, not official platform projections.",
-        ],
+        "season": 2025,
+        "source": "nflverse Player Summary Stats",
+        "status": "empty",
+        "updated_at": "",
+        "player_count": 0,
+        "players": {},
     }
+
+def _stats_2025_clean_number(value):
+    try:
+        if value in (None, "", "NA", "NaN"):
+            return 0
+        number = float(value)
+        return int(number) if number.is_integer() else round(number, 2)
+    except Exception:
+        return 0
+
+def _stats_2025_player_record(name, rows):
+    stats = _pr_aggregate(rows, name) or {}
+    first = rows[0] if rows else {}
+    position = str(
+        first.get("position")
+        or first.get("position_group")
+        or stats.get("position")
+        or ""
+    ).upper()
+    if position == "DST":
+        position = "DEF"
+
+    record = {
+        "name": name,
+        "player_id": str(first.get("player_id") or ""),
+        "position": position,
+        "team": str(first.get("recent_team") or first.get("team") or ""),
+    }
+    for field in STATS_2025_FIELDS:
+        record[field] = _stats_2025_clean_number(stats.get(field))
+
+    record["total_tds"] = (
+        _stats_2025_clean_number(record.get("passing_tds"))
+        + _stats_2025_clean_number(record.get("rushing_tds"))
+        + _stats_2025_clean_number(record.get("receiving_tds"))
+    )
+    return record
+
+def _build_2025_stats_snapshot():
+    rows = _pr_rows(2025)
+    if not rows:
+        raise RuntimeError(
+            "No 2025 nflverse player-stat rows were returned. "
+            "Check Render outbound access and the nflverse loader."
+        )
+
+    # Regular season only when season_type is present.
+    regular = [
+        row for row in rows
+        if str(row.get("season_type") or "REG").upper() == "REG"
+    ]
+    if regular:
+        rows = regular
+
+    grouped = {}
+    for row in rows:
+        name = _pr_row_name(row)
+        norm = _pr_norm(name)
+        if not norm:
+            continue
+        grouped.setdefault(norm, {"name": name, "rows": []})
+        grouped[norm]["rows"].append(row)
+
+    players = {}
+    position_counts = {}
+    for norm, bundle in grouped.items():
+        record = _stats_2025_player_record(bundle["name"], bundle["rows"])
+        # Keep fantasy-relevant offensive players and kickers.
+        pos = record.get("position", "")
+        if pos not in {"QB", "RB", "WR", "TE", "K", "FB"}:
+            continue
+        players[norm] = record
+        position_counts[pos] = position_counts.get(pos, 0) + 1
+
+    payload = {
+        "season": 2025,
+        "season_type": "REG",
+        "source": "nflverse Player Summary Stats",
+        "status": "local",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "player_count": len(players),
+        "position_counts": position_counts,
+        "players": players,
+    }
+
+    if not players:
+        raise RuntimeError("2025 rows loaded, but no fantasy-relevant player records were built.")
+
+    STATS_2025_SNAPSHOT_FILE.write_text(
+        json.dumps(payload, indent=2),
+        encoding="utf-8"
+    )
+    return payload
+
+def _stats_2025_for_name(player_name):
+    snapshot = _stats_2025_snapshot()
+    item = snapshot.get("players", {}).get(_pr_norm(player_name))
+    if item:
+        return dict(item)
+
+    # Before the snapshot is built, retain the existing runtime fallback.
+    try:
+        return _pr_aggregate(_pr_rows(2025), player_name)
+    except Exception:
+        return None
+
+@app.post("/api/data/build-2025-stats")
+def build_2025_stats_api():
+    try:
+        payload = _build_2025_stats_snapshot()
+        return jsonify(
+            ok=True,
+            season=2025,
+            season_type="REG",
+            status=payload.get("status"),
+            source=payload.get("source"),
+            player_count=payload.get("player_count"),
+            position_counts=payload.get("position_counts", {}),
+            updated_at=payload.get("updated_at"),
+            message="2025 player stats database built successfully.",
+        )
+    except Exception as exc:
+        return jsonify(
+            ok=False,
+            season=2025,
+            status="error",
+            error=str(exc),
+        ), 500
+
+@app.get("/api/data/2025-stats/status")
+def stats_2025_status_api():
+    payload = _stats_2025_snapshot()
+    return jsonify(
+        ok=bool(payload.get("players")),
+        season=2025,
+        season_type=payload.get("season_type", "REG"),
+        status=payload.get("status", "empty"),
+        source=payload.get("source"),
+        player_count=len(payload.get("players", {})),
+        position_counts=payload.get("position_counts", {}),
+        updated_at=payload.get("updated_at", ""),
+    )
+
+@app.get("/api/data/2025-stats/player/<path:player_name>")
+def stats_2025_player_api(player_name):
+    player = _stats_2025_for_name(player_name)
+    if not player:
+        return jsonify(ok=False, error="Player not found in 2025 stats database."), 404
+    return jsonify(ok=True, season=2025, player=player)
+
 
 @app.get("/player-research")
 def player_research():
@@ -1940,20 +2396,20 @@ def _pr_adp_lookup(platform="ESPN"):
 def _pr_position_rows(position="", limit=500, platform="ESPN"):
     position = str(position or "").upper().strip()
     sleeper = _pr_players()
-    season_rows = _pr_rows(2025)
-    adp_lookup = _pr_adp_lookup(platform)
 
-    # Build one stats lookup so we do not scan the CSV separately for every player.
-    by_name = {}
-    for row in season_rows:
-        name = _pr_row_name(row)
-        key = _pr_norm(name)
-        if not key:
-            continue
-        by_name.setdefault(key, []).append(row)
+    adp_data = _platform_2026_adp_data(platform)
+    adp_lookup = {
+        key: float(value.get("adp", 999.0))
+        for key, value in adp_data.get("players", {}).items()
+    }
+    adp_display_lookup = {
+        key: value.get("adp_display")
+        for key, value in adp_data.get("players", {}).items()
+    }
 
-    rows = []
+    stats_snapshot = _stats_2025_snapshot().get("players", {})
     allowed = {"QB","RB","WR","TE","K","DEF"}
+    rows = []
 
     for player_id, p in sleeper.items():
         name = p.get("full_name") or " ".join(
@@ -1964,12 +2420,16 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
             continue
 
         pos = str(pos).upper()
+        if pos == "DST":
+            pos = "DEF"
         if pos not in allowed:
             continue
         if position and pos != position:
             continue
 
-        stats = _pr_aggregate(by_name.get(_pr_norm(name), []), name) or {}
+        stats = stats_snapshot.get(_pr_norm(name))
+        if not stats:
+            stats = _stats_2025_for_name(name) or {}
 
         fantasy = stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0
         total_tds = (
@@ -1978,6 +2438,7 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
             + _pr_num(stats.get("receiving_tds"))
         )
 
+        norm = _pr_norm(name)
         rows.append({
             "player_id": str(player_id),
             "name": name,
@@ -1986,8 +2447,9 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
             "status": p.get("status") or "",
             "age": p.get("age"),
             "years_exp": p.get("years_exp"),
+            "adp": round(adp_lookup.get(norm, 999.0), 1),
+            "adp_display": adp_display_lookup.get(norm),
             "games": stats.get("games", 0),
-            "adp": round(adp_lookup.get(_pr_norm(name), 999.0), 1),
             "fantasy_points_ppr": round(_pr_num(fantasy), 1),
             "passing_yards": round(_pr_num(stats.get("passing_yards")), 1),
             "passing_tds": round(_pr_num(stats.get("passing_tds")), 1),
@@ -2002,13 +2464,7 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
             "total_tds": round(total_tds, 1),
         })
 
-    rows.sort(
-        key=lambda x: (
-            x.get("adp", 999.0),
-            x["position"],
-            x["name"],
-        )
-    )
+    rows.sort(key=lambda x: (x.get("adp", 999.0), -x.get("fantasy_points_ppr", 0), x["name"]))
     return rows[:limit]
 
 
