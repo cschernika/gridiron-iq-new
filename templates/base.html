@@ -6,20 +6,30 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
-<div class="app-shell">
+<div class="shell">
 <aside class="sidebar">
-<a class="brand" href="/app"><span class="brand-mark">GI</span><span><b>Gridiron IQ</b><small>Fantasy Football AI</small></span></a>
-<nav>
-<a href="/app">Command Center</a><a href="/draft-center">Draft Center</a><a href="/lineup-optimizer">Lineup Optimizer</a>
-<a href="/waiver-assistant">Waiver Assistant</a><a href="/trade-analyzer">Trade Analyzer</a>
-<a href="/matchup-analyzer">Matchup Analyzer</a><a href="/league-intelligence">League Intelligence</a>
-<a href="/league-sync">League Sync</a><a href="/reports">Reports</a><a href="/settings">Settings</a><a href="/help">Help</a>
-</nav>
-<div class="sidebar-foot"><span class="online-dot"></span> Application online</div>
+  <a class="brand" href="/app"><div class="shield">GI</div><div><b>GRIDIRON IQ</b><small>FANTASY INTELLIGENCE</small></div></a>
+  <div class="nav-label">OVERVIEW</div>
+  <a class="nav active" href="/app">⌂ Dashboard Home</a>
+  <a class="nav" href="/reports">✣ Daily AI Coach</a>
+  <div class="nav-label">LEAGUE TOOLS</div>
+  <a class="nav" href="/league-intelligence">◫ League Analyzer</a>
+  <a class="nav" href="/trade-analyzer">⇄ Trade Analyzer</a>
+  <a class="nav" href="/waiver-assistant">♙ Waiver Wire</a>
+  <a class="nav" href="/lineup-optimizer">⚙ Start / Sit Optimizer</a>
+  <a class="nav" href="/matchup-analyzer">▣ Matchup Analyzer</a>
+  <div class="nav-label">DRAFT</div>
+  <a class="nav" href="/draft-center">♙ Draft Center</a>
+  <a class="nav" href="/draft-center">◧ Player Research</a>
+  <div class="nav-label">CONNECTIONS</div>
+  <a class="nav" href="/league-sync">⊕ Connect League</a>
+  <a class="nav" href="/league-sync">⇄ League Sync</a>
+  <div class="nav-label">SETTINGS</div>
+  <a class="nav" href="/settings">⚙ Settings</a>
+  <a class="nav" href="/help">? Help & Support</a>
+  <div class="user"><div class="avatar">{{ user.name[0] if user else "C" }}</div><div><b>{{ user.name if user else "Chad" }}</b><small>Single-user mode</small></div></div>
 </aside>
-<main class="main">
-<header class="topbar"><div><p class="eyebrow">2026 Fantasy Season</p><h1>{% block heading %}Gridiron IQ{% endblock %}</h1></div><div class="user-chip"><span>{{ user.name[0] }}</span><div><b>{{ user.name }}</b><small>Single-user mode</small></div></div></header>
-{% block body %}{% endblock %}
-</main></div>
+<main class="main">{% block body %}{% endblock %}</main>
+</div>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body></html>
