@@ -3374,6 +3374,154 @@ def player_research_position():
         players=rows,
     )
 
+
+def _pr_projection(history, position):
+    """
+    Build a simple 17-game 2026 projection from recent production.
+    Uses the most recent three seasons available, weighted toward 2025.
+    """
+    if not history:
+        return {
+            "method": "Insufficient historical data",
+            "games": 17,
+            "position": position,
+        }
+
+    recent = sorted(history, key=lambda x: x["season"], reverse=True)[:3]
+    raw_weights = [0.60, 0.28, 0.12][:len(recent)]
+    total_weight = sum(raw_weights)
+    weights = [w / total_weight for w in raw_weights]
+
+    fields = [
+        "passing_yards", "passing_tds", "interceptions",
+        "rushing_yards", "rushing_tds", "carries",
+        "receptions", "targets", "receiving_yards", "receiving_tds",
+        "fantasy_points", "fantasy_points_ppr",
+    ]
+
+    proj = {"games": 17, "position": position}
+    for field in fields:
+        per_game = 0.0
+        for weight, season in zip(weights, recent):
+            games = max(1, int(season.get("games") or 1))
+            per_game += weight * (_pr_num(season.get(field)) / games)
+        proj[field] = round(per_game * 17, 1)
+
+    proj["method"] = "Gridiron IQ weighted recent-production model"
+    return proj
+
+
+def _pr_trend(history):
+    if len(history) < 2:
+        return {"direction": "Not enough data", "change_pct": 0}
+
+    ordered = sorted(history, key=lambda x: x["season"])
+    old, new = ordered[-2], ordered[-1]
+    old_pts = old.get("fantasy_points_ppr") or old.get("fantasy_points") or 0
+    new_pts = new.get("fantasy_points_ppr") or new.get("fantasy_points") or 0
+
+    pct = round((new_pts - old_pts) / old_pts * 100, 1) if old_pts else 0
+    direction = "Rising" if pct > 5 else "Declining" if pct < -5 else "Stable"
+    return {"direction": direction, "change_pct": pct}
+
+
+def _pr_profile(player_id):
+    """
+    Return the individual-player detail payload consumed by player_research.html.
+
+    This function was missing from the latest app.py, which caused every player
+    click to raise a NameError and return HTTP 500.
+    """
+    players = _pr_players()
+    p = players.get(str(player_id))
+    if not p:
+        return None
+
+    name = p.get("full_name") or " ".join(
+        x for x in [p.get("first_name"), p.get("last_name")] if x
+    )
+    if not name:
+        return None
+
+    position = p.get("position") or ((p.get("fantasy_positions") or [""])[0])
+    if position == "DST":
+        position = "DEF"
+
+    history = _pr_history(name)
+    prior = next((x for x in history if x.get("season") == 2025), None)
+
+    # Prefer current 2026 master data for bio/team/status when available.
+    master = _master_players_2026().get("players", {})
+    master_row = master.get(_pr_norm(name), {})
+
+    bio = {
+        "player_id": str(player_id),
+        "name": name,
+        "position": master_row.get("position") or position,
+        "team": master_row.get("team") or p.get("team") or "FA",
+        "number": master_row.get("number") or p.get("number"),
+        "age": master_row.get("age") if master_row.get("age") is not None else p.get("age"),
+        "height": master_row.get("height") or p.get("height"),
+        "weight": master_row.get("weight") or p.get("weight"),
+        "college": master_row.get("college") or p.get("college"),
+        "years_exp": (
+            master_row.get("years_exp")
+            if master_row.get("years_exp") is not None
+            else p.get("years_exp")
+        ),
+        "status": master_row.get("status") or p.get("status"),
+        "injury_status": master_row.get("injury_status") or p.get("injury_status"),
+        "injury_body_part": master_row.get("injury_body_part") or p.get("injury_body_part"),
+        "practice_participation": (
+            master_row.get("practice_participation")
+            or p.get("practice_participation")
+        ),
+        "depth_chart_position": (
+            master_row.get("depth_chart_position")
+            or p.get("depth_chart_position")
+        ),
+        "depth_chart_order": master_row.get("depth_chart_order") or p.get("depth_chart_order"),
+        "rookie": bool(master_row.get("rookie") or p.get("rookie")),
+    }
+
+    projection = None
+    master_projection = master_row.get("projection")
+    if isinstance(master_projection, dict) and master_projection:
+        projection = {
+            "games": 17,
+            "position": bio["position"],
+            "passing_yards": master_projection.get("pass_yards"),
+            "passing_tds": master_projection.get("pass_tds"),
+            "interceptions": master_projection.get("interceptions"),
+            "rushing_yards": master_projection.get("rush_yards"),
+            "rushing_tds": master_projection.get("rush_tds"),
+            "carries": master_projection.get("rush_attempts"),
+            "receptions": master_projection.get("receptions"),
+            "targets": master_projection.get("targets"),
+            "receiving_yards": master_projection.get("receiving_yards"),
+            "receiving_tds": master_projection.get("receiving_tds"),
+            "fantasy_points": master_projection.get("fantasy_points"),
+            "fantasy_points_ppr": master_projection.get("ppr_points"),
+            "method": "FantasyPros 2026 projection",
+        }
+
+    if not projection:
+        projection = _pr_projection(history, bio["position"])
+
+    return {
+        "bio": bio,
+        "previous_year": prior or {},
+        "history": history,
+        "projection": projection,
+        "trend": _pr_trend(history),
+        "data_notes": [
+            "Current player/team information: 2026 master player database when available.",
+            "Historical production: local 2025 stats snapshot and cached prior-season data.",
+            "2026 projection: FantasyPros when available; otherwise Gridiron IQ weighted model.",
+        ],
+    }
+
+
 @app.get("/api/player-research/profile/<player_id>")
 def player_research_profile(player_id):
     profile = _pr_profile(player_id)
