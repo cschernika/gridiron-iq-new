@@ -56,7 +56,7 @@
   <section id="ml-live" class="ml-board-layout" style="display:none">
     <article class="ml-card">
       <div class="ml-player-tools">
-        <input id="ml-search" placeholder="Search available players...">
+        <input id="ml-search" placeholder="Search available players — ranked by ADP...">
         <div id="ml-tabs" class="ml-tabs">
           <button class="active" data-pos="">All</button><button data-pos="QB">QB</button><button data-pos="RB">RB</button><button data-pos="WR">WR</button><button data-pos="TE">TE</button>
         </div>
@@ -64,7 +64,7 @@
 
       <div class="ml-table-wrap">
         <table class="ml-table">
-          <thead><tr><th>Rank</th><th>Player</th><th>Pos</th><th>NFL</th><th>ADP</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead>
+          <thead><tr><th>ADP Rank</th><th>Player</th><th>Pos</th><th>NFL</th><th>ADP</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead>
           <tbody id="ml-player-body"></tbody>
         </table>
       </div>
@@ -182,7 +182,7 @@
 
     $("ml-player-body").innerHTML = rows.slice(0,150).map(p=>`
       <tr>
-        <td>${p.rank}</td><td><b>${p.name}</b></td><td>${p.pos}</td><td>${p.team}</td>
+        <td>${p.adp}</td><td><b>${p.name}</b></td><td>${p.pos}</td><td>${p.team}</td>
         <td>${p.adp}</td><td>${p.projection}</td><td class="ml-iq">${p.pick_score}</td>
         <td><button class="ml-pick" data-player="${p.name.replace(/"/g,'&quot;')}">Draft</button></td>
       </tr>`).join("");

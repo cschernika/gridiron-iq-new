@@ -97,7 +97,7 @@
       <div class="pr-kicker">PLAYER DATABASE</div>
       <h1>Player Research</h1>
       <p>
-        Browse all fantasy players, choose a position, compare 2025 stats side-by-side,
+        Browse all fantasy players ranked by ADP, choose a position, compare 2025 stats side-by-side,
         and click any player for career history, 2026 projections, and current information.
       </p>
     </div>
@@ -179,9 +179,9 @@
         </div>
         <h2>
           {% if selected_position %}
-            {{ selected_position }} 2025 Stats
+            {{ selected_position }} Rankings by ADP & 2025 Stats
           {% else %}
-            All Fantasy Players
+            All Fantasy Players — Ranked by ADP
           {% endif %}
         </h2>
       </div>
@@ -195,6 +195,7 @@
             <th>Player</th>
             <th>Pos</th>
             <th>Team</th>
+            <th>ADP Rank</th>
             <th>Status</th>
 
             {% if selected_position == 'QB' %}
@@ -215,6 +216,7 @@
             <td class="pr-player">{{ p.name }}</td>
             <td><span class="pr-position">{{ p.position }}</span></td>
             <td>{{ p.team }}</td>
+            <td class="pr-points">{% if p.adp < 999 %}{{ p.adp }}{% else %}—{% endif %}</td>
             <td>
               <span class="pr-status {% if p.status|lower == 'active' %}active{% endif %}">
                 {{ p.status or '—' }}
