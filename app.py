@@ -1661,6 +1661,12 @@ def _draft_platform_for_context(context):
     platform = str(context.get("platform") or "ESPN").upper()
     return "YAHOO" if "YAHOO" in platform else "ESPN"
 
+def _current_master_player(player_name):
+    try:
+        return _master_players_2026().get("players", {}).get(_pr_norm(player_name), {})
+    except Exception:
+        return {}
+
 def _draft_player_enrichment(player, context, overall_pick):
     platform = _draft_platform_for_context(context)
     adp_data = _platform_2026_adp_data(platform)
@@ -1684,7 +1690,9 @@ def _draft_player_enrichment(player, context, overall_pick):
 
     value_vs_adp = platform_adp - overall_pick
 
+    current_master = _current_master_player(player["name"])
     return {
+        "current_team": current_master.get("team") or player.get("team") or "FA",
         "platform_adp": round(platform_adp, 1) if platform_adp < 999 else 999,
         "projection_2026": round(projection, 1),
         "points_2025": round(prior_points, 1),
@@ -2436,83 +2444,172 @@ def _sleeper_active_players_2026():
         }
     return out
 
+
+def _normalize_team_code(team):
+    team = str(team or "").strip().upper()
+    aliases = {
+        "JAX": "JAC",
+        "WSH": "WAS",
+        "LA": "LAR",
+        "OAK": "LV",
+        "SD": "LAC",
+        "STL": "LAR",
+    }
+    return aliases.get(team, team)
+
+def _current_team_from_sleeper(row):
+    team = _normalize_team_code(row.get("team"))
+    if team:
+        return team
+    return ""
+
+def _current_team_from_fantasypros(row):
+    return _normalize_team_code(
+        row.get("team")
+        or row.get("team_id")
+        or row.get("player_team")
+        or row.get("player_team_id")
+    )
+
+def _resolve_current_team(sleeper_row=None, fp_row=None, projection_row=None):
+    """
+    2026 CURRENT TEAM PRIORITY
+
+    1. Sleeper active-player directory current team
+    2. FantasyPros current player directory
+    3. FantasyPros 2026 projection team
+    4. blank/FA
+
+    2025 historical stats are NEVER allowed to overwrite the 2026 team.
+    """
+    sleeper_row = sleeper_row or {}
+    fp_row = fp_row or {}
+    projection_row = projection_row or {}
+
+    for candidate in (
+        _current_team_from_sleeper(sleeper_row),
+        _current_team_from_fantasypros(fp_row),
+        _normalize_team_code(projection_row.get("projection_team")),
+    ):
+        if candidate:
+            return candidate
+
+    return "FA"
+
 def _build_master_players_2026():
     warnings = []
     sources = []
-    merged = {}
 
-    # Sleeper is the broad roster/player directory and catches rookies/depth players.
+    sleeper = {}
+    fp_players = {}
+    projections = {}
+    adp = {}
+
+    # Broad current player/roster directory.
     try:
         sleeper = _sleeper_active_players_2026()
-        merged.update(sleeper)
         sources.append(f"Sleeper active NFL players ({len(sleeper)})")
     except Exception as e:
         warnings.append(f"Sleeper players: {e}")
 
-    # FantasyPros player directory can correct current team/position and IDs.
-    fp_players = {}
+    # FantasyPros current player directory.
     try:
         fp_players = _fp_player_list_2026()
-        for norm, row in fp_players.items():
-            current = merged.setdefault(norm, {})
-            # Prefer FP current team when supplied; preserve Sleeper as fallback.
-            for key, value in row.items():
-                if value not in (None, ""):
-                    current[key] = value
         sources.append(f"FantasyPros NFL players ({len(fp_players)})")
     except Exception as e:
         warnings.append(f"FantasyPros players: {e}")
 
-    # FantasyPros preseason projections.
+    # 2026 projections.
     try:
         projections = _fp_projections_2026("PPR")
-        for norm, row in projections.items():
-            current = merged.setdefault(norm, {"name": norm})
-            current.update(row)
-            if row.get("projection_team"):
-                current["team"] = row["projection_team"]
-            if row.get("projection_position"):
-                current["position"] = row["projection_position"]
         sources.append(f"FantasyPros 2026 projections ({len(projections)})")
     except Exception as e:
         warnings.append(f"FantasyPros projections: {e}")
 
-    # FantasyPros ADP / draft rankings.
+    # 2026 ADP/rank data.
     try:
         adp = _fp_adp_2026("PPR")
-        for norm, row in adp.items():
-            merged.setdefault(norm, {"name": norm}).update(row)
         sources.append(f"FantasyPros 2026 ADP ({len(adp)})")
     except Exception as e:
         warnings.append(f"FantasyPros ADP: {e}")
 
-    # Merge 2025 veteran stats from the existing local stats engine.
+    # Merge every unique player across all current 2026 sources.
+    all_keys = set(sleeper) | set(fp_players) | set(projections) | set(adp)
     stats_2025 = _stats_2025_snapshot().get("players", {})
-    for norm, stats in stats_2025.items():
-        if norm in merged:
-            merged[norm]["stats_2025"] = stats
+    merged = {}
 
-    # Clean fantasy pool and identify likely rookies.
-    fantasy_positions = {"QB", "RB", "WR", "TE", "K", "DEF"}
-    clean = {}
-    for norm, p in merged.items():
-        name = str(p.get("name") or "").strip()
-        pos = str(p.get("position") or "").upper()
-        if pos == "DST":
-            pos = "DEF"
-        if not name or pos not in fantasy_positions:
-            continue
+    for norm in all_keys:
+        sleeper_row = dict(sleeper.get(norm) or {})
+        fp_row = dict(fp_players.get(norm) or {})
+        proj_row = dict(projections.get(norm) or {})
+        adp_row = dict(adp.get(norm) or {})
 
-        years_exp = p.get("years_exp")
+        # Best available current name.
+        name = (
+            sleeper_row.get("name")
+            or fp_row.get("name")
+            or norm
+        )
+
+        # Current position priority.
+        position = (
+            sleeper_row.get("position")
+            or fp_row.get("position")
+            or proj_row.get("projection_position")
+            or ""
+        )
+        position = str(position).upper()
+        if position == "DST":
+            position = "DEF"
+
+        # IMPORTANT: current team never comes from 2025 stats.
+        team = _resolve_current_team(
+            sleeper_row=sleeper_row,
+            fp_row=fp_row,
+            projection_row=proj_row,
+        )
+
+        item = {}
+
+        # Start with lower-priority metadata first.
+        item.update(fp_row)
+        item.update(sleeper_row)
+
+        # Explicitly enforce current fields after merge.
+        item["name"] = name
+        item["position"] = position
+        item["team"] = team
+        item["season"] = 2026
+
+        # Projection block.
+        if proj_row:
+            item.update(proj_row)
+
+        # ADP block.
+        if adp_row:
+            item.update(adp_row)
+
+        # Historical stats are nested only. They cannot replace top-level team.
+        if norm in stats_2025:
+            historical = dict(stats_2025[norm])
+            historical["historical_team_2025"] = historical.get("team")
+            item["stats_2025"] = historical
+
+        # Rookie detection.
+        years_exp = item.get("years_exp")
         try:
-            rookie = int(years_exp) == 0
+            item["rookie"] = int(years_exp) == 0
         except Exception:
-            rookie = False
+            item["rookie"] = False
 
-        p["position"] = pos
-        p["rookie"] = rookie
-        p["season"] = 2026
-        clean[norm] = p
+        merged[norm] = item
+
+    fantasy_positions = {"QB", "RB", "WR", "TE", "K", "DEF"}
+    clean = {
+        norm: p
+        for norm, p in merged.items()
+        if p.get("name") and p.get("position") in fantasy_positions
+    }
 
     payload = {
         "season": 2026,
@@ -2521,6 +2618,11 @@ def _build_master_players_2026():
         "rookie_count": sum(1 for p in clean.values() if p.get("rookie")),
         "sources": sources,
         "warnings": warnings,
+        "team_resolution_priority": [
+            "Sleeper current player directory",
+            "FantasyPros current player directory",
+            "FantasyPros 2026 projection team",
+        ],
         "players": clean,
     }
 
@@ -2529,6 +2631,7 @@ def _build_master_players_2026():
         encoding="utf-8",
     )
     return payload
+
 
 @app.get("/player-database-2026")
 def player_database_2026_page():
@@ -2548,6 +2651,21 @@ def refresh_2026_players():
         )
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
+
+@app.get("/api/data/2026-players/team-check/<path:player_name>")
+def team_check_2026_player(player_name):
+    norm = _pr_norm(player_name)
+    master = _master_players_2026().get("players", {}).get(norm, {})
+    return jsonify(
+        ok=bool(master),
+        player=player_name,
+        current_team=master.get("team"),
+        position=master.get("position"),
+        rookie=master.get("rookie"),
+        sleeper_id=master.get("sleeper_id"),
+        fantasypros_id=master.get("fantasypros_id"),
+        updated_at=_master_players_2026().get("updated_at"),
+    )
 
 @app.get("/api/data/2026-players/status")
 def status_2026_players():
@@ -3274,7 +3392,7 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
         rows.append({
             "player_id": str(player_id),
             "name": name,
-            "team": p.get("team") or stats.get("team") or "FA",
+            "team": p.get("team") or "FA",
             "position": pos,
             "status": p.get("status") or "",
             "age": p.get("age"),
