@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}2026 Player Database | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+.pdb{--p:#5d3df5;--m:#708096;--l:#dfe5ef}.pdb h1{font-size:34px;margin:5px 0}.pdb-k{font-size:10px;font-weight:900;color:var(--p);letter-spacing:.1em}.pdb-card{background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px;margin-top:16px}.pdb-btn{border:0;border-radius:10px;background:linear-gradient(90deg,#2d70f4,#6038f3);color:#fff;font-weight:900;padding:11px 15px;cursor:pointer}.pdb-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.pdb-stat{background:#f7f8fc;border-radius:11px;padding:12px}.pdb-stat span,.pdb-stat strong{display:block}.pdb-stat span{font-size:9px;color:var(--m)}.pdb-stat strong{font-size:22px;margin-top:4px}.pdb pre{white-space:pre-wrap;font-size:10px;background:#0d1724;color:#dbe7f5;padding:13px;border-radius:11px;max-height:320px;overflow:auto}@media(max-width:700px){.pdb-grid{grid-template-columns:1fr}}
+</style>
+<div class="pdb">
+<div class="pdb-k">DATA ENGINE</div><h1>2026 Master Player Database</h1>
+<p>Refresh current NFL teams, rookies, player status, FantasyPros projections and draft data.</p>
+<div class="pdb-card"><div class="pdb-grid">
+<div class="pdb-stat"><span>PLAYERS</span><strong id="count">—</strong></div>
+<div class="pdb-stat"><span>ROOKIES</span><strong id="rookies">—</strong></div>
+<div class="pdb-stat"><span>FANTASYPROS API</span><strong id="api">—</strong></div>
+</div>
+<button id="refresh" class="pdb-btn" style="margin-top:14px">Refresh 2026 Player Database</button>
+<pre id="result">Checking database status…</pre></div></div>
+<script>
+async function status(){
+ const r=await fetch("/api/data/2026-players/status"); const d=await r.json();
+ document.getElementById("count").textContent=d.count||0;
+ document.getElementById("rookies").textContent=d.rookie_count||0;
+ document.getElementById("api").textContent=d.fantasypros_api_configured?"Connected":"Not configured";
+ document.getElementById("result").textContent=JSON.stringify(d,null,2);
+}
+document.getElementById("refresh").onclick=async()=>{
+ const b=document.getElementById("refresh"); b.disabled=true; b.textContent="Refreshing…";
+ try{
+  const r=await fetch("/api/data/refresh-2026-players",{method:"POST"});
+  const d=await r.json();
+  document.getElementById("result").textContent=JSON.stringify(d,null,2);
+  await status();
+ }catch(e){document.getElementById("result").textContent=e.message}
+ b.disabled=false;b.textContent="Refresh 2026 Player Database";
+};
+status();
+</script>
+{% endblock %}
