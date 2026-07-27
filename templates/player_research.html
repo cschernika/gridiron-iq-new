@@ -392,7 +392,7 @@
           return [["Pass Yds",s.passing_yards],["Pass TD",s.passing_tds],["INT",s.interceptions],["Rush Yds",s.rushing_yards],["Rush TD",s.rushing_tds],["PPR Pts",s.fantasy_points_ppr||s.fantasy_points]];
         }
         if(pos === "RB"){
-          return [["Carries",s.carries],["Rush Yds",s.rushing_yards],["Rush TD",s.rushing_tds],["Rec",s.receptions],["Rec Yds",s.receiving_yards],["PPR Pts",s.fantasy_points_ppr||s.fantasy_points]];
+          return [["Carries",s.carries],["Rush Yds",s.rushing_yards],["Rush TD",s.rushing_tds],["Rec",s.receptions],["Rec Yds",s.receiving_yards],["Rec TD",s.receiving_tds],["PPR Pts",s.fantasy_points_ppr||s.fantasy_points]];
         }
         return [["Targets",s.targets],["Rec",s.receptions],["Rec Yds",s.receiving_yards],["Rec TD",s.receiving_tds],["Rush Yds",s.rushing_yards],["PPR Pts",s.fantasy_points_ppr||s.fantasy_points]];
       };
