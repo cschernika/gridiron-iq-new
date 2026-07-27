@@ -1327,6 +1327,8 @@ def player_research():
         active_scoring=adp_meta.get("scoring", ""),
         adp_source=adp_meta.get("source", f"{platform} 2026 ADP"),
         adp_updated_at=adp_meta.get("updated_at", ""),
+        adp_status=adp_meta.get("status", "unknown"),
+        adp_warning=adp_meta.get("warning", ""),
     )
 
 @app.get("/api/player-research/search")
@@ -1381,15 +1383,19 @@ class _ADPTableParser(HTMLParser):
 
 def _adp_player_name(raw_player):
     raw_player = str(raw_player or "").strip()
-    m = re.match(r"^(.+?)\s+[A-Z]\.\s+[A-Za-z'’-]+(?:\s+(?:Jr\.|Sr\.|II|III|IV))?\s+[A-Z]{2,3}\s+\(\d+\)", raw_player)
+    if not raw_player:
+        return ""
+
+    m = re.match(
+        r"^(.+?)\s+[A-Z]\.\s+[A-Za-z'’\-\s]+?\s+[A-Z]{2,3}\s+\(\d+\)",
+        raw_player
+    )
     if m:
         return m.group(1).strip()
+
     cleaned = re.sub(r"\s+[A-Z]{2,3}\s+\(\d+\)\s*$", "", raw_player).strip()
-    bits = cleaned.split()
-    for i in range(1, len(bits)):
-        if re.fullmatch(r"[A-Z]\.", bits[i]):
-            return " ".join(bits[:i]).strip()
-    return cleaned
+    m2 = re.match(r"^(.+?)\s+[A-Z]\.\s+[A-Za-z'’\-]+(?:\s+(?:Jr\.|Sr\.|II|III|IV))?$", cleaned)
+    return m2.group(1).strip() if m2 else cleaned
 
 def _parse_platform_adp(html, platform):
     platform = str(platform or "ESPN").upper()
@@ -1397,40 +1403,44 @@ def _parse_platform_adp(html, platform):
 
     parser = _ADPTableParser()
     parser.feed(html)
-    if not parser.rows:
-        return {}
 
     header = None
     for row in parser.rows:
-        lower = [c.lower() for c in row]
-        if "player (bye)" in lower and wanted in lower:
+        lower = [str(c).strip().lower() for c in row]
+        if any("player" in c for c in lower) and wanted in lower:
             header = lower
             break
+
     if not header:
         return {}
 
-    player_idx = header.index("player (bye)")
-    platform_idx = header.index(wanted)
-    pos_idx = header.index("pos") if "pos" in header else None
+    player_idx = next((i for i,c in enumerate(header) if "player" in c), None)
+    platform_idx = next((i for i,c in enumerate(header) if c == wanted), None)
+    pos_idx = next((i for i,c in enumerate(header) if c == "pos"), None)
+
+    if player_idx is None or platform_idx is None:
+        return {}
 
     result = {}
     for row in parser.rows:
         if len(row) <= max(player_idx, platform_idx):
             continue
-        player_name = _adp_player_name(row[player_idx])
-        if not player_name:
+
+        name = _adp_player_name(row[player_idx])
+        if not name:
             continue
-        raw_adp = str(row[platform_idx]).strip().replace("#", "")
+
         try:
-            adp = float(raw_adp)
+            adp = float(str(row[platform_idx]).replace("#", "").strip())
         except Exception:
             continue
-        pos = row[pos_idx] if pos_idx is not None and len(row) > pos_idx else ""
-        result[_pr_norm(player_name)] = {
+
+        result[_pr_norm(name)] = {
             "adp": round(adp, 1),
-            "position_adp": pos,
+            "position_adp": row[pos_idx] if pos_idx is not None and len(row) > pos_idx else "",
             "source": platform,
         }
+
     return result
 
 def _adp_cache_file(platform):
@@ -1440,6 +1450,7 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
     platform = str(platform or "ESPN").upper()
     if platform not in ADP_2026_SOURCES:
         platform = "ESPN"
+
     spec = ADP_2026_SOURCES[platform]
     cache_file = _adp_cache_file(platform)
 
@@ -1455,14 +1466,18 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
     except Exception:
         pass
 
+    errors = []
+
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (compatible; GridironIQ/1.0)",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
         }
-        r = requests.get(spec["url"], headers=headers, timeout=25)
-        r.raise_for_status()
-        players = _parse_platform_adp(r.text, platform)
+        response = requests.get(spec["url"], headers=headers, timeout=30)
+        response.raise_for_status()
+        players = _parse_platform_adp(response.text, platform)
+
         if players:
             payload = {
                 "season": 2026,
@@ -1472,16 +1487,21 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
                 "source_url": spec["url"],
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "players": players,
+                "status": "live",
             }
             cache_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             return payload
-    except Exception:
-        pass
+
+        errors.append("The platform ADP column could not be parsed from the source page.")
+    except Exception as exc:
+        errors.append(str(exc))
 
     try:
         if cache_file.exists():
             cached = json.loads(cache_file.read_text(encoding="utf-8"))
             if cached.get("players"):
+                cached["status"] = "cached"
+                cached["warning"] = "; ".join(errors)
                 return cached
     except Exception:
         pass
@@ -1494,6 +1514,8 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
         "source_url": spec["url"],
         "updated_at": "",
         "players": {},
+        "status": "unavailable",
+        "warning": "; ".join(errors),
     }
 
 def _league_platform(league_key=None):
@@ -1504,7 +1526,10 @@ def _league_platform(league_key=None):
 
 def _pr_adp_lookup(platform="ESPN"):
     data = _platform_2026_adp_data(platform)
-    return {key: float(value.get("adp", 999.0)) for key, value in data.get("players", {}).items()}
+    return {
+        key: float(value.get("adp", 999.0))
+        for key, value in data.get("players", {}).items()
+    }
 
 def _pr_position_rows(position="", limit=500, platform="ESPN"):
     position = str(position or "").upper().strip()
@@ -1580,6 +1605,26 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
     )
     return rows[:limit]
 
+
+
+@app.get("/api/player-research/adp/status")
+def player_research_adp_status():
+    platform = str(request.args.get("platform") or _league_platform()).upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+
+    data = _platform_2026_adp_data(platform)
+    players = data.get("players", {})
+
+    return jsonify(
+        ok=bool(players),
+        platform=platform,
+        status=data.get("status"),
+        source=data.get("source"),
+        updated_at=data.get("updated_at"),
+        player_count=len(players),
+        warning=data.get("warning", ""),
+    )
 
 @app.post("/api/player-research/adp/refresh")
 def player_research_adp_refresh():
