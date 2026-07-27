@@ -557,7 +557,37 @@ def espn_sync():
         settings={"name":getattr(espn.settings,"name","ESPN League"),"team_count":len(teams),"reg_season_count":getattr(espn.settings,"reg_season_count",14) or 14,"playoff_team_count":getattr(espn.settings,"playoff_team_count",6) or 6,"scoring":scoring,"scoring_label":scoring}
         league={"platform":"ESPN","league_id":str(data["league_id"]),"league_name":settings["name"],"season":int(data["season"]),"teams":len(teams),"current_week":getattr(espn,"current_week",None),"synced_at":datetime.now(timezone.utc).isoformat()}
         save_snapshot({"league":league,"settings":settings,"teams":teams})
-        return jsonify(ok=True,message="ESPN league synced.",league=league,settings=settings,user_team=user_team(teams),teams=teams)
+
+        adp_info = {
+            "ok": False,
+            "player_count": 0,
+            "source": "ESPN native fantasy ADP",
+        }
+        try:
+            native_adp = _fetch_espn_native_adp(
+                league_id=data["league_id"],
+                season=data["season"],
+                swid=data["swid"],
+                espn_s2=data["espn_s2"],
+            )
+            adp_info = {
+                "ok": bool(native_adp.get("players")),
+                "player_count": len(native_adp.get("players", {})),
+                "source": native_adp.get("source"),
+                "updated_at": native_adp.get("updated_at"),
+            }
+        except Exception as adp_exc:
+            adp_info["error"] = str(adp_exc)
+
+        return jsonify(
+            ok=True,
+            message="ESPN league synced.",
+            league=league,
+            settings=settings,
+            user_team=user_team(teams),
+            teams=teams,
+            espn_adp=adp_info,
+        )
     except Exception as exc:
         return jsonify(ok=False,error="ESPN sync failed.",detail=str(exc)),400
 
@@ -1337,6 +1367,112 @@ def player_research_search():
     return jsonify(ok=True, players=_pr_search(q) if len(q) >= 2 else [])
 
 
+
+ESPN_NATIVE_ADP_FILE = DATA_DIR / "espn_native_adp_2026.json"
+
+def _save_espn_native_adp(payload):
+    ESPN_NATIVE_ADP_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+def _load_espn_native_adp():
+    try:
+        if ESPN_NATIVE_ADP_FILE.exists():
+            data = json.loads(ESPN_NATIVE_ADP_FILE.read_text(encoding="utf-8"))
+            if data.get("players"):
+                return data
+    except Exception:
+        pass
+    return None
+
+def _fetch_espn_native_adp(league_id, season, swid, espn_s2):
+    """
+    Pull ESPN's own Average Draft Position from the ESPN Fantasy player feed.
+
+    This uses the same private-league credentials supplied during ESPN sync,
+    but saves only the safe player ADP snapshot — never the SWID/espn_s2 values.
+    """
+    url = (
+        f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{int(season)}"
+        f"/segments/0/leagues/{int(league_id)}?view=kona_player_info"
+    )
+
+    fantasy_filter = {
+        "players": {
+            "limit": 2000,
+            "sortDraftRanks": {
+                "sortPriority": 100,
+                "sortAsc": True,
+                "value": "PPR",
+            },
+        }
+    }
+
+    headers = {
+        "Accept": "application/json",
+        "X-Fantasy-Filter": json.dumps(fantasy_filter),
+        "User-Agent": "Mozilla/5.0 (compatible; GridironIQ/1.0)",
+    }
+
+    cookies = {
+        "SWID": str(swid).strip(),
+        "espn_s2": str(espn_s2).strip(),
+    }
+
+    response = requests.get(url, headers=headers, cookies=cookies, timeout=35)
+    response.raise_for_status()
+    payload = response.json()
+
+    players = {}
+    for wrapper in payload.get("players", []):
+        p = wrapper.get("player") or {}
+        name = str(p.get("fullName") or "").strip()
+        if not name:
+            continue
+
+        ownership = p.get("ownership") or {}
+        adp = ownership.get("averageDraftPosition")
+        if adp in (None, ""):
+            continue
+
+        try:
+            adp = round(float(adp), 2)
+        except Exception:
+            continue
+
+        rank_type = p.get("draftRanksByRankType") or {}
+        ppr_rank = None
+        for key in ("PPR", "STANDARD"):
+            info = rank_type.get(key) or {}
+            if info.get("rank") is not None:
+                try:
+                    ppr_rank = int(info.get("rank"))
+                except Exception:
+                    pass
+                break
+
+        players[_pr_norm(name)] = {
+            "name": name,
+            "adp": adp,
+            "rank": ppr_rank,
+            "position_adp": "",
+            "source": "ESPN",
+        }
+
+    result = {
+        "season": int(season),
+        "platform": "ESPN",
+        "scoring": "PPR",
+        "source": "ESPN native fantasy ADP",
+        "source_url": url,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "live",
+        "players": players,
+    }
+
+    if players:
+        _save_espn_native_adp(result)
+
+    return result
+
 ADP_2026_CACHE_TTL = 6 * 60 * 60
 ADP_2026_SOURCES = {
     "ESPN": {
@@ -1447,6 +1583,12 @@ def _adp_cache_file(platform):
     return DATA_DIR / f"adp_2026_{str(platform).lower()}_cache.json"
 
 def _platform_2026_adp_data(platform="ESPN", force=False):
+    # ESPN leagues use ESPN's own fantasy API snapshot captured during league sync.
+    if str(platform or "").upper() == "ESPN":
+        native = _load_espn_native_adp()
+        if native and native.get("players"):
+            return native
+
     platform = str(platform or "ESPN").upper()
     if platform not in ADP_2026_SOURCES:
         platform = "ESPN"
