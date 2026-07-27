@@ -1,11 +1,329 @@
-{% extends "base.html" %}{% block title %}Draft Center | Gridiron IQ{% endblock %}{% block heading %}Draft Center{% endblock %}
+{% extends "base.html" %}
+{% block title %}Draft Center | Gridiron IQ{% endblock %}
+
 {% block body %}
-<section class="page-intro"><span class="pill">{{ scoring }}</span><h2>League-aware draft board</h2>
-<p>{% if connected %}This board is adjusted for your synced ESPN scoring format: <b>{{ scoring }}</b>.{% else %}Connect ESPN first so the board can use your league settings.{% endif %}</p></section>
-<section class="panel">
-<div class="toolbar"><input id="player-search" placeholder="Search players"><select id="position-filter"><option value="">All positions</option><option>QB</option><option>RB</option><option>WR</option><option>TE</option></select><button class="button primary" id="recommend-draft">Recommend Next</button><button class="button" id="reset-draft">Reset</button></div>
-<div id="draft-recommendations" class="recommend-strip">Mark drafted players, then click Recommend Next.</div>
-<table id="draft-table"><thead><tr><th>League Rank</th><th>Player</th><th>Pos</th><th>Team</th><th>Tier</th><th>ADP</th><th>League Score</th><th>Status</th></tr></thead><tbody>
-{% for p in players %}<tr data-name="{{ p.name|lower }}" data-pos="{{ p.pos }}"><td>{{ p.league_rank }}</td><td class="player-name"><b>{{ p.name }}</b></td><td>{{ p.pos }}</td><td>{{ p.team }}</td><td>{{ p.tier }}</td><td>{{ p.adp }}</td><td>{{ p.league_score }}</td><td><button class="draft-toggle">Available</button></td></tr>{% endfor %}
-</tbody></table></section>
+<section class="dc-topbar">
+  <div>
+    <div class="dc-kicker">LIVE DRAFT WAR ROOM</div>
+    <h1>Draft Center</h1>
+    <p>League-aware rankings, roster construction, pick strategy, and live recommendations.</p>
+  </div>
+  <div class="dc-top-actions">
+    <select id="dc-league-select" class="dc-select">
+      {% if draft_leagues %}
+        {% for item in draft_leagues %}
+          <option
+            value="{{ item.key }}"
+            data-platform="{{ item.platform }}"
+            {% if item.key == active_league_key %}selected{% endif %}
+          >
+            {{ item.name }} — {{ item.platform }}
+          </option>
+        {% endfor %}
+      {% else %}
+        <option value="espn-demo">Gramp's Gridiron — ESPN</option>
+        <option value="yahoo-demo">WestRockers — Yahoo</option>
+      {% endif %}
+    </select>
+    <a class="dc-btn secondary" href="/league-sync">Sync League</a>
+  </div>
+</section>
+
+<section class="dc-settings-strip">
+  <div>
+    <span>League</span>
+    <strong id="dc-league-name">{{ draft_context.league_name }}</strong>
+  </div>
+  <div>
+    <span>Platform</span>
+    <strong id="dc-platform">{{ draft_context.platform }}</strong>
+  </div>
+  <div>
+    <span>Scoring</span>
+    <strong id="dc-scoring">{{ draft_context.scoring }}</strong>
+  </div>
+  <div>
+    <span>Teams</span>
+    <strong id="dc-teams">{{ draft_context.teams }}</strong>
+  </div>
+  <div>
+    <span>Draft</span>
+    <strong id="dc-draft-type">{{ draft_context.draft_type }}</strong>
+  </div>
+</section>
+
+<section class="dc-grid-top">
+
+  <article class="dc-panel dc-recommendation">
+    <div class="dc-panel-head">
+      <div>
+        <div class="dc-kicker">GRIDIRON IQ RECOMMENDATION</div>
+        <h2>Best Pick Right Now</h2>
+      </div>
+      <span class="dc-confidence" id="dc-confidence">{{ recommendation.confidence }}% confidence</span>
+    </div>
+
+    <div class="dc-best-pick">
+      <div class="dc-player-badge" id="dc-best-position">{{ recommendation.player.pos }}</div>
+      <div class="dc-best-copy">
+        <h3 id="dc-best-player">{{ recommendation.player.name }}</h3>
+        <p id="dc-best-team">{{ recommendation.player.team }} · Tier {{ recommendation.player.tier }}</p>
+      </div>
+      <div class="dc-iq-score">
+        <span>IQ Score</span>
+        <strong id="dc-best-score">{{ recommendation.score }}</strong>
+      </div>
+    </div>
+
+    <div class="dc-reason-grid">
+      <div><span>Value vs ADP</span><strong id="dc-adp-value">{{ recommendation.adp_value }}</strong></div>
+      <div><span>Roster Fit</span><strong id="dc-roster-fit">{{ recommendation.roster_fit }}</strong></div>
+      <div><span>Scarcity</span><strong id="dc-scarcity">{{ recommendation.scarcity }}</strong></div>
+      <div><span>Tier Risk</span><strong id="dc-tier-risk">{{ recommendation.tier_risk }}</strong></div>
+    </div>
+
+    <p class="dc-rationale" id="dc-rationale">{{ recommendation.rationale }}</p>
+
+    <div class="dc-next-best">
+      <span>Next best:</span>
+      <div id="dc-next-best-list">
+        {% for p in recommendation.next_best %}
+          <button type="button" class="dc-chip">{{ p.name }} · {{ p.pos }}</button>
+        {% endfor %}
+      </div>
+    </div>
+  </article>
+
+  <article class="dc-panel">
+    <div class="dc-panel-head">
+      <div>
+        <div class="dc-kicker">YOUR DRAFT</div>
+        <h2>Pick Strategy</h2>
+      </div>
+    </div>
+
+    <div class="dc-form-grid">
+      <label>
+        Draft Slot
+        <input id="dc-draft-slot" type="number" min="1" max="{{ draft_context.teams }}" value="{{ draft_context.draft_slot }}">
+      </label>
+      <label>
+        Current Round
+        <input id="dc-round" type="number" min="1" max="20" value="{{ draft_context.round }}">
+      </label>
+      <label>
+        Current Pick
+        <input id="dc-pick" type="number" min="1" max="{{ draft_context.teams }}" value="{{ draft_context.pick_in_round }}">
+      </label>
+      <label>
+        Strategy
+        <select id="dc-strategy">
+          <option value="balanced" selected>Balanced</option>
+          <option value="value">Best Value</option>
+          <option value="zero-rb">Zero RB</option>
+          <option value="hero-rb">Hero RB</option>
+          <option value="robust-rb">Robust RB</option>
+          <option value="late-qb">Late QB</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="dc-next-picks">
+      <span>Your upcoming picks</span>
+      <div id="dc-next-picks-list">
+        {% for pick in draft_context.next_picks %}
+          <b>{{ pick }}</b>
+        {% endfor %}
+      </div>
+    </div>
+
+    <button class="dc-btn primary full" id="dc-refresh-recommendation">Recalculate Recommendation</button>
+  </article>
+
+</section>
+
+<section class="dc-grid-mid">
+
+  <article class="dc-panel">
+    <div class="dc-panel-head">
+      <div>
+        <div class="dc-kicker">ROSTER CONSTRUCTION</div>
+        <h2>Your Drafted Roster</h2>
+      </div>
+      <span class="dc-small-muted" id="dc-roster-count">{{ roster|length }} drafted</span>
+    </div>
+
+    <div class="dc-roster-slots" id="dc-roster-slots">
+      {% for slot in roster_slots %}
+        <div class="dc-roster-slot">
+          <span>{{ slot.slot }}</span>
+          <strong>{{ slot.player or "—" }}</strong>
+          <small>{{ slot.status }}</small>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="dc-needs">
+      <span>Roster Need</span>
+      {% for need in roster_needs %}
+        <div class="dc-need-row">
+          <b>{{ need.position }}</b>
+          <div class="dc-meter"><span style="width:{{ need.score }}%"></span></div>
+          <strong>{{ need.label }}</strong>
+        </div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="dc-panel">
+    <div class="dc-panel-head">
+      <div>
+        <div class="dc-kicker">TIER WATCH</div>
+        <h2>Positional Scarcity</h2>
+      </div>
+    </div>
+
+    <div class="dc-tier-alerts" id="dc-tier-alerts">
+      {% for alert in tier_alerts %}
+        <div class="dc-tier-alert {{ alert.level|lower }}">
+          <div>
+            <strong>{{ alert.position }} · Tier {{ alert.tier }}</strong>
+            <span>{{ alert.message }}</span>
+          </div>
+          <b>{{ alert.remaining }} left</b>
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="dc-probability-box">
+      <span>Chance your preferred target survives to your next pick</span>
+      <strong id="dc-survival-probability">{{ recommendation.survival_probability }}%</strong>
+    </div>
+  </article>
+
+</section>
+
+<section class="dc-panel dc-board-panel">
+  <div class="dc-panel-head dc-board-head">
+    <div>
+      <div class="dc-kicker">LIVE DRAFT BOARD</div>
+      <h2>Available Players</h2>
+    </div>
+    <div class="dc-board-tools">
+      <input id="dc-player-search" placeholder="Search player">
+      <select id="dc-position-filter">
+        <option value="">All Positions</option>
+        <option>QB</option>
+        <option>RB</option>
+        <option>WR</option>
+        <option>TE</option>
+      </select>
+      <select id="dc-tier-filter">
+        <option value="">All Tiers</option>
+        <option value="1">Tier 1</option>
+        <option value="2">Tier 2</option>
+        <option value="3">Tier 3</option>
+        <option value="4">Tier 4</option>
+        <option value="5">Tier 5</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="dc-board-wrap">
+    <table class="dc-table" id="dc-player-table">
+      <thead>
+        <tr>
+          <th>IQ</th>
+          <th>Rank</th>
+          <th>Player</th>
+          <th>Pos</th>
+          <th>NFL</th>
+          <th>Tier</th>
+          <th>ADP</th>
+          <th>Proj</th>
+          <th>Value</th>
+          <th>Fit</th>
+          <th>Scarcity</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="dc-player-body">
+        {% for p in players %}
+          <tr
+            data-name="{{ p.name|lower }}"
+            data-pos="{{ p.pos }}"
+            data-tier="{{ p.tier }}"
+            class="{% if p.drafted %}drafted{% endif %}"
+          >
+            <td><span class="dc-score-pill">{{ p.iq_score }}</span></td>
+            <td>{{ p.rank }}</td>
+            <td class="dc-player-name"><strong>{{ p.name }}</strong></td>
+            <td>{{ p.pos }}</td>
+            <td>{{ p.team }}</td>
+            <td>{{ p.tier }}</td>
+            <td>{{ p.adp }}</td>
+            <td>{{ p.projection }}</td>
+            <td>{{ p.adp_value }}</td>
+            <td>{{ p.roster_fit }}</td>
+            <td>{{ p.scarcity }}</td>
+            <td>
+              <button
+                type="button"
+                class="dc-draft-toggle {% if p.drafted %}is-drafted{% endif %}"
+                data-player="{{ p.name }}"
+              >
+                {{ "Drafted" if p.drafted else "Available" }}
+              </button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="dc-grid-bottom">
+  <article class="dc-panel">
+    <div class="dc-panel-head">
+      <div>
+        <div class="dc-kicker">DRAFT SIMULATOR</div>
+        <h2>Strategy Lab</h2>
+      </div>
+    </div>
+    <p>Run quick simulations using your league size, scoring, draft slot, and strategy profile.</p>
+    <div class="dc-sim-actions">
+      <select id="dc-sim-strategy">
+        <option value="balanced">Balanced</option>
+        <option value="hero-rb">Hero RB</option>
+        <option value="zero-rb">Zero RB</option>
+        <option value="late-qb">Late QB</option>
+      </select>
+      <button class="dc-btn primary" id="dc-run-sim">Run Simulation</button>
+    </div>
+    <div class="dc-sim-result" id="dc-sim-result">
+      <strong>Ready to simulate.</strong>
+      <span>Compare roster builds before draft night.</span>
+    </div>
+  </article>
+
+  <article class="dc-panel">
+    <div class="dc-panel-head">
+      <div>
+        <div class="dc-kicker">DRAFT LOG</div>
+        <h2>Recent Picks</h2>
+      </div>
+      <button class="dc-text-button" id="dc-reset-draft">Reset Draft</button>
+    </div>
+    <div class="dc-draft-log" id="dc-draft-log">
+      {% if draft_log %}
+        {% for pick in draft_log[-8:]|reverse %}
+          <div><b>#{{ pick.overall }}</b><span>{{ pick.player }}</span><small>{{ pick.team_label }}</small></div>
+        {% endfor %}
+      {% else %}
+        <div class="dc-empty-log">No picks have been tracked yet.</div>
+      {% endif %}
+    </div>
+  </article>
+</section>
+
 {% endblock %}
