@@ -2026,16 +2026,35 @@ def _pr_aggregate(rows, player_name):
     }
 
 def _pr_history(player_name):
+    """
+    Request-safe career history.
+
+    2025 comes from the local JSON snapshot.
+    Older seasons are displayed only if their CSV files are already cached.
+    No historical download is started while a user waits for the player page.
+    """
     out = []
+
     for season in (2022, 2023, 2024):
-        stats = _pr_aggregate(_pr_rows(season), player_name)
-        if stats:
-            out.append({"season": season, **stats})
+        cache = DATA_DIR / f"player_stats_{season}.csv"
+        if not cache.exists():
+            continue
+        try:
+            rows = list(csv.DictReader(io.StringIO(cache.read_text(encoding="utf-8"))))
+            stats = _pr_aggregate(rows, player_name)
+            if stats:
+                out.append({"season": season, **stats})
+        except Exception:
+            continue
 
     stats_2025 = _stats_2025_for_name(player_name)
     if stats_2025:
-        stats_2025 = {k:v for k,v in stats_2025.items() if k != "name"}
-        out.append({"season": 2025, **stats_2025})
+        clean = {
+            k: v for k, v in stats_2025.items()
+            if k not in {"name", "player_id", "team", "position"}
+        }
+        out.append({"season": 2025, **clean})
+
     return out
 
 
@@ -2159,16 +2178,15 @@ def _build_2025_stats_snapshot():
     return payload
 
 def _stats_2025_for_name(player_name):
-    snapshot = _stats_2025_snapshot()
-    item = snapshot.get("players", {}).get(_pr_norm(player_name))
-    if item:
-        return dict(item)
+    """
+    Fast local lookup only.
 
-    # Before the snapshot is built, retain the existing runtime fallback.
-    try:
-        return _pr_aggregate(_pr_rows(2025), player_name)
-    except Exception:
-        return None
+    Player Research loops through hundreds of players. Calling _pr_rows(2025)
+    here caused the full CSV to be re-read and parsed hundreds of times, which
+    triggered Gunicorn WORKER TIMEOUT on Render.
+    """
+    snapshot = _stats_2025_snapshot()
+    return snapshot.get("players", {}).get(_pr_norm(player_name))
 
 @app.post("/api/data/build-2025-stats")
 def build_2025_stats_api():
@@ -2254,12 +2272,15 @@ def diagnostics_player_research():
     adp = _platform_2026_adp_data(platform)
     return jsonify(
         ok=bool(directory),
+        fast_mode=True,
         player_directory_count=len(directory),
         stats_2025_count=len(stats.get("players", {})),
         adp_player_count=len(adp.get("players", {})),
         platform=platform,
         adp_source=adp.get("source"),
+        note="Player Research no longer parses historical CSV files during page load.",
     )
+
 
 @app.get("/api/diagnostics/mock-draft")
 def diagnostics_mock_draft():
@@ -2853,42 +2874,48 @@ def _pr_adp_lookup(platform="ESPN"):
     }
 
 def _pr_position_rows(position="", limit=500, platform="ESPN"):
+    """
+    Render-safe Player Research list builder.
+
+    It reads the player directory, local ADP JSON and local 2025 stats JSON once.
+    It never parses/downloads historical CSV files while /player-research loads.
+    """
     position = str(position or "").upper().strip()
-    sleeper = _pr_players()
+    player_directory = _pr_players()
 
     adp_data = _platform_2026_adp_data(platform)
-    adp_lookup = {
-        key: float(value.get("adp", 999.0))
-        for key, value in adp_data.get("players", {}).items()
-    }
-    adp_display_lookup = {
-        key: value.get("adp_display")
-        for key, value in adp_data.get("players", {}).items()
-    }
+    adp_players = adp_data.get("players", {})
+    stats_players = _stats_2025_snapshot().get("players", {})
 
-    stats_snapshot = _stats_2025_snapshot().get("players", {})
-    allowed = {"QB","RB","WR","TE","K","DEF"}
+    allowed = {"QB", "RB", "WR", "TE", "K", "DEF"}
     rows = []
 
-    for player_id, p in sleeper.items():
+    for player_id, p in player_directory.items():
         name = p.get("full_name") or " ".join(
             x for x in [p.get("first_name"), p.get("last_name")] if x
         )
         pos = p.get("position") or ((p.get("fantasy_positions") or [""])[0])
+
         if not name or not pos:
             continue
 
         pos = str(pos).upper()
         if pos == "DST":
             pos = "DEF"
+
         if pos not in allowed:
             continue
         if position and pos != position:
             continue
 
-        stats = stats_snapshot.get(_pr_norm(name))
-        if not stats:
-            stats = _stats_2025_for_name(name) or {}
+        norm = _pr_norm(name)
+        stats = stats_players.get(norm, {})
+        adp_row = adp_players.get(norm, {})
+
+        try:
+            adp = float(adp_row.get("adp", 999.0))
+        except Exception:
+            adp = 999.0
 
         fantasy = stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0
         total_tds = (
@@ -2897,17 +2924,16 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
             + _pr_num(stats.get("receiving_tds"))
         )
 
-        norm = _pr_norm(name)
         rows.append({
             "player_id": str(player_id),
             "name": name,
-            "team": p.get("team") or "FA",
+            "team": p.get("team") or stats.get("team") or "FA",
             "position": pos,
             "status": p.get("status") or "",
             "age": p.get("age"),
             "years_exp": p.get("years_exp"),
-            "adp": round(adp_lookup.get(norm, 999.0), 1),
-            "adp_display": adp_display_lookup.get(norm),
+            "adp": round(adp, 1),
+            "adp_display": adp_row.get("adp_display"),
             "games": stats.get("games", 0),
             "fantasy_points_ppr": round(_pr_num(fantasy), 1),
             "passing_yards": round(_pr_num(stats.get("passing_yards")), 1),
@@ -2923,7 +2949,13 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
             "total_tds": round(total_tds, 1),
         })
 
-    rows.sort(key=lambda x: (x.get("adp", 999.0), -x.get("fantasy_points_ppr", 0), x["name"]))
+    rows.sort(
+        key=lambda x: (
+            x.get("adp", 999.0),
+            -x.get("fantasy_points_ppr", 0),
+            x["name"],
+        )
+    )
     return rows[:limit]
 
 
