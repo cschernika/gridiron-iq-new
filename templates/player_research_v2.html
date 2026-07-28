@@ -1,0 +1,183 @@
+<section class="dashboard-section player-research-v2" id="section-player-research" data-title="Player Research">
+  <div class="pr-hero">
+    <div>
+      <p class="eyebrow">Player intelligence</p>
+      <h2>Player Research</h2>
+      <p>Search, filter, compare, and evaluate players for your league format.</p>
+    </div>
+    <div class="pr-league-context">
+      <span id="pr-league-name">League-aware mode</span>
+      <strong id="pr-scoring-label">Full PPR</strong>
+    </div>
+  </div>
+
+  <div class="pr-toolbar panel">
+    <label class="pr-search">
+      <span>Search players</span>
+      <input id="pr-search-input" type="search" placeholder="Search by player, team, or position" autocomplete="off">
+    </label>
+
+    <label>
+      <span>Position</span>
+      <select id="pr-position-filter">
+        <option value="">All positions</option>
+        <option>QB</option><option>RB</option><option>WR</option><option>TE</option>
+      </select>
+    </label>
+
+    <label>
+      <span>Team</span>
+      <select id="pr-team-filter"><option value="">All teams</option></select>
+    </label>
+
+    <label>
+      <span>Sort by</span>
+      <select id="pr-sort">
+        <option value="rank">Overall rank</option>
+        <option value="projection">Projection</option>
+        <option value="adp">ADP</option>
+        <option value="ceiling">Ceiling</option>
+        <option value="floor">Floor</option>
+        <option value="trend">Trend</option>
+      </select>
+    </label>
+
+    <button class="secondary-button" id="pr-clear-filters" type="button">Reset</button>
+  </div>
+
+  <div class="pr-layout">
+    <aside class="pr-player-list panel" aria-label="Player search results">
+      <div class="pr-list-header">
+        <div>
+          <h3>Players</h3>
+          <span id="pr-result-count">Loading…</span>
+        </div>
+        <label class="pr-watch-toggle">
+          <input type="checkbox" id="pr-watch-only">
+          <span>Watchlist only</span>
+        </label>
+      </div>
+      <div id="pr-player-results" class="pr-results" role="list"></div>
+      <button id="pr-load-more" class="secondary-button pr-load-more" type="button">Load more</button>
+    </aside>
+
+    <main class="pr-detail panel" id="pr-detail">
+      <div class="pr-empty-state" id="pr-empty-state">
+        <div class="pr-empty-icon">GIQ</div>
+        <h3>Select a player</h3>
+        <p>Choose a player to view rankings, projections, role, risk, trends, and league-specific advice.</p>
+      </div>
+
+      <div id="pr-profile" hidden>
+        <header class="pr-profile-header">
+          <div class="pr-avatar" id="pr-avatar">--</div>
+          <div class="pr-identity">
+            <div class="pr-title-row">
+              <div>
+                <p class="eyebrow" id="pr-player-meta">Position • Team</p>
+                <h2 id="pr-player-name">Player</h2>
+              </div>
+              <button id="pr-watch-button" class="pr-watch-button" type="button" aria-pressed="false">☆ Watch</button>
+            </div>
+            <div class="pr-tags" id="pr-tags"></div>
+          </div>
+        </header>
+
+        <section class="pr-score-grid">
+          <article><span>Overall</span><strong id="pr-overall-rank">—</strong><small>Rank</small></article>
+          <article><span>Position</span><strong id="pr-position-rank">—</strong><small>Rank</small></article>
+          <article><span>Projection</span><strong id="pr-projection">—</strong><small>Fantasy points</small></article>
+          <article><span>ADP</span><strong id="pr-adp">—</strong><small>Average draft position</small></article>
+          <article><span>GIQ Grade</span><strong id="pr-grade">—</strong><small id="pr-grade-label">Draft value</small></article>
+        </section>
+
+        <section class="pr-insight-banner" id="pr-insight-banner">
+          <div>
+            <p class="eyebrow">Gridiron IQ verdict</p>
+            <h3 id="pr-verdict">—</h3>
+            <p id="pr-summary">—</p>
+          </div>
+          <div class="pr-confidence">
+            <strong id="pr-confidence">—</strong>
+            <span>Confidence</span>
+          </div>
+        </section>
+
+        <div class="pr-tabs" role="tablist">
+          <button class="active" data-pr-tab="overview" type="button">Overview</button>
+          <button data-pr-tab="usage" type="button">Usage & Trends</button>
+          <button data-pr-tab="matchups" type="button">Matchups</button>
+          <button data-pr-tab="news" type="button">News</button>
+        </div>
+
+        <section class="pr-tab-panel active" data-pr-panel="overview">
+          <div class="pr-two-column">
+            <article class="pr-card">
+              <h3>Range of outcomes</h3>
+              <div class="pr-range-row"><span>Floor</span><strong id="pr-floor">—</strong></div>
+              <div class="pr-range-track"><i id="pr-floor-bar"></i></div>
+              <div class="pr-range-row"><span>Median</span><strong id="pr-median">—</strong></div>
+              <div class="pr-range-track"><i id="pr-median-bar"></i></div>
+              <div class="pr-range-row"><span>Ceiling</span><strong id="pr-ceiling">—</strong></div>
+              <div class="pr-range-track"><i id="pr-ceiling-bar"></i></div>
+            </article>
+            <article class="pr-card">
+              <h3>Draft recommendation</h3>
+              <dl class="pr-facts">
+                <div><dt>Target round</dt><dd id="pr-target-round">—</dd></div>
+                <div><dt>Value vs. ADP</dt><dd id="pr-value-vs-adp">—</dd></div>
+                <div><dt>Bye week</dt><dd id="pr-bye">—</dd></div>
+                <div><dt>Risk level</dt><dd id="pr-risk">—</dd></div>
+              </dl>
+            </article>
+          </div>
+
+          <div class="pr-two-column">
+            <article class="pr-card">
+              <h3>Why to draft</h3>
+              <ul id="pr-strengths"></ul>
+            </article>
+            <article class="pr-card">
+              <h3>What could go wrong</h3>
+              <ul id="pr-risks"></ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="pr-tab-panel" data-pr-panel="usage">
+          <div class="pr-metric-strip" id="pr-usage-metrics"></div>
+          <article class="pr-card">
+            <h3>Recent trend</h3>
+            <div id="pr-trend-chart" class="pr-trend-chart" aria-label="Recent performance trend"></div>
+          </article>
+        </section>
+
+        <section class="pr-tab-panel" data-pr-panel="matchups">
+          <article class="pr-card">
+            <h3>Schedule outlook</h3>
+            <div id="pr-matchup-list" class="pr-matchup-list"></div>
+          </article>
+        </section>
+
+        <section class="pr-tab-panel" data-pr-panel="news">
+          <article class="pr-card">
+            <h3>Latest notes</h3>
+            <div id="pr-news-list" class="pr-news-list"></div>
+          </article>
+        </section>
+
+        <section class="pr-compare-section">
+          <div>
+            <p class="eyebrow">Player comparison</p>
+            <h3>Compare side-by-side</h3>
+          </div>
+          <div class="pr-compare-controls">
+            <select id="pr-compare-select"><option value="">Choose another player</option></select>
+            <button id="pr-compare-button" class="primary-button" type="button">Compare</button>
+          </div>
+          <div id="pr-comparison" class="pr-comparison" hidden></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</section>
