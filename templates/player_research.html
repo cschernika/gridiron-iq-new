@@ -124,7 +124,7 @@
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <div class="pr-count">{{ player_count }} players shown · {{ active_platform }} {{ active_scoring }} · {{ adp_source }}</div>
       <button id="pr-refresh-adp" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer">Refresh FantasyPros Data</button>
-      <a href="/api/player-research/adp/status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none">Check ADP Status</a> <a href="/api/player-research/data-status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none;margin-left:10px">Check All Data</a> <button id="pr-refresh-stats" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer;margin-left:8px">Load 2025 Stats</button>
+      <a href="/api/player-research/adp/status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none">Check ADP Status</a> <a href="/api/player-research/data-status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none;margin-left:10px">Check All Data</a> <button id="pr-refresh-stats" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer;margin-left:8px">Refresh 2025 Stats</button>
     </div>
   </section>
 
@@ -194,6 +194,16 @@
         <div id="pr-info" class="pr-info"></div>
       </article>
     </div>
+
+    <article id="pr-news-section" class="pr-card" style="display:none;margin-top:16px">
+      <div class="pr-kicker">CURRENT PLAYER NEWS</div>
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+        <h2 style="margin-bottom:8px">News, Injuries & Practice Updates</h2>
+        <span id="pr-news-updated" style="font-size:9px;color:var(--m)"></span>
+      </div>
+      <div id="pr-injury-card" style="display:none;border:1px solid #f1d7d7;background:#fff8f8;border-radius:10px;padding:10px;margin:8px 0;font-size:10px"></div>
+      <div id="pr-news-list"></div>
+    </article>
   </section>
 
 </div>
@@ -293,17 +303,6 @@
     </div>
   </section>
 
-<div id="pr-news-section" style="display:none;margin-top:16px">
-  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
-    <div>
-      <div style="font-size:9px;font-weight:900;color:#5d3df5;letter-spacing:.08em">CURRENT PLAYER NEWS</div>
-      <h3 style="margin:3px 0 0">News, Injuries & Practice Updates</h3>
-    </div>
-    <span id="pr-news-updated" style="font-size:9px;color:#7b8798"></span>
-  </div>
-  <div id="pr-injury-card" style="display:none;border:1px solid #f1d7d7;background:#fff8f8;border-radius:10px;padding:10px;margin-bottom:9px;font-size:10px"></div>
-  <div id="pr-news-list"></div>
-</div>
 
 <script>
 
@@ -427,6 +426,7 @@
       const bio = profile.bio;
       const prior = profile.previous_year || {};
       const proj = profile.projection || {};
+      renderPlayerNews(profile);
 
       $("pr-avatar").textContent = bio.position || "NFL";
       $("pr-name").textContent = bio.name;
@@ -435,6 +435,7 @@
 
       $("pr-badges").innerHTML = [
         bio.status ? `<span class="pr-badge ok">${bio.status}</span>` : "",
+        bio.adp && Number(bio.adp) < 999 ? `<span class="pr-badge">ADP ${fmt(bio.adp)}${bio.position_adp ? " · " + bio.position_adp : ""}</span>` : "",
         bio.injury_status ? `<span class="pr-badge">Injury: ${bio.injury_status}</span>` : "",
         bio.college ? `<span class="pr-badge">${bio.college}</span>` : "",
         bio.years_exp !== null && bio.years_exp !== undefined
