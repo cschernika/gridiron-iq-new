@@ -2710,6 +2710,42 @@ def _player_research_master_row(player_name):
     except Exception:
         return {}
 
+def _fp_adp_for_player(player_name, position, scoring="PPR"):
+    """
+    Return FantasyPros 2026 ADP for one player from a cached position response.
+    """
+    try:
+        payload = _fp_adp_position_data(position, scoring)
+        rows = _extract_fp_list(payload, ("players", "rankings", "results", "data"))
+        target = _pr_norm(player_name)
+
+        for row in rows:
+            name = str(row.get("player_name") or row.get("name") or "").strip()
+            if _pr_norm(name) != target:
+                continue
+
+            value = row.get("rank_adp")
+            if value in (None, ""):
+                value = row.get("adp")
+            if value in (None, ""):
+                value = row.get("rank_ave")
+
+            try:
+                adp = float(value)
+            except Exception:
+                adp = None
+
+            return {
+                "adp": adp,
+                "position_adp": row.get("pos_rank") or row.get("position_rank") or "",
+                "source": "FantasyPros 2026 ADP",
+            }
+    except Exception:
+        pass
+
+    return None
+
+
 def _player_research_adp(player_name, platform="ESPN", position=None):
     """
     ADP priority:
@@ -2749,11 +2785,15 @@ def _player_research_adp(player_name, platform="ESPN", position=None):
 
     pos = position or master.get("position")
     if pos:
-        fp = _fp_adp_for_player(
-            player_name,
-            pos,
-            "HALF" if platform == "YAHOO" else "PPR",
-        )
+        try:
+            fp = _fp_adp_for_player(
+                player_name,
+                pos,
+                "HALF" if platform == "YAHOO" else "PPR",
+            )
+        except Exception:
+            fp = None
+
         if fp and fp.get("adp") is not None:
             return fp
 
