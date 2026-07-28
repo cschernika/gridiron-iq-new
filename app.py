@@ -2813,6 +2813,41 @@ def _player_research_stats_2025(player_name):
         return {}
 
 
+def _fp_projection_for_player(player_name, position):
+    try:
+        payload = _fp_projection_position_data(position)
+        rows = _extract_fp_list(payload, ("players", "results", "data"))
+        target = _pr_norm(player_name)
+
+        for row in rows:
+            name = str(row.get("name") or row.get("player_name") or "").strip()
+            if _pr_norm(name) != target:
+                continue
+
+            stats = row.get("stats") or {}
+            return {
+                "games": 17,
+                "position": "DEF" if str(position).upper() == "DST" else str(position).upper(),
+                "passing_yards": stats.get("pass_yds"),
+                "passing_tds": stats.get("pass_tds"),
+                "interceptions": stats.get("pass_ints") or stats.get("pass_int"),
+                "carries": stats.get("rush_att"),
+                "rushing_yards": stats.get("rush_yds"),
+                "rushing_tds": stats.get("rush_tds"),
+                "targets": stats.get("rec_tgt") or stats.get("targets"),
+                "receptions": stats.get("rec_rec"),
+                "receiving_yards": stats.get("rec_yds"),
+                "receiving_tds": stats.get("rec_tds"),
+                "fantasy_points": stats.get("points"),
+                "fantasy_points_ppr": stats.get("points_ppr"),
+                "method": "FantasyPros 2026 preseason projection",
+            }
+    except Exception:
+        return None
+
+    return None
+
+
 def _player_research_projection_2026(player_name, position):
     """
     Projection priority:
@@ -2844,7 +2879,11 @@ def _player_research_projection_2026(player_name, position):
         if any(v not in (None, "", 0, 0.0) for k, v in mapped.items() if k not in {"games","position","method"}):
             return mapped
 
-    live = _fp_projection_for_player(player_name, position)
+    try:
+        live = _fp_projection_for_player(player_name, position)
+    except Exception:
+        live = None
+
     if live:
         return live
 
