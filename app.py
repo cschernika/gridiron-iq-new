@@ -1991,6 +1991,10 @@ def _pr_urls(season):
         f"https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_{season}.csv",
     ]
 
+# Canonical nflverse sources used by the Player Research status and refresh routes.
+# Keep this defined at module scope so every route can reference it safely.
+NFLVERSE_2025_STATS_URLS = tuple(_pr_urls(2025))
+
 def _pr_rows(season):
     cache = DATA_DIR / f"player_stats_{season}.csv"
     if cache.exists():
@@ -3075,7 +3079,11 @@ def _player_research_data_status(platform="ESPN"):
         "projection_2026_count": projection_count,
         "platform_adp_count": adp_count,
         "fantasypros_api_configured": bool(os.getenv("FANTASYPROS_API_KEY", "").strip()),
-        "nflverse_stats_url": NFLVERSE_2025_STATS_URLS[0],
+        "nflverse_stats_url": (
+            NFLVERSE_2025_STATS_URLS[0]
+            if NFLVERSE_2025_STATS_URLS
+            else None
+        ),
         "fantasypros_base": "https://api.fantasypros.com/public/v2/json",
     }
 
