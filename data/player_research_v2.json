@@ -1,0 +1,493 @@
+[
+  {
+    "id": "ja-marr-chase",
+    "name": "Ja'Marr Chase",
+    "position": "WR",
+    "team": "CIN",
+    "experience": "6th season",
+    "overall_rank": 1,
+    "position_rank": 1,
+    "projection": 325.4,
+    "adp": 1.8,
+    "grade": "A+",
+    "grade_label": "Elite cornerstone",
+    "verdict": "Draft at cost",
+    "summary": "An elite target earner with week-winning upside and one of the safest first-round profiles.",
+    "confidence": 94,
+    "floor": 270,
+    "median": 325,
+    "ceiling": 382,
+    "target_round": "Round 1",
+    "value_vs_adp": "+0.8 picks",
+    "bye": 10,
+    "risk": "Low",
+    "trend": 8.5,
+    "tags": [
+      {
+        "label": "Elite volume",
+        "type": "positive"
+      },
+      {
+        "label": "Top-tier ceiling",
+        "type": "positive"
+      },
+      {
+        "label": "Stable role",
+        "type": ""
+      }
+    ],
+    "strengths": [
+      "Dominant target share and red-zone role",
+      "Quarterback continuity supports efficiency",
+      "Consistent explosive-play upside"
+    ],
+    "risks": [
+      "Premium acquisition cost",
+      "Production is sensitive to quarterback health"
+    ],
+    "usage": {
+      "target_share": {
+        "value": "29.8%",
+        "label": "Elite"
+      },
+      "routes": {
+        "value": "94%",
+        "label": "Route participation"
+      },
+      "red_zone": {
+        "value": "31",
+        "label": "Targets"
+      },
+      "yards_route": {
+        "value": "2.71",
+        "label": "Yards per route"
+      }
+    },
+    "recent_points": [
+      19.4,
+      28.7,
+      15.8,
+      31.2,
+      22.6,
+      34.1,
+      18.9,
+      26.3
+    ],
+    "matchups": [
+      {
+        "week": 1,
+        "opponent": "CLE",
+        "grade": "B",
+        "note": "Strong secondary, but volume remains bankable.",
+        "projection": 19.8
+      },
+      {
+        "week": 2,
+        "opponent": "BAL",
+        "grade": "B",
+        "note": "Competitive game environment raises pass volume.",
+        "projection": 20.4
+      },
+      {
+        "week": 3,
+        "opponent": "NYJ",
+        "grade": "C",
+        "note": "Difficult perimeter coverage matchup.",
+        "projection": 17.5
+      }
+    ],
+    "news": [
+      {
+        "date": "Jul 27",
+        "title": "Camp role remains unchanged",
+        "summary": "Continues to operate as the clear first read throughout team periods."
+      },
+      {
+        "date": "Jul 23",
+        "title": "Red-zone work emphasized",
+        "summary": "The offense is testing more condensed formations to create favorable releases."
+      }
+    ]
+  },
+  {
+    "id": "bijan-robinson",
+    "name": "Bijan Robinson",
+    "position": "RB",
+    "team": "ATL",
+    "experience": "4th season",
+    "overall_rank": 2,
+    "position_rank": 1,
+    "projection": 309.8,
+    "adp": 2.4,
+    "grade": "A+",
+    "grade_label": "Elite dual-threat",
+    "verdict": "Priority first-round target",
+    "summary": "A true three-down back with receiving usage, touchdown upside, and a league-winning ceiling.",
+    "confidence": 92,
+    "floor": 255,
+    "median": 310,
+    "ceiling": 370,
+    "target_round": "Round 1",
+    "value_vs_adp": "+0.4 picks",
+    "bye": 5,
+    "risk": "Low",
+    "trend": 7.2,
+    "tags": [
+      {
+        "label": "Three-down role",
+        "type": "positive"
+      },
+      {
+        "label": "Receiving floor",
+        "type": "positive"
+      },
+      {
+        "label": "Goal-line work",
+        "type": ""
+      }
+    ],
+    "strengths": [
+      "Elite rushing and receiving combination",
+      "High-value touches support weekly floor",
+      "Offensive environment can produce double-digit touchdowns"
+    ],
+    "risks": [
+      "Running back injury exposure",
+      "Occasional workload sharing can cap spike weeks"
+    ],
+    "usage": {
+      "snap_share": {
+        "value": "78%",
+        "label": "Team snaps"
+      },
+      "route_share": {
+        "value": "62%",
+        "label": "Routes"
+      },
+      "goal_line": {
+        "value": "19",
+        "label": "Carries"
+      },
+      "yards_touch": {
+        "value": "5.4",
+        "label": "Per touch"
+      }
+    },
+    "recent_points": [
+      18.6,
+      24.3,
+      20.1,
+      29.4,
+      16.8,
+      27.9,
+      22.4,
+      25.7
+    ],
+    "matchups": [
+      {
+        "week": 1,
+        "opponent": "TB",
+        "grade": "B",
+        "note": "Solid front, receiving role protects floor.",
+        "projection": 19.1
+      },
+      {
+        "week": 2,
+        "opponent": "CAR",
+        "grade": "A",
+        "note": "Favorable run defense and positive script.",
+        "projection": 22.7
+      },
+      {
+        "week": 3,
+        "opponent": "NO",
+        "grade": "B",
+        "note": "Volume remains strong in a divisional game.",
+        "projection": 19.9
+      }
+    ],
+    "news": [
+      {
+        "date": "Jul 28",
+        "title": "Expanded motion package",
+        "summary": "Atlanta is aligning Robinson across the formation to generate matchup advantages."
+      }
+    ]
+  },
+  {
+    "id": "josh-allen",
+    "name": "Josh Allen",
+    "position": "QB",
+    "team": "BUF",
+    "experience": "9th season",
+    "overall_rank": 18,
+    "position_rank": 1,
+    "projection": 386.2,
+    "adp": 20.5,
+    "grade": "A",
+    "grade_label": "Difference-maker",
+    "verdict": "Worth a late-second or early-third",
+    "summary": "Elite rushing production gives him the strongest weekly ceiling among quarterbacks.",
+    "confidence": 91,
+    "floor": 335,
+    "median": 386,
+    "ceiling": 430,
+    "target_round": "Rounds 2\u20133",
+    "value_vs_adp": "+2.5 picks",
+    "bye": 7,
+    "risk": "Low",
+    "trend": 6.8,
+    "tags": [
+      {
+        "label": "Elite rushing",
+        "type": "positive"
+      },
+      {
+        "label": "QB1 ceiling",
+        "type": "positive"
+      },
+      {
+        "label": "Premium price",
+        "type": "warning"
+      }
+    ],
+    "strengths": [
+      "Rushing touchdowns create positional leverage",
+      "Consistently high red-zone involvement",
+      "Stable top-three quarterback profile"
+    ],
+    "risks": [
+      "Early quarterback cost reduces flexibility",
+      "Aggressive style adds weekly turnover variance"
+    ],
+    "usage": {
+      "designed_runs": {
+        "value": "7.1",
+        "label": "Per game"
+      },
+      "red_zone": {
+        "value": "42",
+        "label": "Carries"
+      },
+      "deep_rate": {
+        "value": "12.8%",
+        "label": "Attempts"
+      },
+      "pressure_grade": {
+        "value": "88",
+        "label": "GIQ score"
+      }
+    },
+    "recent_points": [
+      24.2,
+      31.7,
+      20.5,
+      29.9,
+      18.4,
+      35.1,
+      27.3,
+      26.8
+    ],
+    "matchups": [
+      {
+        "week": 1,
+        "opponent": "MIA",
+        "grade": "A",
+        "note": "Shootout potential and favorable rushing lanes.",
+        "projection": 26.7
+      },
+      {
+        "week": 2,
+        "opponent": "NE",
+        "grade": "B",
+        "note": "Defense can limit explosives, not rushing floor.",
+        "projection": 23.9
+      }
+    ],
+    "news": [
+      {
+        "date": "Jul 26",
+        "title": "Designed runs remain in plan",
+        "summary": "Coaches continue to feature Allen near the goal line."
+      }
+    ]
+  },
+  {
+    "id": "amon-ra-st-brown",
+    "name": "Amon-Ra St. Brown",
+    "position": "WR",
+    "team": "DET",
+    "experience": "6th season",
+    "overall_rank": 5,
+    "position_rank": 3,
+    "projection": 301.7,
+    "adp": 5.9,
+    "grade": "A",
+    "grade_label": "High-floor WR1",
+    "verdict": "Reliable first-round selection",
+    "summary": "A target-volume anchor with exceptional weekly consistency in a productive offense.",
+    "confidence": 93,
+    "floor": 260,
+    "median": 302,
+    "ceiling": 350,
+    "target_round": "Round 1",
+    "value_vs_adp": "+0.9 picks",
+    "bye": 8,
+    "risk": "Low",
+    "trend": 5.9,
+    "tags": [
+      {
+        "label": "Target magnet",
+        "type": "positive"
+      },
+      {
+        "label": "High floor",
+        "type": "positive"
+      }
+    ],
+    "strengths": [
+      "Elite short and intermediate usage",
+      "Strong touchdown environment",
+      "Low weekly bust rate"
+    ],
+    "risks": [
+      "Slightly lower deep-ball ceiling than peers",
+      "Target competition can rise near the goal line"
+    ],
+    "usage": {
+      "target_share": {
+        "value": "27.6%",
+        "label": "Team targets"
+      },
+      "slot_rate": {
+        "value": "54%",
+        "label": "Routes"
+      },
+      "first_read": {
+        "value": "34%",
+        "label": "Rate"
+      },
+      "yards_route": {
+        "value": "2.48",
+        "label": "YPRR"
+      }
+    },
+    "recent_points": [
+      21.1,
+      17.9,
+      25.3,
+      18.8,
+      29.1,
+      20.4,
+      23.7,
+      19.6
+    ],
+    "matchups": [
+      {
+        "week": 1,
+        "opponent": "GB",
+        "grade": "B",
+        "note": "Strong game environment and stable volume.",
+        "projection": 19.4
+      }
+    ],
+    "news": [
+      {
+        "date": "Jul 25",
+        "title": "Full participant",
+        "summary": "Handled his normal workload during the first padded practice."
+      }
+    ]
+  },
+  {
+    "id": "brock-bowers",
+    "name": "Brock Bowers",
+    "position": "TE",
+    "team": "LV",
+    "experience": "3rd season",
+    "overall_rank": 24,
+    "position_rank": 1,
+    "projection": 246.5,
+    "adp": 25.2,
+    "grade": "A",
+    "grade_label": "Elite positional edge",
+    "verdict": "Strong third-round target",
+    "summary": "Rare receiving volume at tight end creates a meaningful weekly advantage.",
+    "confidence": 89,
+    "floor": 205,
+    "median": 247,
+    "ceiling": 292,
+    "target_round": "Round 3",
+    "value_vs_adp": "+1.2 picks",
+    "bye": 6,
+    "risk": "Medium",
+    "trend": 8.1,
+    "tags": [
+      {
+        "label": "Target leader",
+        "type": "positive"
+      },
+      {
+        "label": "Positional edge",
+        "type": "positive"
+      },
+      {
+        "label": "QB uncertainty",
+        "type": "warning"
+      }
+    ],
+    "strengths": [
+      "Can lead his team in targets",
+      "Mismatch creator at every level",
+      "High ceiling relative to tight-end field"
+    ],
+    "risks": [
+      "Quarterback efficiency may fluctuate",
+      "Defenses may devote extra coverage attention"
+    ],
+    "usage": {
+      "target_share": {
+        "value": "25.1%",
+        "label": "Team targets"
+      },
+      "route_share": {
+        "value": "89%",
+        "label": "Routes"
+      },
+      "yards_route": {
+        "value": "2.35",
+        "label": "YPRR"
+      },
+      "red_zone": {
+        "value": "18",
+        "label": "Targets"
+      }
+    },
+    "recent_points": [
+      13.4,
+      18.9,
+      15.7,
+      22.1,
+      11.8,
+      20.3,
+      17.6,
+      19.9
+    ],
+    "matchups": [
+      {
+        "week": 1,
+        "opponent": "DEN",
+        "grade": "B",
+        "note": "Volume should offset difficult coverage.",
+        "projection": 15.2
+      }
+    ],
+    "news": [
+      {
+        "date": "Jul 28",
+        "title": "Featured throughout camp",
+        "summary": "The offense continues to build its passing concepts around Bowers."
+      }
+    ]
+  }
+]
