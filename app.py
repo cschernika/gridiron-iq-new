@@ -2298,7 +2298,7 @@ def _fp_get_json(url, params=None, timeout=25):
     return r.json()
 
 def _fp_player_list_2026():
-    payload = _fp_get_json("https://api.fantasypros.com/v2/json/nfl/players")
+    payload = _fp_get_json("https://api.fantasypros.com/public/v2/json/nfl/players")
     rows = payload.get("players") or []
     out = {}
     for p in rows:
@@ -2334,7 +2334,7 @@ def _fp_player_list_2026():
 
 def _fp_projections_2026(scoring="PPR"):
     payload = _fp_get_json(
-        "https://api.fantasypros.com/v2/json/nfl/2026/projections",
+        "https://api.fantasypros.com/public/v2/json/nfl/2026/projections",
         params={
             "week": 0,
             "positions": "QB:RB:WR:TE:DST:K",
@@ -2375,7 +2375,7 @@ def _fp_projections_2026(scoring="PPR"):
 
 def _fp_adp_2026(scoring="PPR"):
     payload = _fp_get_json(
-        "https://api.fantasypros.com/v2/json/nfl/2026/consensus-rankings",
+        "https://api.fantasypros.com/public/v2/json/nfl/2026/consensus-rankings",
         params={"position": "ALL", "scoring": scoring, "type": "ADP", "week": 0},
     )
     # FantasyPros responses have varied slightly over time. Accept common shapes.
@@ -2710,9 +2710,12 @@ def _player_research_master_row(player_name):
     except Exception:
         return {}
 
-def _player_research_adp(player_name, platform="ESPN"):
+def _player_research_adp(player_name, platform="ESPN", position=None):
     """
-    Return platform ADP from the platform dataset first, then master DB.
+    ADP priority:
+      1. selected platform's local ADP dataset
+      2. 2026 master database
+      3. FantasyPros current ADP by position
     """
     platform = str(platform or "ESPN").upper()
     norm = _pr_norm(player_name)
@@ -2737,32 +2740,51 @@ def _player_research_adp(player_name, platform="ESPN"):
     except Exception:
         value = None
 
-    return {
-        "adp": value if value is not None else 999.0,
-        "position_adp": master.get("adp_position_rank") or "",
-        "source": master.get("source") or "2026 master database",
-    }
+    if value is not None and value < 999:
+        return {
+            "adp": value,
+            "position_adp": master.get("adp_position_rank") or "",
+            "source": "2026 master database",
+        }
+
+    pos = position or master.get("position")
+    if pos:
+        fp = _fp_adp_for_player(
+            player_name,
+            pos,
+            "HALF" if platform == "YAHOO" else "PPR",
+        )
+        if fp and fp.get("adp") is not None:
+            return fp
+
+    return {"adp": 999.0, "position_adp": "", "source": "Unavailable"}
+
 
 def _player_research_stats_2025(player_name):
     """
-    Historical 2025 stats come only from the local 2025 stats snapshot.
+    Historical 2025 stats from the nflverse local snapshot.
+    Automatically builds the snapshot once when missing.
     """
     try:
-        stats = _stats_2025_snapshot().get("players", {}).get(_pr_norm(player_name))
+        snapshot = _ensure_2025_stats_snapshot()
+        stats = snapshot.get("players", {}).get(_pr_norm(player_name))
         return dict(stats) if stats else {}
     except Exception:
         return {}
 
+
 def _player_research_projection_2026(player_name, position):
     """
-    Prefer FantasyPros projection stored in the 2026 master DB.
-    Fall back to Gridiron IQ projection generated from history/2025 stats.
+    Projection priority:
+      1. projection already stored in the 2026 master DB
+      2. on-demand FantasyPros preseason projection by position
+      3. Gridiron IQ history-based fallback
     """
     master = _player_research_master_row(player_name)
     fp = master.get("projection")
 
     if isinstance(fp, dict) and fp:
-        return {
+        mapped = {
             "games": 17,
             "position": position,
             "passing_yards": fp.get("pass_yards"),
@@ -2779,6 +2801,12 @@ def _player_research_projection_2026(player_name, position):
             "fantasy_points_ppr": fp.get("ppr_points"),
             "method": "FantasyPros 2026 projection",
         }
+        if any(v not in (None, "", 0, 0.0) for k, v in mapped.items() if k not in {"games","position","method"}):
+            return mapped
+
+    live = _fp_projection_for_player(player_name, position)
+    if live:
+        return live
 
     history = _pr_history(player_name)
     return _pr_projection(history, position)
@@ -2949,11 +2977,10 @@ def _player_research_data_status(platform="ESPN"):
     stats = _stats_2025_snapshot()
     adp = _platform_2026_adp_data(platform)
 
-    projection_count = 0
-    for p in master.get("players", {}).values():
-        if isinstance(p.get("projection"), dict) and p.get("projection"):
-            projection_count += 1
-
+    projection_count = sum(
+        1 for p in master.get("players", {}).values()
+        if isinstance(p.get("projection"), dict) and p.get("projection")
+    )
     adp_count = 0
     for p in adp.get("players", {}).values():
         try:
@@ -2968,104 +2995,11 @@ def _player_research_data_status(platform="ESPN"):
         "stats_2025_count": len(stats.get("players", {})),
         "projection_2026_count": projection_count,
         "platform_adp_count": adp_count,
-        "master_updated_at": master.get("updated_at", ""),
-        "stats_updated_at": stats.get("updated_at", ""),
-        "adp_source": adp.get("source", ""),
         "fantasypros_api_configured": bool(os.getenv("FANTASYPROS_API_KEY", "").strip()),
+        "nflverse_stats_url": NFLVERSE_2025_STATS_URLS[0],
+        "fantasypros_base": "https://api.fantasypros.com/public/v2/json",
     }
 
-
-NFLVERSE_2025_STATS_URLS = [
-    "https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_reg_2025.csv",
-    "https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_2025.csv",
-]
-
-def _download_2025_stats_rows():
-    errors = []
-    headers = {
-        "User-Agent": "GridironIQ/2026",
-        "Accept": "text/csv,text/plain,*/*",
-    }
-    for url in NFLVERSE_2025_STATS_URLS:
-        try:
-            response = requests.get(url, headers=headers, timeout=45)
-            response.raise_for_status()
-            text = response.text
-            if not text or "," not in text:
-                raise RuntimeError("Downloaded response did not look like CSV.")
-            rows = list(csv.DictReader(io.StringIO(text)))
-            if rows:
-                return rows, url
-        except Exception as exc:
-            errors.append(f"{url}: {exc}")
-    raise RuntimeError("Could not download 2025 nflverse stats. " + " | ".join(errors))
-
-def _build_2025_stats_snapshot_direct():
-    rows, source_url = _download_2025_stats_rows()
-
-    regular = [
-        row for row in rows
-        if str(row.get("season_type") or "REG").upper() == "REG"
-    ]
-    if regular:
-        rows = regular
-
-    grouped = {}
-    for row in rows:
-        name = _pr_row_name(row)
-        norm = _pr_norm(name)
-        if not norm:
-            continue
-        grouped.setdefault(norm, {"name": name, "rows": []})
-        grouped[norm]["rows"].append(row)
-
-    players = {}
-    position_counts = {}
-    for norm, bundle in grouped.items():
-        record = _stats_2025_player_record(bundle["name"], bundle["rows"])
-        pos = str(record.get("position") or "").upper()
-        if pos == "DST":
-            pos = "DEF"
-        if pos not in {"QB","RB","WR","TE","K","FB"}:
-            continue
-        record["position"] = pos
-        players[norm] = record
-        position_counts[pos] = position_counts.get(pos, 0) + 1
-
-    if not players:
-        raise RuntimeError("2025 stats downloaded but no fantasy-relevant player rows were built.")
-
-    payload = {
-        "season": 2025,
-        "season_type": "REG",
-        "source": "nflverse Player Summary Stats",
-        "source_url": source_url,
-        "status": "local",
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "player_count": len(players),
-        "position_counts": position_counts,
-        "players": players,
-    }
-    STATS_2025_SNAPSHOT_FILE.write_text(
-        json.dumps(payload, indent=2),
-        encoding="utf-8",
-    )
-    return payload
-
-@app.post("/api/player-research/refresh-2025-stats")
-def player_research_refresh_2025_stats():
-    try:
-        payload = _build_2025_stats_snapshot_direct()
-        return jsonify(
-            ok=True,
-            player_count=payload.get("player_count", 0),
-            position_counts=payload.get("position_counts", {}),
-            source=payload.get("source"),
-            source_url=payload.get("source_url"),
-            updated_at=payload.get("updated_at"),
-        )
-    except Exception as exc:
-        return jsonify(ok=False, error=str(exc)), 500
 
 @app.get("/api/player-research/data-status")
 def player_research_data_status_api():
@@ -3747,7 +3681,7 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
 
         master = _player_research_master_row(name)
         stats = _player_research_stats_2025(name)
-        adp_info = _player_research_adp(name, platform)
+        adp_info = _player_research_adp(name, platform, pos)
         projection = _player_research_projection_2026(name, pos)
 
         fantasy = stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0
@@ -3947,7 +3881,7 @@ def _pr_profile(player_id):
     stats_2025 = _player_research_stats_2025(name)
     history = _pr_history(name)
     projection = _player_research_projection_2026(name, master.get("position") or position)
-    adp_info = _player_research_adp(name, _league_platform())
+    adp_info = _player_research_adp(name, _league_platform(), master.get("position") or position)
 
     bio = {
         "player_id": str(player_id),
