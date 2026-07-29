@@ -5339,6 +5339,11 @@ def player_research_profile(player_id):
     return jsonify(ok=True, profile=profile)
 
 
+
+from player_research_db import register as register_player_research_database
+register_player_research_database(app)
+
+
 @app.errorhandler(404)
 def not_found(_): return page("error.html",code=404,message="Page not found."),404
 
