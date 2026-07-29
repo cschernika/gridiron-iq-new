@@ -56,7 +56,7 @@
             Refresh 2025 Stats
           </button>
           <button id="pr-refresh-adp" class="pr-secondary-button" type="button">
-            Refresh 2026 ADP
+            Update 2026 ADP
           </button>
           <button id="pr-reload" class="pr-primary-button" type="button">
             Reload table
@@ -135,6 +135,11 @@
       </section>
 
       <p id="pr-source" class="pr-source">Loading data sources…</p>
+      <div class="pr-pager" id="pr-pager">
+        <button id="pr-prev-page" class="pr-secondary-button" type="button">Previous</button>
+        <span id="pr-page-label">Page 1 of 1</span>
+        <button id="pr-next-page" class="pr-secondary-button" type="button">Next</button>
+      </div>
 
       <div id="pr-player-overlay" class="pr-player-overlay" hidden></div>
       <aside id="pr-player-drawer" class="pr-player-drawer" hidden>
@@ -462,6 +467,23 @@
   }
 
 
+  .pr-pager {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 14px;
+    margin: 16px 0 4px;
+  }
+
+  .pr-pager button {
+    min-width: 110px;
+  }
+
+  .pr-pager button:disabled {
+    opacity: .45;
+    cursor: default;
+  }
+
   .pr-table tbody tr[data-player-name]{cursor:pointer}
   .pr-table tbody tr[data-player-name]:hover{background:#efedff}
   .pr-player-overlay{position:fixed;inset:0;z-index:1090;background:rgba(18,25,42,.48)}
@@ -605,7 +627,8 @@
       q: $("pr-search").value.trim(),
       sort: $("pr-sort").value,
       direction: $("pr-direction").value,
-      limit: "1000"
+      page: String(state.page),
+      page_size: String(state.pageSize)
     });
 
     try {
@@ -630,6 +653,14 @@
       renderRows(data.players || []);
 
       $("pr-count").textContent = data.count ?? 0;
+      state.page = data.page || 1;
+      $("pr-page-label").textContent =
+        `Page ${data.page || 1} of ${data.total_pages || 1} · ` +
+        `${data.returned_count || 0} shown of ${data.count || 0}`;
+      $("pr-prev-page").disabled = (data.page || 1) <= 1;
+      $("pr-next-page").disabled =
+        (data.page || 1) >= (data.total_pages || 1);
+
       $("pr-platform").textContent = data.platform || state.platform;
       $("pr-stats").textContent =
         data.updated_at?.stats_2025 ? "Loaded" : "Not loaded";
@@ -665,7 +696,7 @@
 
   $("pr-search").addEventListener("input", () => {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadPlayers, 250);
+    searchTimer = setTimeout(() => { state.page = 1; loadPlayers(); }, 250);
   });
 
   async function refresh2025Stats() {
@@ -776,15 +807,27 @@
 
       await loadPlayers();
     } catch (error) {
-      showAlert(`2026 ADP refresh failed: ${error.message}`);
+      showAlert(`2026 ADP update failed: ${error.message}`);
     } finally {
       button.disabled = false;
       button.textContent = originalText;
     }
   }
 
-  $("pr-sort").addEventListener("change", loadPlayers);
-  $("pr-direction").addEventListener("change", loadPlayers);
+  $("pr-sort").addEventListener("change", () => { state.page = 1; loadPlayers(); });
+  $("pr-direction").addEventListener("change", () => { state.page = 1; loadPlayers(); });
+  $("pr-prev-page").addEventListener("click", () => {
+    if (state.page > 1) {
+      state.page -= 1;
+      loadPlayers();
+    }
+  });
+
+  $("pr-next-page").addEventListener("click", () => {
+    state.page += 1;
+    loadPlayers();
+  });
+
   $("pr-reload").addEventListener("click", loadPlayers);
   $("pr-refresh-stats").addEventListener("click", refresh2025Stats);
   $("pr-refresh-adp").addEventListener("click", refresh2026Adp);
