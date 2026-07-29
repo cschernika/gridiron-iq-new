@@ -4649,21 +4649,54 @@ def player_research_adp_refresh():
     if platform not in {"ESPN", "YAHOO"}:
         platform = "ESPN"
 
-    data = _platform_2026_adp_data(platform, force=True)
-
-    return jsonify(
-        ok=bool(data.get("players")),
-        season=2026,
-        platform=platform,
-        scoring=data.get("scoring"),
-        source=data.get("source"),
-        status=data.get("status"),
-        updated_at=data.get("updated_at"),
-        player_count=len(data.get("players", {})),
-        api_configured=_fp_api_status()["configured"],
-        warning=data.get("warning", ""),
-        warnings=data.get("warnings", []),
+    app.logger.info(
+        "Starting 2026 ADP refresh for platform=%s",
+        platform,
     )
+
+    try:
+        data = _platform_2026_adp_data(platform, force=True)
+        players = data.get("players", {}) or {}
+
+        app.logger.info(
+            "Completed 2026 ADP refresh platform=%s source=%s players=%s status=%s",
+            platform,
+            data.get("source"),
+            len(players),
+            data.get("status"),
+        )
+
+        return jsonify(
+            ok=bool(players),
+            season=2026,
+            platform=platform,
+            scoring=data.get("scoring"),
+            source=data.get("source"),
+            status=data.get("status"),
+            updated_at=data.get("updated_at"),
+            player_count=len(players),
+            api_configured=_fp_api_status()["configured"],
+            warning=data.get("warning", ""),
+            warnings=data.get("warnings", []),
+            diagnostic_errors=data.get("diagnostic_errors", []),
+            message=(
+                f"Loaded {len(players)} {platform} ADP players."
+                if players
+                else "No usable ADP players were returned."
+            ),
+        )
+    except Exception as exc:
+        app.logger.exception(
+            "2026 ADP refresh failed for platform=%s",
+            platform,
+        )
+        return jsonify(
+            ok=False,
+            season=2026,
+            platform=platform,
+            error=str(exc),
+            message="The 2026 ADP refresh failed.",
+        ), 500
 
 @app.get("/api/player-research/position")
 def player_research_position():
