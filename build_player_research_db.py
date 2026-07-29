@@ -23,6 +23,11 @@ def main() -> None:
     )
     parser.add_argument("--all", action="store_true", help="Build history, then apply current teams, projections, and saved ADP.")
     parser.add_argument("--history", action="store_true", help="Import historical seasons.")
+    parser.add_argument(
+        "--career-history",
+        action="store_true",
+        help="Import every available completed NFL season from 1999 through 2025.",
+    )
     parser.add_argument("--season", type=int, help="Import one NFL season.")
     parser.add_argument("--start", type=int, default=1999)
     parser.add_argument("--end", type=int, default=2025)
@@ -49,6 +54,9 @@ def main() -> None:
             result["identity_repair"] = repair_recent_player_aliases()
         if args.history:
             result["history"] = import_all_history(args.start, args.end)
+        if args.career_history:
+            result["career_history"] = import_all_history(1999, 2025)
+            result["identity_repair"] = repair_recent_player_aliases()
         if args.season:
             result[f"season_{args.season}"] = import_season(args.season)
         if args.projections:

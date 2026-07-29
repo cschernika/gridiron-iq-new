@@ -1956,6 +1956,38 @@ def import_projection_api():
         return jsonify(ok=False, error=str(exc)), 500
 
 
+@bp.post("/api/player-research-db/import-career-history")
+def import_career_history_api():
+    body = request.get_json(silent=True) or {}
+    start_season = _int_or_none(body.get("start_season")) or 1999
+    end_season = _int_or_none(body.get("end_season")) or 2025
+
+    start_season = max(1999, start_season)
+    end_season = min(2025, end_season)
+
+    if start_season > end_season:
+        return jsonify(
+            ok=False,
+            error="The starting season must be before the ending season.",
+        ), 400
+
+    try:
+        result = import_all_history(start_season, end_season)
+        identity_result = repair_recent_player_aliases()
+        return jsonify(
+            ok=not bool(result.get("failures")),
+            start_season=start_season,
+            end_season=end_season,
+            imported=result.get("imported", {}),
+            failures=result.get("failures", {}),
+            season_count=result.get("season_count", 0),
+            identity_merges=identity_result.get("merged_count", 0),
+        )
+    except Exception as exc:
+        current_app.logger.exception("Complete career-history import failed")
+        return jsonify(ok=False, error=str(exc)), 500
+
+
 @bp.post("/api/player-research-db/import-season/<int:season>")
 def import_season_api(season: int):
     try:
@@ -2190,6 +2222,42 @@ def profile_api(player_name: str):
         field: 0 for field in STAT_FIELDS
     }
 
+    history_dicts = [dict(row) for row in history]
+    career_totals = {
+        field: round(
+            sum(_number(row.get(field)) for row in history_dicts),
+            2,
+        )
+        for field in STAT_FIELDS
+    }
+
+    seasons_played = len(history_dicts)
+    career_games = career_totals.get("games", 0) or 0
+
+    career_per_season = {
+        field: round(
+            career_totals.get(field, 0) / seasons_played,
+            2,
+        ) if seasons_played else 0
+        for field in STAT_FIELDS
+    }
+
+    career_per_game = {
+        field: round(
+            career_totals.get(field, 0) / career_games,
+            2,
+        ) if career_games else 0
+        for field in STAT_FIELDS
+    }
+
+    teams_by_season = [
+        {
+            "season": row.get("season"),
+            "team": row.get("team") or "FA",
+        }
+        for row in history_dicts
+    ]
+
     return jsonify(
         ok=True,
         profile={
@@ -2201,12 +2269,27 @@ def profile_api(player_name: str):
             "previous_year": previous_year,
             "history": [
                 {
-                    **dict(row),
-                    "season_team": row["team"],
+                    **row,
+                    "season_team": row.get("team"),
                     "current_team": player["team"],
                 }
-                for row in history
+                for row in history_dicts
             ],
+            "career": {
+                "seasons_played": seasons_played,
+                "first_season": (
+                    history_dicts[0].get("season")
+                    if history_dicts else None
+                ),
+                "last_season": (
+                    history_dicts[-1].get("season")
+                    if history_dicts else None
+                ),
+                "teams_by_season": teams_by_season,
+                "totals": career_totals,
+                "per_season": career_per_season,
+                "per_game": career_per_game,
+            },
             "projection": projection_data,
             "injury": {
                 "status": player["injury_status"] or "",
