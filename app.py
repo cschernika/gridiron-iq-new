@@ -4619,11 +4619,15 @@ def _fast_2026_projection_from_2025(stats, position):
 
 def _pr_position_rows(position="", limit=1000, platform="ESPN"):
     """
-    Build the current fantasy-player universe.
+    Build the current fantasy-player universe from three reliable signals:
 
-    Current active players and current ADP form the pool. Historical statistics
-    and the master projection file only enrich matching current players; they
-    cannot add retired or stale players to the table.
+      1. a current NFL team assignment
+      2. meaningful 2025 production
+      3. a valid 2026 platform ADP ranking
+
+    Sleeper's broad player database contains many historical records whose
+    active flag is not sufficient by itself. Stats and projections enrich the
+    pool, but inactive historical names cannot enter without a current signal.
     """
     position = str(position or "").upper()
     platform = str(platform or "ESPN").upper()
@@ -4641,7 +4645,55 @@ def _pr_position_rows(position="", limit=1000, platform="ESPN"):
     directory = _pr_players()
     pool = {}
 
-    # Current active players are the primary universe.
+    def valid_position(value):
+        pos = str(value or "").upper()
+        if pos == "DST":
+            pos = "DEF"
+        return pos if pos in {"QB", "RB", "WR", "TE", "K", "DEF"} else ""
+
+    def positive_number(value):
+        try:
+            return float(value or 0) > 0
+        except Exception:
+            return False
+
+    def valid_adp(row):
+        if not isinstance(row, dict):
+            return False
+        try:
+            return 0 < float(row.get("adp", 999) or 999) < 999
+        except Exception:
+            return False
+
+    def meaningful_stats(row):
+        if not isinstance(row, dict):
+            return False
+        return (
+            positive_number(row.get("games"))
+            or positive_number(row.get("fantasy_points_ppr"))
+            or positive_number(row.get("passing_yards"))
+            or positive_number(row.get("rushing_yards"))
+            or positive_number(row.get("receiving_yards"))
+        )
+
+    def add_or_update(norm, values, source):
+        if not norm or not isinstance(values, dict):
+            return
+        record = pool.setdefault(norm, {
+            "player_key": norm,
+            "data_sources": set(),
+        })
+        record["data_sources"].add(source)
+
+        for key, value in values.items():
+            if value in (None, "", [], {}):
+                continue
+            # Current directory and master data have priority for team/bio.
+            if key not in record or source in {"directory", "master"}:
+                record[key] = value
+
+    # Current directory records only enter when they have a current team, 2025
+    # production, or valid ADP. The broad active flag alone is not trusted.
     for player_id, current in directory.items():
         if not isinstance(current, dict):
             continue
@@ -4659,40 +4711,34 @@ def _pr_position_rows(position="", limit=1000, platform="ESPN"):
         if not name:
             continue
 
-        pos = str(
+        norm = _pr_norm(name)
+        stats = stats_players.get(norm, {}) or {}
+        adp_row = adp_players.get(norm, {}) or {}
+
+        pos = valid_position(
             current.get("position")
             or ((current.get("fantasy_positions") or [""])[0])
+            or stats.get("position")
+            or adp_row.get("position")
+        )
+        if not pos:
+            continue
+
+        team = str(
+            current.get("team")
+            or adp_row.get("team")
+            or stats.get("team")
             or ""
         ).upper()
-        if pos == "DST":
-            pos = "DEF"
-        if pos not in {"QB", "RB", "WR", "TE", "K", "DEF"}:
+
+        has_current_team = bool(team and team not in {"FA", "N/A", "NONE"})
+        has_stats = meaningful_stats(stats)
+        has_adp = valid_adp(adp_row)
+
+        if not (has_current_team or has_stats or has_adp):
             continue
 
-        active_flag = current.get("active")
-        status = str(current.get("status") or "").lower()
-        team = str(current.get("team") or "").upper()
-
-        # Sleeper's full player endpoint includes retired and inactive records.
-        # Require an explicit active flag or a current active roster status.
-        is_current = (
-            active_flag is True
-            or status in {
-                "active",
-                "injured reserve",
-                "pup",
-                "physically unable to perform",
-                "suspended",
-                "non-football injury",
-            }
-        )
-
-        if not is_current:
-            continue
-
-        norm = _pr_norm(name)
-        pool[norm] = {
-            "player_key": norm,
+        add_or_update(norm, {
             "player_id": str(player_id),
             "name": name,
             "position": pos,
@@ -4703,55 +4749,68 @@ def _pr_position_rows(position="", limit=1000, platform="ESPN"):
             "status": current.get("status"),
             "injury_status": current.get("injury_status"),
             "rookie": bool(current.get("rookie")),
-            "data_sources": {"directory"},
-        }
+        }, "directory")
 
-    # Add ranked ADP players that may not yet exist in the current directory,
-    # such as newly added rookies or defenses.
-    for norm, adp in adp_players.items():
-        if not isinstance(adp, dict):
+    # Add every player who produced meaningful 2025 statistics. This recovers
+    # legitimate players missing from the current directory.
+    for norm, stats in stats_players.items():
+        if not meaningful_stats(stats):
             continue
 
-        try:
-            adp_value = float(adp.get("adp", 999) or 999)
-        except Exception:
-            adp_value = 999
-
-        if adp_value >= 999:
+        pos = valid_position(stats.get("position"))
+        if not pos:
             continue
 
-        if norm not in pool:
-            adp_pos = str(adp.get("position") or adp.get("pos") or "").upper()
-            if adp_pos == "DST":
-                adp_pos = "DEF"
-            if adp_pos not in {"QB", "RB", "WR", "TE", "K", "DEF"}:
-                continue
+        master = master_players.get(norm, {}) or {}
+        adp_row = adp_players.get(norm, {}) or {}
 
-            pool[norm] = {
-                "player_key": norm,
-                "player_id": str(adp.get("player_id") or ""),
-                "name": adp.get("name") or adp.get("player_name") or norm,
-                "position": adp_pos,
-                "team": adp.get("team") or "FA",
-                "status": "ranked",
-                "injury_status": "",
-                "rookie": False,
-                "data_sources": {"adp"},
-            }
+        add_or_update(norm, {
+            "name": stats.get("name") or master.get("name")
+                or adp_row.get("name") or norm,
+            "position": pos,
+            "team": master.get("team") or adp_row.get("team")
+                or stats.get("team") or "FA",
+        }, "stats")
 
-        pool[norm]["adp_row"] = adp
-        pool[norm]["data_sources"].add("adp")
+    # Add ranked 2026 players such as rookies who have no 2025 production.
+    for norm, adp_row in adp_players.items():
+        if not valid_adp(adp_row):
+            continue
+
+        master = master_players.get(norm, {}) or {}
+        pos = valid_position(
+            adp_row.get("position")
+            or master.get("position")
+        )
+        if not pos:
+            continue
+
+        add_or_update(norm, {
+            "player_id": str(adp_row.get("player_id") or ""),
+            "name": adp_row.get("name") or adp_row.get("player_name")
+                or master.get("name") or norm,
+            "position": pos,
+            "team": master.get("team") or adp_row.get("team") or "FA",
+            "rookie": bool(master.get("rookie")),
+        }, "adp")
 
     rows = []
 
     for norm, player in pool.items():
-        pos = str(player.get("position") or "").upper()
+        stats = stats_players.get(norm, {}) or {}
+        adp_row = adp_players.get(norm, {}) or {}
+        master = master_players.get(norm, {}) or {}
+
+        pos = valid_position(
+            player.get("position")
+            or master.get("position")
+            or stats.get("position")
+            or adp_row.get("position")
+        )
+        if not pos:
+            continue
         if position and pos != position:
             continue
-
-        stats = stats_players.get(norm, {}) or {}
-        master = master_players.get(norm, {}) or {}
-        adp_row = player.get("adp_row") or adp_players.get(norm, {}) or {}
 
         try:
             adp = float(adp_row.get("adp", 999) or 999)
@@ -4795,7 +4854,7 @@ def _pr_position_rows(position="", limit=1000, platform="ESPN"):
                 projected_stats.get("fantasy_points_ppr", 0) or 0
             )
         except Exception:
-            projection_total = 0
+            projection_total = 0.0
 
         if projection_total <= 0:
             projected_stats = _fast_2026_projection_from_2025(stats, pos)
@@ -4803,11 +4862,12 @@ def _pr_position_rows(position="", limit=1000, platform="ESPN"):
         rows.append({
             "player_key": norm,
             "player_id": player.get("player_id") or "",
-            "name": player.get("name") or norm,
+            "name": player.get("name") or stats.get("name")
+                or adp_row.get("name") or norm,
             "team": master.get("team") or player.get("team")
                 or adp_row.get("team") or stats.get("team") or "FA",
             "position": pos,
-            "adp": round(adp, 1) if adp < 999 else 999,
+            "adp": round(adp, 1) if 0 < adp < 999 else 999,
             "position_adp": adp_row.get("position_adp")
                 or adp_row.get("positional_rank") or "",
             "games": stats.get("games", 0),
