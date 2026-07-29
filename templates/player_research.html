@@ -56,7 +56,7 @@
             Import 2025 into Database
           </button>
           <button id="pr-refresh-adp" class="pr-secondary-button" type="button">
-            Import Saved 2026 ADP
+            Import Teams & 2026 ADP
           </button>
           <button id="pr-reload" class="pr-primary-button" type="button">
             Reload table
@@ -801,7 +801,7 @@
         );
       } else {
         showAlert(
-          `2026 ${state.platform} ADP refreshed for ${data.count || data.player_count} players from ${source}.`
+          `Imported ${data.count || data.player_count} ${state.platform} ADP rows and refreshed current teams from ${source}.`
         );
       }
 
