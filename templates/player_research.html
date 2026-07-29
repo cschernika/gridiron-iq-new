@@ -743,12 +743,20 @@
         );
       }
 
-      $("pr-adp").textContent = "Loaded";
+      const usedSavedData = String(data.status || "").toLowerCase() === "cached";
+      $("pr-adp").textContent = usedSavedData ? "Saved data" : "Loaded";
 
       const source = data.source || state.platform;
-      showAlert(
-        `2026 ${state.platform} ADP refreshed for ${data.player_count} players from ${source}.`
-      );
+
+      if (usedSavedData) {
+        showAlert(
+          `Live ADP was unavailable. Keeping ${data.player_count} saved players from ${source}.`
+        );
+      } else {
+        showAlert(
+          `2026 ${state.platform} ADP refreshed for ${data.player_count} players from ${source}.`
+        );
+      }
 
       await loadPlayers();
     } catch (error) {
