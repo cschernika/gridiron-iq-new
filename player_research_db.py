@@ -220,17 +220,112 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def import_current_players() -> int:
+    """
+    Import current teams and player bio data.
+
+    Source priority:
+      1. Sleeper current player directory
+      2. 2026 master player file
+      3. saved ESPN/Yahoo ADP datasets
+
+    Newer team sources are applied after historical imports, so a player's
+    current team is never replaced by the last team from an older season.
+    """
     init_database()
+    now = datetime.now(timezone.utc).isoformat()
+    merged: dict[str, dict[str, Any]] = {}
+
+    def merge_player(
+        name: str,
+        *,
+        source_priority: int,
+        player_id: str = "",
+        position: str = "",
+        team: str = "",
+        age: Any = None,
+        college: str = "",
+        years_exp: Any = None,
+        status: str = "",
+        injury_status: str = "",
+        rookie: bool = False,
+        active: bool = True,
+    ) -> None:
+        name = str(name or "").strip()
+        if not name:
+            return
+
+        key = _norm(name)
+        pos = _position(position)
+        team_value = str(team or "").upper().strip()
+        if team_value in {"N/A", "NONE", "NULL"}:
+            team_value = ""
+
+        record = merged.setdefault(
+            key,
+            {
+                "player_key": key,
+                "player_id": "",
+                "name": name,
+                "position": "",
+                "team": "",
+                "age": None,
+                "college": "",
+                "years_exp": None,
+                "status": "",
+                "injury_status": "",
+                "rookie": False,
+                "active": True,
+                "_team_priority": -1,
+                "_position_priority": -1,
+                "_bio_priority": -1,
+            },
+        )
+
+        record["name"] = name
+
+        if player_id and source_priority >= record["_bio_priority"]:
+            record["player_id"] = str(player_id)
+
+        if pos and source_priority >= record["_position_priority"]:
+            record["position"] = pos
+            record["_position_priority"] = source_priority
+
+        if (
+            team_value
+            and team_value != "FA"
+            and source_priority >= record["_team_priority"]
+        ):
+            record["team"] = team_value
+            record["_team_priority"] = source_priority
+        elif not record["team"] and team_value:
+            record["team"] = team_value
+
+        if source_priority >= record["_bio_priority"]:
+            if age not in (None, ""):
+                record["age"] = _number(age) or None
+            if college:
+                record["college"] = str(college)
+            if years_exp not in (None, ""):
+                record["years_exp"] = _number(years_exp) or None
+            if status:
+                record["status"] = str(status)
+            if injury_status:
+                record["injury_status"] = str(injury_status)
+            record["rookie"] = bool(rookie)
+            record["active"] = bool(active)
+            record["_bio_priority"] = source_priority
+
+    # Sleeper current player directory.
     cache_path = DATA_DIR / "sleeper_players_cache.json"
-    payload: dict[str, Any] = {}
+    sleeper_payload: dict[str, Any] = {}
 
     try:
         if cache_path.exists():
-            payload = _load_json(cache_path)
+            sleeper_payload = _load_json(cache_path)
     except Exception:
-        payload = {}
+        sleeper_payload = {}
 
-    if not payload:
+    try:
         response = requests.get(
             "https://api.sleeper.app/v1/players/nfl",
             headers={"User-Agent": "Gridiron-IQ/2026"},
@@ -238,17 +333,16 @@ def import_current_players() -> int:
         )
         response.raise_for_status()
         result = response.json()
-        if isinstance(result, dict):
-            payload = result
+        if isinstance(result, dict) and result:
+            sleeper_payload = result
             cache_path.write_text(
-                json.dumps(payload, ensure_ascii=False),
+                json.dumps(sleeper_payload, ensure_ascii=False),
                 encoding="utf-8",
             )
+    except Exception:
+        pass
 
-    now = datetime.now(timezone.utc).isoformat()
-    rows = []
-
-    for player_id, player in payload.items():
+    for player_id, player in sleeper_payload.items():
         if not isinstance(player, dict):
             continue
 
@@ -271,14 +365,12 @@ def import_current_players() -> int:
         if not position:
             continue
 
-        active = player.get("active")
-        status = str(player.get("status") or "").lower()
         team = str(player.get("team") or "").upper()
-
-        current_signal = (
-            active is True
+        status = str(player.get("status") or "")
+        active = (
+            player.get("active") is True
             or bool(team)
-            or status in {
+            or status.lower() in {
                 "active",
                 "injured reserve",
                 "pup",
@@ -286,29 +378,108 @@ def import_current_players() -> int:
                 "non-football injury",
             }
         )
-        if not current_signal:
+
+        if not active:
             continue
 
+        merge_player(
+            name,
+            source_priority=30,
+            player_id=str(player_id),
+            position=position,
+            team=team,
+            age=player.get("age"),
+            college=player.get("college") or "",
+            years_exp=player.get("years_exp"),
+            status=status,
+            injury_status=player.get("injury_status") or "",
+            rookie=bool(player.get("rookie")),
+            active=True,
+        )
+
+    # 2026 master player database can contain newer team assignments.
+    master_path = DATA_DIR / "nfl_players_2026.json"
+    master_payload = _load_json(master_path)
+    for _, player in (master_payload.get("players", {}) or {}).items():
+        if not isinstance(player, dict):
+            continue
+        name = str(player.get("name") or player.get("full_name") or "").strip()
+        position = _position(player.get("position"))
+        if not name or not position:
+            continue
+
+        merge_player(
+            name,
+            source_priority=40,
+            player_id=str(
+                player.get("sleeper_id")
+                or player.get("player_id")
+                or ""
+            ),
+            position=position,
+            team=player.get("team") or "",
+            age=player.get("age"),
+            college=player.get("college") or "",
+            years_exp=player.get("years_exp"),
+            status=player.get("status") or "",
+            injury_status=player.get("injury_status") or "",
+            rookie=bool(player.get("rookie")),
+            active=True,
+        )
+
+    # Authenticated ESPN ADP is the strongest available current team signal.
+    for platform, priority in (("ESPN", 60), ("YAHOO", 50)):
+        for candidate in _adp_candidates(platform):
+            payload = _load_json(candidate)
+            if not payload.get("players"):
+                continue
+            for _, player in payload.get("players", {}).items():
+                if not isinstance(player, dict):
+                    continue
+                name = str(
+                    player.get("name")
+                    or player.get("player_name")
+                    or ""
+                ).strip()
+                position = _position(
+                    player.get("position")
+                    or player.get("pos")
+                )
+                if not name or not position:
+                    continue
+
+                merge_player(
+                    name,
+                    source_priority=priority,
+                    player_id=str(player.get("player_id") or ""),
+                    position=position,
+                    team=player.get("team") or "",
+                    active=True,
+                )
+            break
+
+    rows = []
+    for record in merged.values():
         rows.append(
             (
-                _norm(name),
-                str(player_id),
-                name,
-                position,
-                team or "FA",
-                _number(player.get("age")) or None,
-                player.get("college") or "",
-                _number(player.get("years_exp")) or None,
-                player.get("status") or "",
-                player.get("injury_status") or "",
-                1 if player.get("rookie") else 0,
-                1,
+                record["player_key"],
+                record["player_id"],
+                record["name"],
+                record["position"],
+                record["team"] or "FA",
+                record["age"],
+                record["college"],
+                record["years_exp"],
+                record["status"],
+                record["injury_status"],
+                1 if record["rookie"] else 0,
+                1 if record["active"] else 0,
                 now,
             )
         )
 
-    with connect() as db:
-        db.executemany(
+    with connect() as connection:
+        connection.executemany(
             """
             INSERT INTO players(
                 player_key, player_id, name, position, team, age, college,
@@ -316,22 +487,45 @@ def import_current_players() -> int:
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(player_key) DO UPDATE SET
-                player_id=excluded.player_id,
+                player_id=CASE
+                    WHEN excluded.player_id<>'' THEN excluded.player_id
+                    ELSE players.player_id
+                END,
                 name=excluded.name,
-                position=excluded.position,
-                team=excluded.team,
-                age=excluded.age,
-                college=excluded.college,
-                years_exp=excluded.years_exp,
-                status=excluded.status,
-                injury_status=excluded.injury_status,
+                position=CASE
+                    WHEN excluded.position<>'' THEN excluded.position
+                    ELSE players.position
+                END,
+                team=CASE
+                    WHEN excluded.team<>'' AND excluded.team<>'FA'
+                    THEN excluded.team
+                    ELSE players.team
+                END,
+                age=COALESCE(excluded.age, players.age),
+                college=CASE
+                    WHEN excluded.college<>'' THEN excluded.college
+                    ELSE players.college
+                END,
+                years_exp=COALESCE(excluded.years_exp, players.years_exp),
+                status=CASE
+                    WHEN excluded.status<>'' THEN excluded.status
+                    ELSE players.status
+                END,
+                injury_status=CASE
+                    WHEN excluded.injury_status<>'' THEN excluded.injury_status
+                    ELSE players.injury_status
+                END,
                 rookie=excluded.rookie,
                 active=excluded.active,
                 updated_at=excluded.updated_at
             """,
             rows,
         )
-        _set_status(db, "current_players", {"count": len(rows)})
+        _set_status(
+            connection,
+            "current_players",
+            {"count": len(rows), "source": "Sleeper + 2026 master + saved ADP"},
+        )
 
     return len(rows)
 
@@ -597,13 +791,20 @@ def _adp_candidates(platform: str) -> list[Path]:
 
 
 def import_adp(platform: str = "ESPN") -> dict[str, Any]:
+    """
+    Import every valid saved 2026 ADP row into SQLite.
+
+    The authenticated ESPN League Sync writes espn_adp_2026.json. This function
+    imports that file, updates current teams, and calculates positional ADP
+    whenever the source does not provide it.
+    """
     init_database()
     platform = platform.upper()
     if platform not in {"ESPN", "YAHOO"}:
         raise ValueError("Platform must be ESPN or YAHOO.")
 
-    payload = {}
-    source_path = None
+    payload: dict[str, Any] = {}
+    source_path: Path | None = None
 
     for candidate in _adp_candidates(platform):
         current = _load_json(candidate)
@@ -612,22 +813,21 @@ def import_adp(platform: str = "ESPN") -> dict[str, Any]:
             source_path = candidate
             break
 
-    if not payload:
+    if not payload or source_path is None:
         return {
             "ok": False,
             "platform": platform,
             "count": 0,
             "message": (
                 f"No saved {platform} ADP dataset was found. "
-                "Sync the league or provide an authorized ADP file first."
+                "Sync the league first, then import ADP again."
             ),
         }
 
     now = datetime.now(timezone.utc).isoformat()
-    player_rows = []
-    adp_rows = []
+    prepared: list[dict[str, Any]] = []
 
-    for player_key, row in payload.get("players", {}).items():
+    for _, row in payload.get("players", {}).items():
         if not isinstance(row, dict):
             continue
 
@@ -635,64 +835,110 @@ def import_adp(platform: str = "ESPN") -> dict[str, Any]:
         if not name:
             continue
 
-        normalized = _norm(name)
-        position = _position(row.get("position") or row.get("pos"))
-        team = str(row.get("team") or "").upper()
-
         try:
             adp_value = float(row.get("adp"))
-            if not (0 < adp_value < 999):
-                continue
         except Exception:
             continue
 
+        if not (0 < adp_value < 999):
+            continue
+
+        prepared.append(
+            {
+                "player_key": _norm(name),
+                "player_id": str(row.get("player_id") or ""),
+                "name": name,
+                "position": _position(
+                    row.get("position")
+                    or row.get("pos")
+                ),
+                "team": str(row.get("team") or "").upper(),
+                "adp": round(adp_value, 2),
+                "position_adp": str(
+                    row.get("position_adp")
+                    or row.get("positional_rank")
+                    or ""
+                ),
+                "rank_value": (
+                    _number(row.get("rank") or row.get("rank_value"))
+                    or None
+                ),
+            }
+        )
+
+    # Calculate missing positional rankings.
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in prepared:
+        if row["position"]:
+            grouped[row["position"]].append(row)
+
+    for position, rows in grouped.items():
+        rows.sort(key=lambda item: (item["adp"], item["name"].lower()))
+        for number, row in enumerate(rows, start=1):
+            if not row["position_adp"]:
+                row["position_adp"] = f"{position}{number}"
+
+    player_rows = []
+    adp_rows = []
+
+    for row in prepared:
         player_rows.append(
             (
-                normalized,
-                str(row.get("player_id") or ""),
-                name,
-                position,
-                team or "FA",
+                row["player_key"],
+                row["player_id"],
+                row["name"],
+                row["position"],
+                row["team"] or "FA",
                 1,
                 now,
             )
         )
         adp_rows.append(
             (
-                normalized,
+                row["player_key"],
                 2026,
                 platform,
-                adp_value,
-                str(
-                    row.get("position_adp")
-                    or row.get("positional_rank")
-                    or ""
-                ),
-                _number(row.get("rank") or row.get("rank_value")) or None,
+                row["adp"],
+                row["position_adp"],
+                row["rank_value"],
                 payload.get("source") or source_path.name,
                 payload.get("updated_at") or now,
             )
         )
 
-    with connect() as db:
-        db.executemany(
+    with connect() as connection:
+        connection.executemany(
             """
             INSERT INTO players(
                 player_key, player_id, name, position, team, active, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(player_key) DO UPDATE SET
-                player_id=CASE WHEN excluded.player_id<>'' THEN excluded.player_id ELSE players.player_id END,
+                player_id=CASE
+                    WHEN excluded.player_id<>'' THEN excluded.player_id
+                    ELSE players.player_id
+                END,
                 name=excluded.name,
-                position=CASE WHEN excluded.position<>'' THEN excluded.position ELSE players.position END,
-                team=CASE WHEN excluded.team<>'FA' THEN excluded.team ELSE players.team END,
+                position=CASE
+                    WHEN excluded.position<>'' THEN excluded.position
+                    ELSE players.position
+                END,
+                team=CASE
+                    WHEN excluded.team<>'' AND excluded.team<>'FA'
+                    THEN excluded.team
+                    ELSE players.team
+                END,
                 active=1,
                 updated_at=excluded.updated_at
             """,
             player_rows,
         )
-        db.execute("DELETE FROM adp WHERE season=2026 AND platform=?", (platform,))
-        db.executemany(
+
+        connection.execute(
+            "DELETE FROM adp WHERE season=2026 AND platform=?",
+            (platform,),
+        )
+        connection.executemany(
             """
             INSERT INTO adp(
                 player_key, season, platform, adp, position_adp,
@@ -702,12 +948,14 @@ def import_adp(platform: str = "ESPN") -> dict[str, Any]:
             """,
             adp_rows,
         )
+
         _set_status(
-            db,
+            connection,
             f"adp_{platform.lower()}_2026",
             {
                 "count": len(adp_rows),
-                "source": payload.get("source") or str(source_path),
+                "source": payload.get("source") or source_path.name,
+                "file": str(source_path),
             },
         )
 
@@ -716,6 +964,7 @@ def import_adp(platform: str = "ESPN") -> dict[str, Any]:
         "platform": platform,
         "count": len(adp_rows),
         "source": payload.get("source") or source_path.name,
+        "file": str(source_path),
     }
 
 
@@ -832,11 +1081,17 @@ def import_projections() -> int:
 
 def build_everything(start_season: int = 1999, end_season: int = 2025) -> dict[str, Any]:
     result: dict[str, Any] = {}
-    result["current_players"] = import_current_players()
+
+    # Historical teams are imported first. Current teams and 2026 sources are
+    # applied afterward so old season data cannot overwrite current rosters.
     result["history"] = import_all_history(start_season, end_season)
+    result["current_players"] = import_current_players()
     result["projections_2026"] = import_projections()
     result["adp_espn"] = import_adp("ESPN")
     result["adp_yahoo"] = import_adp("YAHOO")
+
+    # Apply current teams once more after projection/ADP imports.
+    result["current_players_final"] = import_current_players()
     return result
 
 
@@ -932,6 +1187,12 @@ def import_adp_api():
     platform = str(body.get("platform") or "ESPN").upper()
     try:
         result = import_adp(platform)
+        if result.get("ok"):
+            result["current_player_count"] = import_current_players()
+            result["message"] = (
+                f"Imported {result.get('count', 0)} {platform} ADP rows "
+                "and refreshed current teams."
+            )
         return jsonify(result), 200 if result.get("ok") else 409
     except Exception as exc:
         current_app.logger.exception("Player database ADP import failed")

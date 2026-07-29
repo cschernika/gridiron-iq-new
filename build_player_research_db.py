@@ -19,7 +19,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build the Gridiron IQ SQLite Player Research database."
     )
-    parser.add_argument("--all", action="store_true", help="Build players, 1999-2025 history, projections, and saved ADP.")
+    parser.add_argument("--all", action="store_true", help="Build history, then apply current teams, projections, and saved ADP.")
     parser.add_argument("--history", action="store_true", help="Import historical seasons.")
     parser.add_argument("--season", type=int, help="Import one NFL season.")
     parser.add_argument("--start", type=int, default=1999)

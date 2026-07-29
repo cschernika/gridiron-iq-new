@@ -738,6 +738,26 @@ def espn_sync():
                 "source": native_adp.get("source"),
                 "updated_at": native_adp.get("updated_at"),
             }
+
+            # Immediately copy the authenticated ESPN teams and ADP into the
+            # SQLite Player Research database.
+            try:
+                from player_research_db import (
+                    import_adp as import_sqlite_adp,
+                    import_current_players as import_sqlite_current_players,
+                )
+
+                sqlite_adp = import_sqlite_adp("ESPN")
+                sqlite_players = import_sqlite_current_players()
+
+                adp_info["sqlite_imported"] = bool(sqlite_adp.get("ok"))
+                adp_info["sqlite_adp_count"] = sqlite_adp.get("count", 0)
+                adp_info["sqlite_player_count"] = sqlite_players
+            except Exception as sqlite_exc:
+                app.logger.exception(
+                    "ESPN synced but SQLite Player Research update failed"
+                )
+                adp_info["sqlite_error"] = str(sqlite_exc)
         except Exception as adp_exc:
             adp_info["error"] = str(adp_exc)
 
