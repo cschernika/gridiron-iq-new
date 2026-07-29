@@ -3525,7 +3525,9 @@ def _fetch_espn_native_adp(league_id=None, season=2026, swid=None, espn_s2=None)
     season = int(season or 2026)
 
     urls = [
-        # ESPN default PPR player pool.
+        # ESPN default PPR player pool. ESPN sometimes blocks one hostname
+        # while allowing its read-only API hostname.
+        f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3?view=kona_player_info",
         f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3?view=kona_player_info",
     ]
     if league_id:
@@ -3572,7 +3574,26 @@ def _fetch_espn_native_adp(league_id=None, season=2026, swid=None, espn_s2=None)
                 timeout=35
             )
             response.raise_for_status()
-            payload = response.json()
+
+            content_type = str(response.headers.get("content-type") or "").lower()
+            body_preview = response.text[:160].strip()
+
+            if "json" not in content_type:
+                raise RuntimeError(
+                    "ESPN returned non-JSON content"
+                    + (f" ({content_type})" if content_type else "")
+                    + (f": {body_preview}" if body_preview else "")
+                )
+
+            try:
+                payload = response.json()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"ESPN returned invalid JSON: {exc}"
+                ) from exc
+
+            if not isinstance(payload, dict):
+                raise RuntimeError("ESPN returned an unexpected response format.")
 
             wrappers = payload.get("players") or []
             players = {}
@@ -3781,6 +3802,116 @@ def _parse_platform_adp(html, platform):
         }
 
     return result
+
+
+def _public_platform_adp_dataset(platform):
+    """
+    Load the public FantasyPros ADP table without an API key.
+
+    The public page exposes platform columns such as ESPN and Yahoo. This is
+    used when the restricted FantasyPros JSON API returns 403.
+    """
+    platform = str(platform or "ESPN").upper()
+    if platform not in ADP_2026_SOURCES:
+        platform = "ESPN"
+
+    source = ADP_2026_SOURCES[platform]
+    response = requests.get(
+        source["url"],
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/150 Safari/537.36"
+            ),
+        },
+        timeout=(8, 30),
+    )
+    response.raise_for_status()
+
+    players = _parse_platform_adp(response.text, platform)
+    if not players:
+        raise RuntimeError(
+            f"The public FantasyPros {platform} ADP table returned no usable rows."
+        )
+
+    # Fill position/team from the current Sleeper directory.
+    directory_by_name = {}
+    try:
+        for player_id, row in _pr_players().items():
+            if not isinstance(row, dict):
+                continue
+            name = str(
+                row.get("full_name")
+                or " ".join(
+                    value for value in [
+                        row.get("first_name"),
+                        row.get("last_name"),
+                    ] if value
+                )
+            ).strip()
+            if not name:
+                continue
+            position = str(
+                row.get("position")
+                or ((row.get("fantasy_positions") or [""])[0])
+                or ""
+            ).upper()
+            if position == "DST":
+                position = "DEF"
+            directory_by_name[_pr_norm(name)] = {
+                "position": position,
+                "team": str(row.get("team") or "").upper(),
+                "player_id": str(player_id),
+            }
+    except Exception:
+        directory_by_name = {}
+
+    for norm, item in players.items():
+        current = directory_by_name.get(norm, {})
+        item.setdefault("name", "")
+        item["position"] = item.get("position") or current.get("position") or ""
+        item["team"] = item.get("team") or current.get("team") or ""
+        item["player_id"] = current.get("player_id") or ""
+        item["source"] = f"FantasyPros public {platform} ADP"
+
+    # Calculate positional ranks when the page does not supply them.
+    by_position = defaultdict(list)
+    for norm, item in players.items():
+        position = str(item.get("position") or "").upper()
+        if position in {"QB", "RB", "WR", "TE", "K", "DEF"}:
+            by_position[position].append(
+                (float(item.get("adp", 999) or 999), norm)
+            )
+
+    for position, ranked in by_position.items():
+        ranked.sort(key=lambda pair: (pair[0], pair[1]))
+        for number, (_, norm) in enumerate(ranked, start=1):
+            if not players[norm].get("position_adp"):
+                players[norm]["position_adp"] = f"{position}{number}"
+
+    payload = {
+        "season": 2026,
+        "platform": platform,
+        "scoring": source["scoring"],
+        "source": f"FantasyPros public webpage — {platform} ADP",
+        "source_url": source["url"],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "public",
+        "players": players,
+    }
+
+    path = _local_platform_adp_path(platform)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temp.replace(path)
+    return payload
+
 
 def _adp_cache_file(platform):
     return DATA_DIR / f"adp_2026_{str(platform).lower()}_cache.json"
@@ -4048,10 +4179,11 @@ def _fp_build_platform_dataset(platform):
 def _platform_2026_adp_data(platform="ESPN", force=False):
     """
     Load 2026 ADP in this order:
-      1. saved platform dataset
-      2. ESPN native ADP for ESPN leagues
-      3. FantasyPros API
-      4. last successful saved dataset
+      1. complete saved dataset
+      2. ESPN native ADP for ESPN
+      3. public FantasyPros platform ADP webpage
+      4. restricted FantasyPros API when available
+      5. last successful saved dataset
     """
     platform = str(platform or "ESPN").upper()
     if platform not in {"ESPN", "YAHOO"}:
@@ -4074,11 +4206,7 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
                 in {"QB", "RB", "WR", "TE", "K", "DEF"}
                 for item in players.values()
             )
-            cache_is_complete = (
-                platform != "ESPN"
-                or (ranked_count >= 75 and has_position_data)
-            )
-            if not force and cache_is_complete:
+            if not force and ranked_count >= 75 and has_position_data:
                 payload["status"] = payload.get("status") or "local"
                 return payload
     except Exception:
@@ -4086,46 +4214,72 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
 
     errors = []
 
-    # ESPN's own market ADP does not require FantasyPros.
     if platform == "ESPN":
         try:
             native = _fetch_espn_native_adp(season=2026)
             if native.get("players"):
-                path.write_text(json.dumps(native, indent=2), encoding="utf-8")
+                path.write_text(
+                    json.dumps(native, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
                 return native
         except Exception as exc:
-            errors.append(f"ESPN native ADP: {exc}")
+            errors.append(f"ESPN native: {exc}")
 
         try:
             native_cached = _load_espn_native_adp()
             if native_cached and native_cached.get("players"):
-                native_cached["status"] = "cached"
-                native_cached["warning"] = " | ".join(errors)
-                path.write_text(json.dumps(native_cached, indent=2), encoding="utf-8")
-                return native_cached
+                players = native_cached.get("players", {})
+                ranked_count = sum(
+                    1 for item in players.values()
+                    if float(item.get("adp", 999) or 999) < 999
+                )
+                if ranked_count >= 75:
+                    native_cached["status"] = "cached"
+                    native_cached["warning"] = (
+                        "Live ESPN refresh was unavailable; using saved ESPN ADP."
+                    )
+                    path.write_text(
+                        json.dumps(native_cached, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                    return native_cached
         except Exception as exc:
-            errors.append(f"ESPN native cache: {exc}")
+            errors.append(f"ESPN saved data: {exc}")
 
-    # FantasyPros remains available when the API key is configured.
+    # This source does not require FANTASYPROS_API_KEY.
     try:
-        return _fp_build_platform_dataset(platform)
+        return _public_platform_adp_dataset(platform)
     except Exception as exc:
-        errors.append(f"FantasyPros: {exc}")
+        errors.append(f"Public ADP table: {exc}")
+
+    # Keep the restricted API as an optional final online source.
+    if _fp_api_key():
+        try:
+            return _fp_build_platform_dataset(platform)
+        except Exception as exc:
+            errors.append(f"FantasyPros API: {exc}")
 
     if cached and cached.get("players"):
         cached["status"] = "cached"
-        cached["warning"] = " | ".join(errors)
+        cached["warning"] = (
+            "Live ADP refresh was unavailable. The last saved ADP is being used."
+        )
         return cached
 
     return {
         "season": 2026,
         "platform": platform,
         "scoring": "PPR" if platform == "ESPN" else "Half PPR",
-        "source": "No 2026 ADP source available",
+        "source": "No live ADP source available",
         "updated_at": "",
         "players": {},
         "status": "unavailable",
-        "warning": " | ".join(errors),
+        "warning": (
+            "The live ADP sources are temporarily unavailable. "
+            "Try refreshing again later."
+        ),
+        "diagnostic_errors": errors[-3:],
     }
 
 
