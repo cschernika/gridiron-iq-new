@@ -3223,11 +3223,11 @@ def player_research_table_api():
     direction = request.args.get("direction", "asc").strip().lower()
 
     try:
-        limit = min(2500, max(1, int(request.args.get("limit", 2000))))
+        limit = min(2500, max(1, int(request.args.get("limit", 500))))
     except Exception:
         limit = 2000
 
-    rows = _pr_position_rows(position, limit=min(limit, 1000), platform=platform)
+    rows = _pr_position_rows(position, limit=min(limit, 500), platform=platform)
 
     if query:
         rows = [
@@ -3922,6 +3922,46 @@ def _pr_adp_lookup(platform="ESPN"):
         for key, value in data.get("players", {}).items()
     }
 
+
+def _fast_2026_projection_from_2025(stats, position):
+    """Fast fallback projection with no file or network access."""
+    stats = stats or {}
+    position = str(position or "").upper()
+
+    def number(key):
+        try:
+            return float(stats.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    prior_ppr = number("fantasy_points_ppr")
+    games = max(0.0, number("games"))
+
+    if prior_ppr > 0:
+        multiplier = {
+            "QB": 1.01,
+            "RB": 0.98,
+            "WR": 1.01,
+            "TE": 1.02,
+            "K": 1.00,
+            "DEF": 1.00,
+        }.get(position, 1.00)
+        sample_factor = min(1.0, games / 12.0) if games else 0.85
+        return round(
+            prior_ppr * multiplier * (0.70 + 0.30 * sample_factor),
+            1,
+        )
+
+    return {
+        "QB": 245.0,
+        "RB": 145.0,
+        "WR": 140.0,
+        "TE": 105.0,
+        "K": 120.0,
+        "DEF": 120.0,
+    }.get(position, 100.0)
+
+
 def _pr_position_rows(position="", limit=500, platform="ESPN"):
     position = str(position or "").upper()
     platform = str(platform or "ESPN").upper()
@@ -4004,12 +4044,7 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
             projected_points = 0.0
 
         if projected_points <= 0:
-            try:
-                projected_points = float(
-                    _player_research_projection_2026(name, pos) or 0
-                )
-            except Exception:
-                projected_points = 0.0
+            projected_points = _fast_2026_projection_from_2025(stats, pos)
 
         rows.append({
             "name": name,
@@ -4043,7 +4078,7 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
         -float(row.get("proj_2026_ppr", 0) or 0),
         row.get("name", ""),
     ))
-    return rows[:max(1, min(int(limit or 500), 1000))]
+    return rows[:max(1, min(int(limit or 500), 500))]
 
 
 def player_research_adp_status():
