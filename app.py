@@ -2194,6 +2194,67 @@ def _stats_2025_snapshot():
         return empty
 
 
+
+def _stats_2025_clean_number(value):
+    """Convert nflverse CSV values into JSON-safe numbers."""
+    try:
+        if value in (None, "", "NA", "NaN", "nan", "null"):
+            return 0
+        number = float(value)
+        return int(number) if number.is_integer() else round(number, 2)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _stats_2025_player_record(name, rows):
+    """
+    Convert one player's nflverse rows into the saved 2025 stat record.
+
+    The nflverse source may contain either one season-summary row or several
+    weekly rows. `_pr_aggregate` handles both shapes.
+    """
+    rows = rows or []
+    stats = _pr_aggregate(rows, name) or {}
+    first = rows[0] if rows else {}
+
+    position = str(
+        first.get("position")
+        or first.get("position_group")
+        or stats.get("position")
+        or ""
+    ).upper()
+
+    if position == "DST":
+        position = "DEF"
+
+    record = {
+        "name": name,
+        "player_id": str(
+            first.get("player_id")
+            or stats.get("player_id")
+            or ""
+        ),
+        "position": position,
+        "team": str(
+            first.get("recent_team")
+            or first.get("team")
+            or stats.get("team")
+            or ""
+        ),
+    }
+
+    for field in STATS_2025_FIELDS:
+        record[field] = _stats_2025_clean_number(stats.get(field))
+
+    record["total_tds"] = (
+        _stats_2025_clean_number(record.get("passing_tds"))
+        + _stats_2025_clean_number(record.get("rushing_tds"))
+        + _stats_2025_clean_number(record.get("receiving_tds"))
+    )
+
+    return record
+
+
 def _build_2025_stats_snapshot(force=False):
     rows = _pr_rows(2025, force=force)
     if not rows:
