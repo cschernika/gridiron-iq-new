@@ -589,7 +589,7 @@
       q: $("pr-search").value.trim(),
       sort: $("pr-sort").value,
       direction: $("pr-direction").value,
-      limit: "2000"
+      limit: "1000"
     });
 
     try {
@@ -635,7 +635,7 @@
         `2026 projections: ${data.sources?.projections_2026 || "not loaded"} · ` +
         `ADP: ${data.sources?.adp_2026 || "not loaded"}`;
 
-      if (data.warnings?.length) {
+      if (data.warnings?.length && !data.updated_at?.adp_2026) {
         showAlert(data.warnings.join(" "));
       }
     } catch (error) {
@@ -750,7 +750,7 @@
 
       if (usedSavedData) {
         showAlert(
-          `Live ADP was unavailable. Keeping ${data.player_count} saved players from ${source}.`
+          `Using ${data.player_count} saved ADP players from ${source}. Reconnect ESPN under League Sync, then refresh ADP for a live update.`
         );
       } else {
         showAlert(
