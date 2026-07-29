@@ -743,16 +743,34 @@ def espn_sync():
             # SQLite Player Research database.
             try:
                 from player_research_db import (
-                    import_adp as import_sqlite_adp,
+                    import_adp_payload as import_sqlite_adp_payload,
                     import_current_players as import_sqlite_current_players,
                 )
 
-                sqlite_adp = import_sqlite_adp("ESPN")
+                sqlite_adp = import_sqlite_adp_payload(
+                    "ESPN",
+                    native_adp,
+                    source_name=native_adp.get("source")
+                    or "Authenticated ESPN League Sync",
+                )
                 sqlite_players = import_sqlite_current_players()
 
                 adp_info["sqlite_imported"] = bool(sqlite_adp.get("ok"))
                 adp_info["sqlite_adp_count"] = sqlite_adp.get("count", 0)
+                adp_info["sqlite_received_count"] = sqlite_adp.get(
+                    "received_count", 0
+                )
+                adp_info["sqlite_usable_count"] = sqlite_adp.get(
+                    "usable_count", 0
+                )
                 adp_info["sqlite_player_count"] = sqlite_players
+
+                app.logger.info(
+                    "ESPN ADP direct SQLite import received=%s usable=%s inserted=%s",
+                    sqlite_adp.get("received_count", 0),
+                    sqlite_adp.get("usable_count", 0),
+                    sqlite_adp.get("count", 0),
+                )
             except Exception as sqlite_exc:
                 app.logger.exception(
                     "ESPN synced but SQLite Player Research update failed"

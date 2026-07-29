@@ -790,75 +790,114 @@ def _adp_candidates(platform: str) -> list[Path]:
     return [DATA_DIR / "yahoo_adp_2026.json"]
 
 
-def import_adp(platform: str = "ESPN") -> dict[str, Any]:
-    """
-    Import every valid saved 2026 ADP row into SQLite.
 
-    The authenticated ESPN League Sync writes espn_adp_2026.json. This function
-    imports that file, updates current teams, and calculates positional ADP
-    whenever the source does not provide it.
+def import_adp_payload(
+    platform: str,
+    payload: dict[str, Any],
+    *,
+    source_name: str = "",
+) -> dict[str, Any]:
+    """
+    Insert an already-fetched ADP payload directly into SQLite.
+
+    This avoids a fragile JSON-file handoff between ESPN League Sync and the
+    Player Research database.
     """
     init_database()
-    platform = platform.upper()
+    platform = str(platform or "ESPN").upper()
     if platform not in {"ESPN", "YAHOO"}:
         raise ValueError("Platform must be ESPN or YAHOO.")
 
-    payload: dict[str, Any] = {}
-    source_path: Path | None = None
-
-    for candidate in _adp_candidates(platform):
-        current = _load_json(candidate)
-        if current.get("players"):
-            payload = current
-            source_path = candidate
-            break
-
-    if not payload or source_path is None:
+    if not isinstance(payload, dict):
         return {
             "ok": False,
             "platform": platform,
             "count": 0,
-            "message": (
-                f"No saved {platform} ADP dataset was found. "
-                "Sync the league first, then import ADP again."
-            ),
+            "message": "The ADP payload was not a JSON object.",
+        }
+
+    raw_players = payload.get("players") or {}
+    if isinstance(raw_players, list):
+        raw_players = {
+            _norm(
+                row.get("name")
+                or row.get("player_name")
+                or row.get("fullName")
+            ): row
+            for row in raw_players
+            if isinstance(row, dict)
+        }
+
+    if not isinstance(raw_players, dict) or not raw_players:
+        return {
+            "ok": False,
+            "platform": platform,
+            "count": 0,
+            "message": "The ADP payload contained no players.",
         }
 
     now = datetime.now(timezone.utc).isoformat()
     prepared: list[dict[str, Any]] = []
 
-    for _, row in payload.get("players", {}).items():
+    for fallback_key, row in raw_players.items():
         if not isinstance(row, dict):
             continue
 
-        name = str(row.get("name") or row.get("player_name") or "").strip()
+        name = str(
+            row.get("name")
+            or row.get("player_name")
+            or row.get("fullName")
+            or ""
+        ).strip()
         if not name:
             continue
 
+        adp_raw = (
+            row.get("adp")
+            if row.get("adp") not in (None, "")
+            else row.get("averageDraftPosition")
+        )
+        if adp_raw in (None, ""):
+            adp_raw = row.get("rank") or row.get("rank_value")
+
         try:
-            adp_value = float(row.get("adp"))
+            adp_value = float(adp_raw)
         except Exception:
             continue
 
         if not (0 < adp_value < 999):
             continue
 
+        position = _position(
+            row.get("position")
+            or row.get("pos")
+            or row.get("positionAbbreviation")
+        )
+        team = str(
+            row.get("team")
+            or row.get("proTeamAbbreviation")
+            or ""
+        ).upper().strip()
+
         prepared.append(
             {
                 "player_key": _norm(name),
-                "player_id": str(row.get("player_id") or ""),
-                "name": name,
-                "position": _position(
-                    row.get("position")
-                    or row.get("pos")
+                "player_id": str(
+                    row.get("player_id")
+                    or row.get("playerId")
+                    or row.get("id")
+                    or ""
                 ),
-                "team": str(row.get("team") or "").upper(),
+                "name": name,
+                "position": position,
+                "team": team,
                 "adp": round(adp_value, 2),
                 "position_adp": str(
                     row.get("position_adp")
                     or row.get("positional_rank")
+                    or row.get("positionRank")
                     or ""
-                ),
+                ).strip(),
                 "rank_value": (
                     _number(row.get("rank") or row.get("rank_value"))
                     or None
@@ -866,7 +905,6 @@ def import_adp(platform: str = "ESPN") -> dict[str, Any]:
             }
         )
 
-    # Calculate missing positional rankings.
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in prepared:
         if row["position"]:
@@ -878,33 +916,34 @@ def import_adp(platform: str = "ESPN") -> dict[str, Any]:
             if not row["position_adp"]:
                 row["position_adp"] = f"{position}{number}"
 
-    player_rows = []
-    adp_rows = []
+    player_rows = [
+        (
+            row["player_key"],
+            row["player_id"],
+            row["name"],
+            row["position"],
+            row["team"] or "FA",
+            1,
+            now,
+        )
+        for row in prepared
+    ]
 
-    for row in prepared:
-        player_rows.append(
-            (
-                row["player_key"],
-                row["player_id"],
-                row["name"],
-                row["position"],
-                row["team"] or "FA",
-                1,
-                now,
-            )
+    adp_rows = [
+        (
+            row["player_key"],
+            2026,
+            platform,
+            row["adp"],
+            row["position_adp"],
+            row["rank_value"],
+            source_name
+            or payload.get("source")
+            or f"{platform} direct sync",
+            payload.get("updated_at") or now,
         )
-        adp_rows.append(
-            (
-                row["player_key"],
-                2026,
-                platform,
-                row["adp"],
-                row["position_adp"],
-                row["rank_value"],
-                payload.get("source") or source_path.name,
-                payload.get("updated_at") or now,
-            )
-        )
+        for row in prepared
+    ]
 
     with connect() as connection:
         connection.executemany(
@@ -938,6 +977,7 @@ def import_adp(platform: str = "ESPN") -> dict[str, Any]:
             "DELETE FROM adp WHERE season=2026 AND platform=?",
             (platform,),
         )
+
         connection.executemany(
             """
             INSERT INTO adp(
@@ -949,23 +989,74 @@ def import_adp(platform: str = "ESPN") -> dict[str, Any]:
             adp_rows,
         )
 
+        inserted_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM adp
+            WHERE season=2026 AND platform=?
+            """,
+            (platform,),
+        ).fetchone()[0]
+
         _set_status(
             connection,
             f"adp_{platform.lower()}_2026",
             {
-                "count": len(adp_rows),
-                "source": payload.get("source") or source_path.name,
-                "file": str(source_path),
+                "count": inserted_count,
+                "source": source_name
+                or payload.get("source")
+                or f"{platform} direct sync",
+                "direct_import": True,
             },
         )
 
     return {
-        "ok": bool(adp_rows),
+        "ok": inserted_count > 0,
         "platform": platform,
-        "count": len(adp_rows),
-        "source": payload.get("source") or source_path.name,
-        "file": str(source_path),
+        "count": inserted_count,
+        "received_count": len(raw_players),
+        "usable_count": len(prepared),
+        "source": source_name
+        or payload.get("source")
+        or f"{platform} direct sync",
+        "message": (
+            f"Inserted {inserted_count} {platform} ADP rows into SQLite."
+            if inserted_count
+            else "No usable ADP rows were found in the payload."
+        ),
     }
+
+
+def import_adp(platform: str = "ESPN") -> dict[str, Any]:
+    """
+    Import ADP from the newest saved platform JSON file.
+    """
+    init_database()
+    platform = str(platform or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        raise ValueError("Platform must be ESPN or YAHOO.")
+
+    for candidate in _adp_candidates(platform):
+        payload = _load_json(candidate)
+        if payload.get("players"):
+            result = import_adp_payload(
+                platform,
+                payload,
+                source_name=payload.get("source") or candidate.name,
+            )
+            result["file"] = str(candidate)
+            return result
+
+    return {
+        "ok": False,
+        "platform": platform,
+        "count": 0,
+        "message": (
+            f"No saved {platform} ADP dataset was found in "
+            f"{', '.join(str(path) for path in _adp_candidates(platform))}."
+        ),
+    }
+
 
 
 def import_projections() -> int:
@@ -1169,6 +1260,50 @@ def database_status() -> dict[str, Any]:
 @bp.get("/api/player-research-db/status")
 def status_api():
     return jsonify(database_status())
+
+
+@bp.get("/api/player-research-db/adp-status")
+def adp_status_api():
+    init_database()
+    platform = str(request.args.get("platform") or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+
+    with connect() as connection:
+        summary = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS row_count,
+                MIN(adp) AS best_adp,
+                MAX(adp) AS worst_adp,
+                MAX(updated_at) AS updated_at
+            FROM adp
+            WHERE season=2026 AND platform=?
+            """,
+            (platform,),
+        ).fetchone()
+
+        samples = connection.execute(
+            """
+            SELECT p.name, p.team, p.position, a.adp, a.position_adp
+            FROM adp a
+            JOIN players p ON p.player_key=a.player_key
+            WHERE a.season=2026 AND a.platform=?
+            ORDER BY a.adp ASC
+            LIMIT 10
+            """,
+            (platform,),
+        ).fetchall()
+
+    return jsonify(
+        ok=bool(summary["row_count"]),
+        platform=platform,
+        row_count=summary["row_count"],
+        best_adp=summary["best_adp"],
+        worst_adp=summary["worst_adp"],
+        updated_at=summary["updated_at"],
+        samples=[dict(row) for row in samples],
+    )
 
 
 @bp.post("/api/player-research-db/import-current")
