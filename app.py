@@ -1991,10 +1991,6 @@ def _pr_urls(season):
         f"https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_{season}.csv",
     ]
 
-# Canonical nflverse sources used by the Player Research status and refresh routes.
-# Keep this defined at module scope so every route can reference it safely.
-NFLVERSE_2025_STATS_URLS = tuple(_pr_urls(2025))
-
 def _pr_rows(season):
     cache = DATA_DIR / f"player_stats_{season}.csv"
     if cache.exists():
@@ -3079,11 +3075,7 @@ def _player_research_data_status(platform="ESPN"):
         "projection_2026_count": projection_count,
         "platform_adp_count": adp_count,
         "fantasypros_api_configured": bool(os.getenv("FANTASYPROS_API_KEY", "").strip()),
-        "nflverse_stats_url": (
-            NFLVERSE_2025_STATS_URLS[0]
-            if NFLVERSE_2025_STATS_URLS
-            else None
-        ),
+        "nflverse_stats_url": (NFLVERSE_2025_STATS_URLS[0] if globals().get("NFLVERSE_2025_STATS_URLS") else None),
         "fantasypros_base": "https://api.fantasypros.com/public/v2/json",
     }
 
@@ -3100,30 +3092,131 @@ def player_research():
     if selected_position not in {"", "QB", "RB", "WR", "TE", "K", "DEF"}:
         selected_position = ""
 
-    league_key = request.args.get("league") or session.get("active_league_key") or "espn-gramps"
+    league_key = (
+        request.args.get("league")
+        or session.get("active_league_key")
+        or "espn-gramps"
+    )
     if league_key not in CONTEXTS:
         league_key = "espn-gramps"
+
     session["active_league_key"] = league_key
     context = CONTEXTS[league_key]
-    platform = "YAHOO" if "YAHOO" in str(context.get("platform", "")).upper() else "ESPN"
-
-    player_rows = _pr_position_rows(selected_position, limit=2000, platform=platform)
-    adp_meta = _platform_2026_adp_data(platform)
+    platform = (
+        "YAHOO"
+        if "YAHOO" in str(context.get("platform", "")).upper()
+        else "ESPN"
+    )
 
     return page(
         "player_research.html",
         selected_position=selected_position,
-        player_rows=player_rows,
-        player_count=len(player_rows),
         draft_leagues=draft_leagues(),
         active_league_key=league_key,
         active_platform=platform,
-        active_scoring=adp_meta.get("scoring", ""),
-        adp_source=adp_meta.get("source", f"{platform} 2026 ADP"),
-        adp_updated_at=adp_meta.get("updated_at", ""),
-        adp_status=adp_meta.get("status", "unknown"),
-        adp_warning=adp_meta.get("warning", ""),
+        active_scoring=context.get("scoring", ""),
     )
+
+
+@app.get("/api/player-research/table")
+def player_research_table_api():
+    """
+    Unified Player Research v2 table.
+
+    Current roster/team comes from the 2026 player directory/master database.
+    Historical production comes from the saved 2025 nflverse snapshot.
+    Projections and ADP come from the selected 2026 platform data.
+    """
+    position = request.args.get("position", "").strip().upper()
+    if position not in {"", "QB", "RB", "WR", "TE", "K", "DEF"}:
+        return jsonify(ok=False, error="Unsupported position."), 400
+
+    platform = str(
+        request.args.get("platform") or _league_platform()
+    ).upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+
+    query = request.args.get("q", "").strip().lower()
+    sort_by = request.args.get("sort", "adp").strip().lower()
+    direction = request.args.get("direction", "asc").strip().lower()
+    try:
+        limit = min(2500, max(1, int(request.args.get("limit", 2000))))
+    except Exception:
+        limit = 2000
+
+    rows = _pr_position_rows(position, limit=2500, platform=platform)
+
+    if query:
+        rows = [
+            row for row in rows
+            if query in str(row.get("name", "")).lower()
+            or query in str(row.get("team", "")).lower()
+            or query in str(row.get("position", "")).lower()
+        ]
+
+    sort_fields = {
+        "name": "name",
+        "team": "team",
+        "position": "position",
+        "adp": "adp",
+        "position_adp": "position_adp",
+        "points_2025": "fantasy_points_ppr",
+        "projection_2026": "proj_2026_ppr",
+        "games": "games",
+    }
+    field = sort_fields.get(sort_by, "adp")
+    reverse = direction == "desc"
+
+    def sort_value(row):
+        value = row.get(field)
+        if field in {"name", "team", "position", "position_adp"}:
+            return str(value or "").lower()
+        try:
+            number = float(value)
+            if field == "adp" and number >= 999:
+                return 999999.0
+            return number
+        except Exception:
+            return 999999.0 if not reverse else -999999.0
+
+    rows.sort(key=sort_value, reverse=reverse)
+    rows = rows[:limit]
+
+    counts = Counter(row.get("position") for row in rows)
+    stats_snapshot = _stats_2025_snapshot()
+    adp_snapshot = _platform_2026_adp_data(platform)
+    master_snapshot = _master_players_2026()
+
+    return jsonify(
+        ok=True,
+        version="2.0",
+        platform=platform,
+        scoring=adp_snapshot.get("scoring", ""),
+        selected_position=position or "ALL",
+        count=len(rows),
+        position_counts=dict(counts),
+        players=rows,
+        sources={
+            "current_players": master_snapshot.get("sources", []),
+            "stats_2025": stats_snapshot.get("source", ""),
+            "projections_2026": "FantasyPros when available; Gridiron IQ fallback model otherwise",
+            "adp_2026": adp_snapshot.get("source", ""),
+        },
+        updated_at={
+            "current_players": master_snapshot.get("updated_at", ""),
+            "stats_2025": stats_snapshot.get("updated_at", ""),
+            "adp_2026": adp_snapshot.get("updated_at", ""),
+        },
+        warnings=[
+            warning for warning in [
+                adp_snapshot.get("warning", ""),
+                "Run the data refresh if counts are zero or teams are outdated."
+                if not rows else "",
+            ] if warning
+        ],
+    )
+
 
 @app.get("/api/diagnostics/player-research")
 def diagnostics_player_research():
@@ -4021,7 +4114,21 @@ def player_research_profile(player_id):
 def not_found(_): return page("error.html",code=404,message="Page not found."),404
 
 @app.errorhandler(500)
-def server_error(_): return page("error.html",code=500,message="Something went wrong. Check Render logs."),500
+def server_error(error):
+    if request.path.startswith("/api/"):
+        original = getattr(error, "original_exception", None)
+        app.logger.exception("Unhandled API error on %s", request.path)
+        return jsonify(
+            ok=False,
+            error=str(original or error),
+            message="The server could not complete this Player Research request.",
+            path=request.path,
+        ), 500
+    return page(
+        "error.html",
+        code=500,
+        message="Something went wrong. Check Render logs.",
+    ), 500
 
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=int(os.getenv("PORT","8000")),debug=os.getenv("FLASK_DEBUG")=="1")
