@@ -166,11 +166,20 @@
           </section>
           <section class="pr-detail-card">
             <div class="pr-news-heading">
-              <h3>Season History</h3>
-              <span class="pr-muted">Stored in SQLite</span>
+              <h3>Complete NFL Career</h3>
+              <span id="pr-career-range" class="pr-muted">Stored in SQLite</span>
             </div>
+            <div id="pr-career-summary" class="pr-detail-stats"></div>
+            <div class="pr-career-tabs" role="group" aria-label="Career summary view">
+              <button type="button" class="pr-career-tab is-active" data-career-view="totals">Career totals</button>
+              <button type="button" class="pr-career-tab" data-career-view="per_game">Per game</button>
+              <button type="button" class="pr-career-tab" data-career-view="per_season">Per season</button>
+            </div>
+            <div id="pr-career-totals" class="pr-detail-stats"></div>
             <p id="pr-career-progress" class="pr-muted"></p>
-            <div id="pr-detail-history"></div>
+            <div class="pr-history-scroll">
+              <div id="pr-detail-history"></div>
+            </div>
           </section>
           <section class="pr-detail-card"><h3>Injury and Status</h3><p id="pr-detail-injury">No current injury designation.</p></section>
           <section class="pr-detail-card">
@@ -503,6 +512,63 @@
   .pr-detail-stat{padding:10px;border-radius:9px;background:#f3f5f9}
   .pr-detail-stat span,.pr-detail-stat strong{display:block}
   .pr-detail-stat span{color:#718096;font-size:10px;text-transform:uppercase}
+  .pr-career-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 16px 0 12px;
+  }
+
+  .pr-career-tab {
+    border: 1px solid #d9e1ea;
+    border-radius: 999px;
+    background: #fff;
+    padding: 8px 13px;
+    color: #42516a;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .pr-career-tab.is-active {
+    background: #142033;
+    border-color: #142033;
+    color: #fff;
+  }
+
+  .pr-history-scroll {
+    overflow-x: auto;
+    margin-top: 16px;
+    border: 1px solid #e7ebf1;
+    border-radius: 12px;
+  }
+
+  .pr-history-table {
+    width: 100%;
+    min-width: 1450px;
+    border-collapse: collapse;
+    background: #fff;
+  }
+
+  .pr-history-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .pr-history-table th {
+    white-space: nowrap;
+    background: #f5f7fa;
+  }
+
+  .pr-history-table tbody tr:hover {
+    background: #f8fafc;
+  }
+
+  .pr-history-table .pr-total-row {
+    font-weight: 800;
+    background: #eef3f8;
+  }
+
   .pr-history-table{width:100%;border-collapse:collapse}
   .pr-history-table th,.pr-history-table td{padding:8px;border-bottom:1px solid #e7ebf1;text-align:right}
   .pr-history-table th:first-child,.pr-history-table td:first-child{text-align:left}
@@ -909,7 +975,120 @@
       ).join("");
 
       const history = profile.history || [];
-      $("pr-detail-history").innerHTML = history.length ? `<table class="pr-history-table"><thead><tr><th>Season</th><th>Games</th><th>PPR</th><th>Rush Yds</th><th>Rec Yds</th><th>Pass Yds</th></tr></thead><tbody>${history.slice().reverse().map(s=>`<tr><td>${s.season}</td><td>${readable(s.games)}</td><td>${readable(s.fantasy_points_ppr,1)}</td><td>${readable(s.rushing_yards)}</td><td>${readable(s.receiving_yards)}</td><td>${readable(s.passing_yards)}</td></tr>`).join("")}</tbody></table>` : '<p class="pr-muted">Older season files have not been loaded.</p>';
+      const career = profile.career || {};
+      const careerTotals = career.totals || {};
+      const careerPerGame = career.per_game || {};
+      const careerPerSeason = career.per_season || {};
+
+      $("pr-career-range").textContent = career.seasons_played
+        ? `${career.first_season}–${career.last_season} · ${career.seasons_played} seasons`
+        : "No completed seasons stored";
+
+      $("pr-career-summary").innerHTML = [
+        ["Seasons", career.seasons_played || 0],
+        ["Career games", careerTotals.games || 0],
+        ["Current team", bio.team || "FA"],
+        ["Career PPR", careerTotals.fantasy_points_ppr || 0]
+      ].map(
+        ([label, value]) =>
+          `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value, label === "Career PPR" ? 1 : 0)}</strong></div>`
+      ).join("");
+
+      const careerViews = {
+        totals: careerTotals,
+        per_game: careerPerGame,
+        per_season: careerPerSeason
+      };
+
+      function renderCareerSummary(viewName) {
+        const values = careerViews[viewName] || careerTotals;
+        const decimals = viewName === "totals" ? 0 : 1;
+        const careerFields = [
+          ["Games", values.games],
+          ["Standard points", values.fantasy_points],
+          ["PPR points", values.fantasy_points_ppr],
+          ["Completions", values.completions],
+          ["Pass attempts", values.attempts],
+          ["Pass yards", values.passing_yards],
+          ["Pass TD", values.passing_tds],
+          ["Interceptions", values.interceptions],
+          ["Carries", values.carries],
+          ["Rush yards", values.rushing_yards],
+          ["Rush TD", values.rushing_tds],
+          ["Targets", values.targets],
+          ["Receptions", values.receptions],
+          ["Rec yards", values.receiving_yards],
+          ["Rec TD", values.receiving_tds]
+        ];
+
+        $("pr-career-totals").innerHTML = careerFields.map(
+          ([label, value]) =>
+            `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value, decimals)}</strong></div>`
+        ).join("");
+      }
+
+      renderCareerSummary("totals");
+
+      document.querySelectorAll(".pr-career-tab").forEach((button) => {
+        button.onclick = () => {
+          document.querySelectorAll(".pr-career-tab").forEach(
+            (candidate) => candidate.classList.remove("is-active")
+          );
+          button.classList.add("is-active");
+          renderCareerSummary(button.dataset.careerView);
+        };
+      });
+
+      const columns = [
+        ["Season", "season", 0],
+        ["Team", "season_team", 0],
+        ["G", "games", 0],
+        ["Cmp", "completions", 0],
+        ["Att", "attempts", 0],
+        ["Pass Yds", "passing_yards", 0],
+        ["Pass TD", "passing_tds", 0],
+        ["INT", "interceptions", 0],
+        ["Car", "carries", 0],
+        ["Rush Yds", "rushing_yards", 0],
+        ["Rush TD", "rushing_tds", 0],
+        ["Tgt", "targets", 0],
+        ["Rec", "receptions", 0],
+        ["Rec Yds", "receiving_yards", 0],
+        ["Rec TD", "receiving_tds", 0],
+        ["STD Pts", "fantasy_points", 1],
+        ["PPR Pts", "fantasy_points_ppr", 1]
+      ];
+
+      if (history.length) {
+        const header = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
+        const rowsHtml = history.slice().reverse().map((season) => {
+          const cells = columns.map(([label, key, decimals]) => {
+            if (key === "season_team") {
+              return `<td>${escapeHtml(season.season_team || season.team || "FA")}</td>`;
+            }
+            if (key === "season") {
+              return `<td>${escapeHtml(season.season)}</td>`;
+            }
+            return `<td>${readable(season[key], decimals)}</td>`;
+          }).join("");
+          return `<tr>${cells}</tr>`;
+        }).join("");
+
+        const totalCells = columns.map(([label, key, decimals], index) => {
+          if (index === 0) return "<td>Career</td>";
+          if (key === "season_team") return "<td>All teams</td>";
+          return `<td>${readable(careerTotals[key], decimals)}</td>`;
+        }).join("");
+
+        $("pr-detail-history").innerHTML =
+          `<table class="pr-history-table">` +
+          `<thead><tr>${header}</tr></thead>` +
+          `<tbody>${rowsHtml}<tr class="pr-total-row">${totalCells}</tr></tbody>` +
+          `</table>`;
+      } else {
+        $("pr-detail-history").innerHTML =
+          '<p class="pr-muted">Career seasons have not been imported into SQLite.</p>';
+      }
 
       $("pr-detail-injury").textContent =
         bio.injury_status
