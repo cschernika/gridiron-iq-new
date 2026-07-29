@@ -709,15 +709,6 @@ def espn_sync():
         league={"platform":"ESPN","league_id":str(data["league_id"]),"league_name":settings["name"],"season":int(data["season"]),"teams":len(teams),"current_week":getattr(espn,"current_week",None),"synced_at":datetime.now(timezone.utc).isoformat()}
         save_snapshot({"league":league,"settings":settings,"teams":teams})
 
-        # Keep the ESPN credentials in this user's signed Flask session so
-        # Player Research can perform an authenticated ADP refresh later.
-        session["espn_adp_credentials"] = {
-            "league_id": str(data["league_id"]),
-            "season": int(data["season"]),
-            "swid": str(data["swid"]).strip(),
-            "espn_s2": str(data["espn_s2"]).strip(),
-        }
-
         adp_info = {
             "ok": False,
             "player_count": 0,
@@ -730,6 +721,17 @@ def espn_sync():
                 swid=data["swid"],
                 espn_s2=data["espn_s2"],
             )
+            # Save the authenticated ESPN result in the exact cache consumed
+            # by Player Research. Credentials are never stored.
+            if native_adp.get("players"):
+                platform_path = _local_platform_adp_path("ESPN")
+                temp_path = platform_path.with_suffix(platform_path.suffix + ".tmp")
+                temp_path.write_text(
+                    json.dumps(native_adp, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                temp_path.replace(platform_path)
+
             adp_info = {
                 "ok": bool(native_adp.get("players")),
                 "player_count": len(native_adp.get("players", {})),
@@ -2446,6 +2448,7 @@ def _stats_2025_for_name(player_name):
 def build_2025_stats_api():
     try:
         payload = _ensure_2025_stats_snapshot(force=True)
+        _clear_pr_rows_cache()
         return jsonify(
             ok=True,
             season=2025,
@@ -3405,11 +3408,28 @@ def player_research_table_api():
     direction = request.args.get("direction", "asc").strip().lower()
 
     try:
-        limit = min(2500, max(1, int(request.args.get("limit", 1000))))
+        page = max(1, int(request.args.get("page", 1)))
     except Exception:
-        limit = 2000
+        page = 1
 
-    rows = _pr_position_rows(position, limit=min(limit, 1000), platform=platform)
+    try:
+        page_size = min(250, max(25, int(request.args.get("page_size", 200))))
+    except Exception:
+        page_size = 200
+
+    all_rows = _pr_position_rows("", limit=5000, platform=platform)
+
+    position_counts = dict(Counter(
+        row.get("position")
+        for row in all_rows
+        if row.get("position")
+    ))
+
+    rows = (
+        [row for row in all_rows if row.get("position") == position]
+        if position
+        else list(all_rows)
+    )
 
     if query:
         rows = [
@@ -3443,33 +3463,37 @@ def player_research_table_api():
             return 999999.0
 
     rows.sort(key=value_for_sort, reverse=reverse)
-    rows = rows[:limit]
+
+    total_count = len(rows)
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    start_index = (page - 1) * page_size
+    page_rows = rows[start_index:start_index + page_size]
 
     stats = _stats_2025_snapshot()
     adp = _platform_2026_adp_data(platform)
-    counts = Counter(row.get("position") for row in rows)
 
     return jsonify(
         ok=True,
         platform=platform,
         selected_position=position or "ALL",
-        count=len(rows),
-        position_counts=dict(counts),
-        players=rows,
+        count=total_count,
+        returned_count=len(page_rows),
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        position_counts=position_counts,
+        players=page_rows,
         sources={
             "stats_2025": stats.get("source", ""),
-            "projections_2026": "FantasyPros or Gridiron IQ history-based projection",
+            "projections_2026": "2026 source projections or Gridiron IQ fallback",
             "adp_2026": adp.get("source", ""),
         },
         updated_at={
             "stats_2025": stats.get("updated_at", ""),
             "adp_2026": adp.get("updated_at", ""),
         },
-        warnings=(
-            []
-            if adp.get("players")
-            else [x for x in [adp.get("warning", "")] if x]
-        ),
+        warnings=[],
     )
 
 @app.get("/api/diagnostics/player-research")
@@ -4617,7 +4641,7 @@ def _fast_2026_projection_from_2025(stats, position):
     return projected
 
 
-def _pr_position_rows(position="", limit=1000, platform="ESPN"):
+def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
     """
     Build the current fantasy-player universe from three reliable signals:
 
@@ -4919,7 +4943,77 @@ def _pr_position_rows(position="", limit=1000, platform="ESPN"):
         row.get("name", ""),
     ))
 
-    return rows[:max(1, min(int(limit or 1000), 1000))]
+    return rows[:max(1, min(int(limit or 5000), 5000))]
+
+
+
+_PR_ROWS_CACHE = {}
+_PR_ROWS_CACHE_TTL = 300
+
+
+def _pr_data_signature(platform):
+    """Return a lightweight signature for files that affect Player Research."""
+    paths = [
+        STATS_2025_SNAPSHOT_FILE,
+        _local_platform_adp_path(platform),
+        MASTER_PLAYERS_2026_FILE,
+        PLAYER_CACHE_FILE,
+    ]
+    signature = []
+    for path in paths:
+        try:
+            stat = path.stat()
+            signature.append((str(path), stat.st_mtime_ns, stat.st_size))
+        except Exception:
+            signature.append((str(path), 0, 0))
+    return tuple(signature)
+
+
+def _clear_pr_rows_cache():
+    _PR_ROWS_CACHE.clear()
+
+
+def _pr_position_rows(position="", limit=1000, platform="ESPN"):
+    """
+    Return cached merged player rows.
+
+    The expensive merge is performed once per platform and repeated only when
+    a source file changes or the five-minute cache expires.
+    """
+    position = str(position or "").upper()
+    platform = str(platform or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+
+    now = time.time()
+    signature = _pr_data_signature(platform)
+    cached = _PR_ROWS_CACHE.get(platform)
+
+    if (
+        cached
+        and cached.get("signature") == signature
+        and now - cached.get("created_at", 0) < _PR_ROWS_CACHE_TTL
+    ):
+        all_rows = cached.get("rows", [])
+    else:
+        all_rows = _build_pr_position_rows_uncached(
+            "",
+            limit=5000,
+            platform=platform,
+        )
+        _PR_ROWS_CACHE[platform] = {
+            "signature": signature,
+            "created_at": now,
+            "rows": all_rows,
+        }
+
+    if position:
+        rows = [row for row in all_rows if row.get("position") == position]
+    else:
+        rows = list(all_rows)
+
+    return rows[:max(1, min(int(limit or 1000), 5000))]
+
 
 
 def player_research_adp_status():
@@ -4956,39 +5050,45 @@ def player_research_adp_refresh():
     if platform not in {"ESPN", "YAHOO"}:
         platform = "ESPN"
 
-    app.logger.info("Starting 2026 ADP refresh platform=%s", platform)
+    app.logger.info("Starting 2026 ADP update platform=%s", platform)
 
     try:
         if platform == "ESPN":
-            credentials = session.get("espn_adp_credentials") or {}
+            # ESPN ADP is captured during the authenticated League Sync.
+            # Reuse that result instead of storing or replaying ESPN cookies.
+            data = _load_espn_native_adp()
 
-            if credentials.get("swid") and credentials.get("espn_s2"):
-                data = _fetch_espn_native_adp(
-                    league_id=credentials.get("league_id"),
-                    season=credentials.get("season") or 2026,
-                    swid=credentials.get("swid"),
-                    espn_s2=credentials.get("espn_s2"),
+            if not data or not data.get("players"):
+                # Public sources remain a fallback for users who have not synced.
+                data = _platform_2026_adp_data("ESPN", force=True)
+            else:
+                data = dict(data)
+                data["status"] = "synced"
+                data["source"] = (
+                    data.get("source")
+                    or "ESPN ADP captured during authenticated league sync"
                 )
 
-                # Also update the platform cache consumed by Player Research.
-                path = _local_platform_adp_path("ESPN")
-                path.write_text(
+                platform_path = _local_platform_adp_path("ESPN")
+                temp_path = platform_path.with_suffix(platform_path.suffix + ".tmp")
+                temp_path.write_text(
                     json.dumps(data, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
-            else:
-                data = _platform_2026_adp_data("ESPN", force=True)
+                temp_path.replace(platform_path)
         else:
             data = _platform_2026_adp_data("YAHOO", force=True)
 
         players = data.get("players", {}) or {}
         ranked_count = sum(
             1 for item in players.values()
-            if float(item.get("adp", 999) or 999) < 999
+            if 0 < float(item.get("adp", 999) or 999) < 999
         )
 
+        _clear_pr_rows_cache()
+
         app.logger.info(
-            "Completed ADP refresh platform=%s source=%s players=%s ranked=%s status=%s",
+            "Completed ADP update platform=%s source=%s players=%s ranked=%s status=%s",
             platform,
             data.get("source"),
             len(players),
@@ -5005,39 +5105,29 @@ def player_research_adp_refresh():
             updated_at=data.get("updated_at"),
             player_count=len(players),
             players_with_platform_adp=ranked_count,
-            warning=data.get("warning", ""),
             message=(
                 f"Loaded {ranked_count} ranked {platform} players."
                 if ranked_count
                 else "No ranked ADP players were returned."
             ),
+            requires_espn_sync=(
+                platform == "ESPN"
+                and (not data or data.get("status") == "unavailable")
+            ),
         )
     except Exception as exc:
-        app.logger.exception("2026 ADP refresh failed platform=%s", platform)
-
-        cached = _platform_2026_adp_data(platform, force=False)
-        cached_players = cached.get("players", {}) or {}
-
+        app.logger.exception("2026 ADP update failed platform=%s", platform)
         return jsonify(
-            ok=bool(cached_players),
-            season=2026,
+            ok=False,
             platform=platform,
-            source=cached.get("source"),
-            status="cached" if cached_players else "unavailable",
-            updated_at=cached.get("updated_at"),
-            player_count=len(cached_players),
-            players_with_platform_adp=sum(
-                1 for item in cached_players.values()
-                if float(item.get("adp", 999) or 999) < 999
-            ),
-            warning=(
-                "Authenticated ESPN ADP refresh failed. "
-                "Reconnect ESPN under League Sync and refresh again."
+            error=str(exc),
+            message=(
+                "Sync ESPN again under League Sync. The authenticated sync "
+                "will update the ESPN ADP dataset."
                 if platform == "ESPN"
-                else "Yahoo ADP refresh failed."
+                else "Yahoo ADP could not be updated."
             ),
-            diagnostic_error=str(exc),
-        ), 200 if cached_players else 500
+        ), 500
 
 @app.get("/api/player-research/position")
 def player_research_position():
