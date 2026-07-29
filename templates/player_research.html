@@ -1,544 +1,105 @@
 {% extends "base.html" %}
+
 {% block title %}Player Research | Gridiron IQ{% endblock %}
 
-{% block body %}
-<style>
-.pr-page{
-  --p:#5d3df5;--t:#132033;--m:#68778e;--l:#dfe5ef;--g:#16a34a;
-  color:var(--t);
-}
-.pr-header{
-  display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:18px
-}
-.pr-kicker{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}
-.pr-header h1{font-size:36px;margin:5px 0 6px}
-.pr-header p{margin:0;color:var(--m);max-width:720px}
-.pr-search{width:330px;max-width:100%;border:1px solid var(--l);border-radius:11px;padding:11px 13px;background:#fff}
-
-.pr-position-bar{
-  background:#fff;border:1px solid var(--l);border-radius:15px;padding:16px;
-  display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;
-  margin-bottom:16px
-}
-.pr-tabs{display:flex;gap:7px;flex-wrap:wrap}
-.pr-tab{
-  border:0;background:#f0f3f8;color:#64748b;border-radius:999px;padding:9px 14px;
-  font-weight:800;text-decoration:none;font-size:12px
-}
-.pr-tab.active{background:var(--p);color:#fff}
-.pr-count{font-size:12px;color:var(--m)}
-
-.pr-card{
-  background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px;
-  box-shadow:0 8px 24px rgba(25,45,75,.035)
-}
-.pr-card-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:12px}
-.pr-card-head h2{font-size:22px;margin:4px 0 0}
-.pr-table-wrap{overflow:auto}
-.pr-table{width:100%;border-collapse:collapse;min-width:1000px}
-.pr-table th,.pr-table td{
-  padding:10px 8px;border-bottom:1px solid #e7eaf1;text-align:left;
-  font-size:11px;white-space:nowrap
-}
-.pr-table th{
-  font-size:9px;color:var(--m);text-transform:uppercase;position:sticky;top:0;background:#fff
-}
-.pr-table tbody tr{cursor:pointer}
-.pr-table tbody tr:hover{background:#f8f9fc}
-.pr-player{font-weight:900}
-.pr-position{
-  display:inline-grid;place-items:center;min-width:31px;height:25px;border-radius:7px;
-  background:#eeeaff;color:var(--p);font-weight:900;font-size:10px
-}
-.pr-points{font-weight:900;color:var(--p)}
-.pr-status{
-  display:inline-block;padding:5px 8px;border-radius:999px;background:#eef2f7;
-  color:#617087;font-size:9px;font-weight:900
-}
-.pr-status.active{background:#e8f8ed;color:#148c3b}
-
-.pr-detail{
-  margin-top:16px;display:none
-}
-.pr-loading{text-align:center;padding:30px;color:var(--m)}
-.pr-hero{
-  display:grid;grid-template-columns:80px 1fr auto;gap:18px;align-items:center;
-  background:#fff;border:1px solid var(--l);border-radius:16px;padding:19px;margin-bottom:16px
-}
-.pr-avatar{
-  width:76px;height:76px;border-radius:18px;background:#eeeaff;color:var(--p);
-  display:grid;place-items:center;font-size:23px;font-weight:900
-}
-.pr-name h2{margin:0;font-size:27px}.pr-name p{margin:5px 0;color:var(--m)}
-.pr-badges{display:flex;gap:7px;flex-wrap:wrap}
-.pr-badge{background:#f0f3f8;border-radius:999px;padding:6px 9px;font-size:10px;font-weight:800}
-.pr-badge.ok{background:#e8f8ed;color:#148c3b}
-.pr-trend{text-align:right}.pr-trend span,.pr-trend strong{display:block}
-.pr-trend span{font-size:9px;color:var(--m)}.pr-trend strong{font-size:22px;margin-top:4px}
-.pr-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
-.pr-stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
-.pr-stat{border:1px solid #e7eaf1;border-radius:10px;padding:10px}
-.pr-stat span,.pr-stat strong{display:block}.pr-stat span{font-size:9px;color:var(--m);text-transform:uppercase}
-.pr-stat strong{font-size:19px;margin-top:4px}
-.pr-info{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
-.pr-info>div{border:1px solid #e7eaf1;border-radius:10px;padding:10px}
-.pr-info span,.pr-info b{display:block}.pr-info span{font-size:9px;color:var(--m);text-transform:uppercase}
-.pr-info b{font-size:11px;margin-top:4px}
-.pr-history{width:100%;border-collapse:collapse}.pr-history th,.pr-history td{padding:9px 6px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:10px}
-.pr-history th{font-size:8px;color:var(--m)}
-@media(max-width:900px){.pr-header{flex-direction:column}.pr-search{width:100%}.pr-detail-grid{grid-template-columns:1fr}.pr-hero{grid-template-columns:70px 1fr}.pr-trend{grid-column:1/-1;text-align:left}}
-@media(max-width:620px){.pr-stat-grid,.pr-info{grid-template-columns:1fr 1fr}}
-</style>
-
-<div class="pr-page">
-
-  <section class="pr-header">
+{% block content %}
+<section class="pr2-page" data-platform="{{ active_platform }}">
+  <div class="pr2-header">
     <div>
-      <div class="pr-kicker">PLAYER DATABASE</div>
+      <p class="pr2-eyebrow">Gridiron IQ</p>
       <h1>Player Research</h1>
-      <p>
-        Browse all fantasy players ranked by 2026 ADP, choose a position, compare 2025 stats side-by-side,
-        and click any player for career history, 2026 projections, and current information.
-      </p>
+      <p>Current NFL players, 2025 production, 2026 projections, and platform ADP in one table.</p>
     </div>
-    <div style="display:grid;gap:8px;min-width:330px">
-      <select id="pr-league" class="pr-search">
-        {% for item in draft_leagues %}
-        <option value="{{ item.key }}" {% if item.key == active_league_key %}selected{% endif %}>{{ item.name }} — {{ item.platform }}</option>
+    <div class="pr2-league">
+      <label for="pr2-league-select">League</label>
+      <select id="pr2-league-select">
+        {% for league in draft_leagues %}
+          <option value="{{ league.key }}" {% if league.key == active_league_key %}selected{% endif %}>
+            {{ league.name }} · {{ league.platform }}
+          </option>
         {% endfor %}
       </select>
-      <input id="pr-filter" class="pr-search" placeholder="Filter this list by player name...">
+      <span>{{ active_scoring }}</span>
     </div>
-  </section>
-
-  <section class="pr-position-bar">
-    <div class="pr-tabs">
-      <a class="pr-tab {% if not selected_position %}active{% endif %}" href="/player-research?league={{ active_league_key }}">All Players</a>
-      <a class="pr-tab {% if selected_position == 'QB' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=QB">QB</a>
-      <a class="pr-tab {% if selected_position == 'RB' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=RB">RB</a>
-      <a class="pr-tab {% if selected_position == 'WR' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=WR">WR</a>
-      <a class="pr-tab {% if selected_position == 'TE' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=TE">TE</a>
-      <a class="pr-tab {% if selected_position == 'K' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=K">K</a>
-      <a class="pr-tab {% if selected_position == 'DEF' %}active{% endif %}" href="/player-research?league={{ active_league_key }}&position=DEF">DEF</a>
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <div class="pr-count">{{ player_count }} players shown · {{ active_platform }} {{ active_scoring }} · {{ adp_source }}</div>
-      <button id="pr-refresh-adp" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer">Refresh FantasyPros Data</button>
-      <a href="/api/player-research/adp/status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none">Check ADP Status</a> <a href="/api/player-research/data-status?platform={{ active_platform }}" target="_blank" style="font-size:10px;font-weight:800;color:#4b39e7;text-decoration:none;margin-left:10px">Check All Data</a> <button id="pr-refresh-stats" type="button" style="border:1px solid var(--l);background:#fff;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer;margin-left:8px">Refresh 2025 Stats</button>
-    </div>
-  </section>
-
-  <div style="margin-bottom:14px;padding:10px 12px;border-radius:10px;
-    {% if adp_status == 'live' %}background:#eaf8ee;color:#148c3b;
-    {% elif adp_status == 'cached' %}background:#fff7e6;color:#9a6400;
-    {% else %}background:#fdecec;color:#b83434;{% endif %}">
-    <b>{{ active_platform }} 2026 ADP:</b>
-    {% if adp_status == 'live' %}
-      local ADP file loaded
-    {% elif adp_status == 'cached' %}
-      local ADP file loaded
-    {% else %}
-      local ADP file did not load
-    {% endif %}
-    {% if adp_updated_at %} · {{ adp_updated_at }}{% endif %}
-    {% if adp_warning %}<div style="font-size:10px;margin-top:4px">{{ adp_warning }}</div>{% endif %}
   </div>
 
-<div id="pr-loading" class="pr-loading" style="display:none">Loading full player research…</div>
+  <div id="pr2-alert" class="pr2-alert" hidden></div>
 
-  <section id="pr-detail" class="pr-detail">
-    <div class="pr-hero">
-      <div id="pr-avatar" class="pr-avatar">NFL</div>
-      <div class="pr-name">
-        <h2 id="pr-name"></h2>
-        <p id="pr-meta"></p>
-        <div id="pr-badges" class="pr-badges"></div>
-      </div>
-      <div class="pr-trend">
-        <span>CAREER TREND</span>
-        <strong id="pr-trend">—</strong>
-        <small id="pr-trend-pct"></small>
-      </div>
-    </div>
+  <div class="pr2-toolbar">
+    <label class="pr2-search">
+      <span>Search</span>
+      <input id="pr2-search" type="search" placeholder="Player or team">
+    </label>
+    <label>
+      <span>Sort</span>
+      <select id="pr2-sort">
+        <option value="adp">ADP</option>
+        <option value="projection_2026">2026 projected points</option>
+        <option value="points_2025">2025 fantasy points</option>
+        <option value="name">Player name</option>
+        <option value="team">Team</option>
+      </select>
+    </label>
+    <label>
+      <span>Order</span>
+      <select id="pr2-direction">
+        <option value="asc">Ascending</option>
+        <option value="desc">Descending</option>
+      </select>
+    </label>
+    <button id="pr2-refresh-table" class="pr2-button" type="button">Reload table</button>
+  </div>
 
-    <div class="pr-detail-grid">
-      <article class="pr-card">
-        <div class="pr-kicker">2025 SEASON</div>
-        <h2>Previous-Year Stats</h2>
-        <div id="pr-prior" class="pr-stat-grid"></div>
-      </article>
+  <nav class="pr2-tabs" aria-label="Player positions">
+    {% for value, label in [("", "All Players"), ("QB", "QB"), ("RB", "RB"), ("WR", "WR"), ("TE", "TE"), ("K", "K"), ("DEF", "DEF")] %}
+      <button type="button"
+              data-position="{{ value }}"
+              class="{% if selected_position == value %}active{% endif %}">
+        {{ label }}
+        <span data-count-for="{{ value or 'ALL' }}">—</span>
+      </button>
+    {% endfor %}
+  </nav>
 
-      <article class="pr-card">
-        <div class="pr-kicker">2026 OUTLOOK</div>
-        <h2>Gridiron IQ Projection</h2>
-        <div id="pr-proj" class="pr-stat-grid"></div>
-        <p id="pr-method" style="font-size:11px;color:var(--m)"></p>
-      </article>
-    </div>
+  <div class="pr2-summary">
+    <div><span>Players shown</span><strong id="pr2-count">—</strong></div>
+    <div><span>Platform</span><strong id="pr2-platform">{{ active_platform }}</strong></div>
+    <div><span>2025 stats</span><strong id="pr2-stats-status">Loading</strong></div>
+    <div><span>2026 ADP</span><strong id="pr2-adp-status">Loading</strong></div>
+  </div>
 
-    <div class="pr-detail-grid">
-      <article class="pr-card">
-        <div class="pr-kicker">CAREER HISTORY</div>
-        <h2>Season-by-Season</h2>
-        <div style="overflow:auto">
-          <table class="pr-history">
-            <thead><tr><th>YEAR</th><th>G</th><th>PPR</th><th>PASS YDS</th><th>RUSH YDS</th><th>REC</th><th>REC YDS</th><th>TD</th></tr></thead>
-            <tbody id="pr-history"></tbody>
-          </table>
-        </div>
-      </article>
+  <div class="pr2-table-wrap">
+    <table class="pr2-table">
+      <thead>
+        <tr>
+          <th>ADP</th>
+          <th>Pos. ADP</th>
+          <th>Player</th>
+          <th>Team</th>
+          <th>Pos.</th>
+          <th>2025 GP</th>
+          <th>2025 PPR</th>
+          <th>2025 Pass Yds</th>
+          <th>2025 Pass TD</th>
+          <th>2025 Rush Yds</th>
+          <th>2025 Rush TD</th>
+          <th>2025 Rec</th>
+          <th>2025 Rec Yds</th>
+          <th>2025 Rec TD</th>
+          <th>2026 Proj. PPR</th>
+        </tr>
+      </thead>
+      <tbody id="pr2-body">
+        <tr><td colspan="15" class="pr2-loading">Loading current players…</td></tr>
+      </tbody>
+    </table>
+  </div>
 
-      <article class="pr-card">
-        <div class="pr-kicker">PLAYER PROFILE</div>
-        <h2>Bio & Current Information</h2>
-        <div id="pr-info" class="pr-info"></div>
-      </article>
-    </div>
+  <div class="pr2-footer">
+    <p id="pr2-source-note">Loading data sources…</p>
+  </div>
+</section>
 
-    <article id="pr-news-section" class="pr-card" style="display:none;margin-top:16px">
-      <div class="pr-kicker">CURRENT PLAYER NEWS</div>
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
-        <h2 style="margin-bottom:8px">News, Injuries & Practice Updates</h2>
-        <span id="pr-news-updated" style="font-size:9px;color:var(--m)"></span>
-      </div>
-      <div id="pr-injury-card" style="display:none;border:1px solid #f1d7d7;background:#fff8f8;border-radius:10px;padding:10px;margin:8px 0;font-size:10px"></div>
-      <div id="pr-news-list"></div>
-    </article>
-  </section>
-
-</div>
-
-  <section class="pr-card">
-    <div class="pr-card-head">
-      <div>
-        <div class="pr-kicker">
-          {% if selected_position %}{{ selected_position }} PLAYERS{% else %}ALL PLAYERS{% endif %}
-        </div>
-        <h2>
-          {% if selected_position %}
-            {{ selected_position }} Rankings by 2026 ADP & 2025 Stats
-          {% else %}
-            All Fantasy Players — Ranked by 2026 ADP
-          {% endif %}
-        </h2>
-      </div>
-      <div class="pr-count">Click any player — their full research appears above this list</div>
-    </div>
-
-    <div class="pr-table-wrap">
-      <table class="pr-table">
-        <thead>
-          <tr>
-            <th>Player</th>
-            <th>Pos</th>
-            <th>Team</th>
-            <th>{{ active_platform }} 2026 ADP</th>
-            <th>Status</th>
-
-            {% if selected_position == 'QB' %}
-              <th>G</th><th>PPR Pts</th><th>Pass Yds</th><th>Pass TD</th><th>INT</th><th>Rush Yds</th><th>Rush TD</th>
-            {% elif selected_position == 'RB' %}
-              <th>G</th><th>PPR Pts</th><th>Carries</th><th>Rush Yds</th><th>Rush TD</th><th>Rec</th><th>Rec Yds</th><th>Rec TD</th>
-            {% elif selected_position in ['WR','TE'] %}
-              <th>G</th><th>PPR Pts</th><th>Targets</th><th>Rec</th><th>Rec Yds</th><th>Rec TD</th><th>Rush Yds</th>
-            {% else %}
-              <th>G</th><th>PPR Pts</th><th>Pass Yds</th><th>Rush Yds</th><th>Rec</th><th>Rec Yds</th><th>Total TD</th>
-            {% endif %}
-          </tr>
-        </thead>
-
-        <tbody id="pr-table-body">
-          {% for p in player_rows %}
-          <tr data-player-id="{{ p.player_id }}" data-player-name="{{ p.name|lower }}">
-            <td class="pr-player">{{ p.name }}</td>
-            <td><span class="pr-position">{{ p.position }}</span></td>
-            <td>{{ p.team }}</td>
-            <td class="pr-points">{% if p.adp < 999 %}{{ p.adp }}{% else %}Not loaded{% endif %}</td>
-            <td>
-              <span class="pr-status {% if p.status|lower == 'active' %}active{% endif %}">
-                {{ p.status or '—' }}
-              </span>
-            </td>
-
-            {% if selected_position == 'QB' %}
-              <td>{{ p.games }}</td>
-              <td class="pr-points">{{ p.fantasy_points_ppr }}</td>
-              <td>{{ p.passing_yards }}</td>
-              <td>{{ p.passing_tds }}</td>
-              <td>{{ p.interceptions }}</td>
-              <td>{{ p.rushing_yards }}</td>
-              <td>{{ p.rushing_tds }}</td>
-            {% elif selected_position == 'RB' %}
-              <td>{{ p.games }}</td>
-              <td class="pr-points">{{ p.fantasy_points_ppr }}</td>
-              <td>{{ p.carries }}</td>
-              <td>{{ p.rushing_yards }}</td>
-              <td>{{ p.rushing_tds }}</td>
-              <td>{{ p.receptions }}</td>
-              <td>{{ p.receiving_yards }}</td>
-              <td>{{ p.receiving_tds }}</td>
-            {% elif selected_position in ['WR','TE'] %}
-              <td>{{ p.games }}</td>
-              <td class="pr-points">{{ p.fantasy_points_ppr }}</td>
-              <td>{{ p.targets }}</td>
-              <td>{{ p.receptions }}</td>
-              <td>{{ p.receiving_yards }}</td>
-              <td>{{ p.receiving_tds }}</td>
-              <td>{{ p.rushing_yards }}</td>
-            {% else %}
-              <td>{{ p.games }}</td>
-              <td class="pr-points">{{ p.fantasy_points_ppr }}</td>
-              <td>{{ p.passing_yards }}</td>
-              <td>{{ p.rushing_yards }}</td>
-              <td>{{ p.receptions }}</td>
-              <td>{{ p.receiving_yards }}</td>
-              <td>{{ p.total_tds }}</td>
-            {% endif %}
-          </tr>
-          {% else %}
-          <tr><td colspan="12">No players were returned.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-
-
-<script>
-
-  function renderPlayerNews(data){
-    const section = document.getElementById("pr-news-section");
-    const list = document.getElementById("pr-news-list");
-    const injuryCard = document.getElementById("pr-injury-card");
-    const updated = document.getElementById("pr-news-updated");
-    if(!section || !list) return;
-
-    section.style.display = "block";
-    updated.textContent = data.news_updated_at ? `Updated ${data.news_updated_at}` : "";
-
-    const injury = data.injury || {};
-    const injuryBits = [];
-    if(injury.status) injuryBits.push(`<b>Status:</b> ${injury.status}`);
-    if(injury.body_part) injuryBits.push(`<b>Injury:</b> ${injury.body_part}`);
-    if(injury.practice) injuryBits.push(`<b>Practice:</b> ${injury.practice}`);
-    if(injury.description) injuryBits.push(injury.description);
-
-    if(injuryBits.length){
-      injuryCard.style.display = "block";
-      injuryCard.innerHTML = injuryBits.join(" &nbsp; · &nbsp; ");
-    } else {
-      injuryCard.style.display = "none";
-      injuryCard.innerHTML = "";
-    }
-
-    const news = data.news || [];
-    if(!news.length){
-      list.innerHTML = `<div style="border:1px solid #e3e7ee;border-radius:10px;padding:11px;font-size:10px;color:#778397">No recent FantasyPros news was returned for this player.</div>`;
-      return;
-    }
-
-    list.innerHTML = news.map(item => `
-      <div style="border:1px solid #e3e7ee;border-radius:10px;padding:11px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;gap:12px">
-          <b style="font-size:11px">${item.title || "Player update"}</b>
-          <span style="font-size:8px;color:#8995a6">${item.published || ""}</span>
-        </div>
-        ${item.summary ? `<div style="font-size:10px;color:#546274;line-height:1.45;margin-top:6px">${item.summary}</div>` : ""}
-        ${item.analysis ? `<div style="font-size:10px;line-height:1.45;margin-top:6px"><b>Fantasy impact:</b> ${item.analysis}</div>` : ""}
-        <div style="font-size:8px;color:#8995a6;margin-top:6px">${item.source || "FantasyPros"}${item.category ? " · " + item.category : ""}</div>
-      </div>
-    `).join("");
-  }
-
-(() => {
-  const $ = id => document.getElementById(id);
-
-  const leagueSelector = $("pr-league");
-  if(leagueSelector){
-    leagueSelector.addEventListener("change", () => {
-      location.href = `/player-research?league=${encodeURIComponent(leagueSelector.value)}`;
-    });
-  }
-
-  const refreshAdpButton = $("pr-refresh-adp");
-  if(refreshAdpButton){
-    refreshAdpButton.addEventListener("click", async () => {
-      const original = refreshAdpButton.textContent;
-      refreshAdpButton.disabled = true;
-      refreshAdpButton.textContent = "Refreshing…";
-      try{
-        const response = await fetch("/api/player-research/adp/refresh", {
-          method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({platform:"{{ active_platform }}"})
-        });
-        const data = await response.json();
-    renderPlayerNews(data);
-        if(!response.ok) throw new Error(data.error || "Refresh failed");
-        location.reload();
-      }catch(error){
-        alert(error.message);
-        refreshAdpButton.disabled = false;
-        refreshAdpButton.textContent = original;
-      }
-    });
-  }
-
-  const fmt = value => {
-    if(value === null || value === undefined || value === "") return "—";
-    const n = Number(value);
-    return Number.isNaN(n)
-      ? value
-      : n.toLocaleString(undefined,{maximumFractionDigits:1});
-  };
-
-  async function api(url){
-    const response = await fetch(url);
-    const data = await response.json().catch(()=>({}));
-    if(!response.ok){
-      throw new Error(data.error || `Request failed (${response.status})`);
-    }
-    return data;
-  }
-
-  $("pr-filter").addEventListener("input", () => {
-    const q = $("pr-filter").value.toLowerCase().trim();
-
-    document.querySelectorAll("#pr-table-body tr[data-player-id]").forEach(row => {
-      row.style.display =
-        !q || row.dataset.playerName.includes(q)
-          ? ""
-          : "none";
-    });
-  });
-
-  document.querySelectorAll("#pr-table-body tr[data-player-id]").forEach(row => {
-    row.addEventListener("click", () => loadProfile(row.dataset.playerId));
-  });
-
-  async function loadProfile(playerId){
-    $("pr-detail").style.display = "none";
-    $("pr-loading").style.display = "block";
-
-    try{
-      const data = await api(`/api/player-research/profile/${playerId}`);
-      const profile = data.profile;
-      const bio = profile.bio;
-      const prior = profile.previous_year || {};
-      const proj = profile.projection || {};
-      renderPlayerNews(profile);
-
-      $("pr-avatar").textContent = bio.position || "NFL";
-      $("pr-name").textContent = bio.name;
-      $("pr-meta").textContent =
-        `${bio.team || "FA"} · ${bio.position || "—"}${bio.number ? " · #" + bio.number : ""}`;
-
-      $("pr-badges").innerHTML = [
-        bio.status ? `<span class="pr-badge ok">${bio.status}</span>` : "",
-        bio.adp && Number(bio.adp) < 999 ? `<span class="pr-badge">ADP ${fmt(bio.adp)}${bio.position_adp ? " · " + bio.position_adp : ""}</span>` : "",
-        bio.injury_status ? `<span class="pr-badge">Injury: ${bio.injury_status}</span>` : "",
-        bio.college ? `<span class="pr-badge">${bio.college}</span>` : "",
-        bio.years_exp !== null && bio.years_exp !== undefined
-          ? `<span class="pr-badge">${bio.years_exp} yrs experience</span>`
-          : ""
-      ].join("");
-
-      $("pr-trend").textContent = profile.trend.direction;
-      $("pr-trend-pct").textContent =
-        `${profile.trend.change_pct > 0 ? "+" : ""}${profile.trend.change_pct}% vs prior season`;
-
-      const statList = (s,pos) => {
-        if(pos === "QB"){
-          return [["Pass Yds",s.passing_yards],["Pass TD",s.passing_tds],["INT",s.interceptions],["Rush Yds",s.rushing_yards],["Rush TD",s.rushing_tds],["PPR Pts",s.fantasy_points_ppr||s.fantasy_points]];
-        }
-        if(pos === "RB"){
-          return [["Carries",s.carries],["Rush Yds",s.rushing_yards],["Rush TD",s.rushing_tds],["Rec",s.receptions],["Rec Yds",s.receiving_yards],["Rec TD",s.receiving_tds],["PPR Pts",s.fantasy_points_ppr||s.fantasy_points]];
-        }
-        return [["Targets",s.targets],["Rec",s.receptions],["Rec Yds",s.receiving_yards],["Rec TD",s.receiving_tds],["Rush Yds",s.rushing_yards],["PPR Pts",s.fantasy_points_ppr||s.fantasy_points]];
-      };
-
-      $("pr-prior").innerHTML =
-        statList(prior,bio.position)
-          .map(([label,val]) => `<div class="pr-stat"><span>${label}</span><strong>${fmt(val)}</strong></div>`)
-          .join("");
-
-      $("pr-proj").innerHTML =
-        statList(proj,bio.position)
-          .map(([label,val]) => `<div class="pr-stat"><span>${label}</span><strong>${fmt(val)}</strong></div>`)
-          .join("");
-
-      $("pr-method").textContent =
-        `${proj.method || "Gridiron IQ projection"} · ${proj.games || 17}-game projection`;
-
-      $("pr-history").innerHTML =
-        (profile.history || []).slice().reverse().map(s => {
-          const td =
-            Number(s.passing_tds||0)
-            + Number(s.rushing_tds||0)
-            + Number(s.receiving_tds||0);
-
-          return `<tr>
-            <td>${s.season}</td>
-            <td>${fmt(s.games)}</td>
-            <td>${fmt(s.fantasy_points_ppr||s.fantasy_points)}</td>
-            <td>${fmt(s.passing_yards)}</td>
-            <td>${fmt(s.rushing_yards)}</td>
-            <td>${fmt(s.receptions)}</td>
-            <td>${fmt(s.receiving_yards)}</td>
-            <td>${fmt(td)}</td>
-          </tr>`;
-        }).join("")
-        || `<tr><td colspan="8">Historical data unavailable.</td></tr>`;
-
-      const info = [
-        ["Age",bio.age],
-        ["Height",bio.height],
-        ["Weight",bio.weight],
-        ["College",bio.college],
-        ["Experience",bio.years_exp !== null && bio.years_exp !== undefined ? bio.years_exp + " years" : null],
-        ["Depth Chart",bio.depth_chart_position],
-        ["Depth Order",bio.depth_chart_order],
-        ["Practice",bio.practice_participation],
-        ["Injury",bio.injury_body_part]
-      ];
-
-      $("pr-info").innerHTML =
-        info.map(([label,val]) =>
-          `<div><span>${label}</span><b>${fmt(val)}</b></div>`
-        ).join("");
-
-      $("pr-loading").style.display = "none";
-      $("pr-detail").style.display = "block";
-      $("pr-detail").scrollIntoView({behavior:"smooth",block:"start"});
-
-    }catch(error){
-      $("pr-loading").style.display = "none";
-      alert(error.message);
-    }
-  }
-})();
-
-  const refreshStatsButton = document.getElementById("pr-refresh-stats");
-  if(refreshStatsButton){
-    refreshStatsButton.addEventListener("click", async () => {
-      const old = refreshStatsButton.textContent;
-      refreshStatsButton.disabled = true;
-      refreshStatsButton.textContent = "Loading 2025 Stats…";
-      try{
-        const response = await fetch("/api/player-research/refresh-2025-stats", {method:"POST"});
-        const data = await response.json();
-        if(!response.ok || !data.ok) throw new Error(data.error || "2025 stats refresh failed.");
-        alert(`2025 stats loaded for ${data.player_count} players.`);
-        location.reload();
-      }catch(error){
-        alert(error.message);
-      }finally{
-        refreshStatsButton.disabled = false;
-        refreshStatsButton.textContent = old;
-      }
-    });
-  }
-
-</script>
-
+<link rel="stylesheet" href="{{ url_for('static', filename='player_research_v2.css') }}">
+<script defer src="{{ url_for('static', filename='player_research_v2.js') }}"></script>
 {% endblock %}
