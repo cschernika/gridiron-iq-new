@@ -7,7 +7,7 @@
         <div class="pr-heading">
           <p class="pr-eyebrow">Player Database</p>
           <h1>Player Research</h1>
-          <p>Current NFL players, 2025 statistics, 2026 projections, and ADP rankings.</p>
+          <p>Current NFL players, 2025 statistics, 2026 projections, and ADP rankings. Click any player for the full profile.</p>
         </div>
 
         <div class="pr-league-control">
@@ -132,6 +132,35 @@
       </section>
 
       <p id="pr-source" class="pr-source">Loading data sources…</p>
+
+      <div id="pr-player-overlay" class="pr-player-overlay" hidden></div>
+      <aside id="pr-player-drawer" class="pr-player-drawer" hidden>
+        <div class="pr-drawer-header">
+          <div>
+            <p class="pr-eyebrow">Player profile</p>
+            <h2 id="pr-detail-name">Player</h2>
+            <p id="pr-detail-meta">Position · Team</p>
+          </div>
+          <button id="pr-detail-close" class="pr-close-button" type="button">×</button>
+        </div>
+        <div id="pr-detail-loading" class="pr-detail-loading">Loading player profile…</div>
+        <div id="pr-detail-content" hidden>
+          <section class="pr-detail-summary">
+            <article><span>2026 ADP</span><strong id="pr-detail-adp">—</strong></article>
+            <article><span>Positional ADP</span><strong id="pr-detail-pos-adp">—</strong></article>
+            <article><span>2025 PPR</span><strong id="pr-detail-2025-ppr">—</strong></article>
+            <article><span>2026 Projection</span><strong id="pr-detail-projection">—</strong></article>
+          </section>
+          <section class="pr-detail-card"><h3>2025 Statistics</h3><div id="pr-detail-stats" class="pr-detail-stats"></div></section>
+          <section class="pr-detail-card"><h3>Season History</h3><div id="pr-detail-history"></div></section>
+          <section class="pr-detail-card"><h3>Injury and Status</h3><p id="pr-detail-injury">No current injury designation.</p></section>
+          <section class="pr-detail-card">
+            <div class="pr-news-heading"><h3>Current News</h3><button id="pr-load-news" class="pr-secondary-button" type="button">Load news</button></div>
+            <div id="pr-detail-news"><p class="pr-muted">Select Load news for current updates.</p></div>
+          </section>
+        </div>
+      </aside>
+
 </section>
 
 <style>
@@ -408,6 +437,32 @@
     font-size: 12px;
   }
 
+
+  .pr-table tbody tr[data-player-name]{cursor:pointer}
+  .pr-table tbody tr[data-player-name]:hover{background:#efedff}
+  .pr-player-overlay{position:fixed;inset:0;z-index:1090;background:rgba(18,25,42,.48)}
+  .pr-player-drawer{position:fixed;top:0;right:0;bottom:0;z-index:1100;width:min(680px,94vw);overflow-y:auto;padding:24px;background:#f7f9fc;box-shadow:-18px 0 48px rgba(20,32,51,.24)}
+  .pr-drawer-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:18px}
+  .pr-drawer-header h2{margin:0 0 5px;font-size:32px}
+  .pr-close-button{width:42px;height:42px;border:1px solid #d8dfe9;border-radius:10px;background:#fff;font-size:27px;cursor:pointer}
+  .pr-detail-loading{padding:50px 20px;text-align:center;color:#68778c}
+  .pr-detail-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
+  .pr-detail-summary article,.pr-detail-card{padding:15px;border:1px solid #dfe5ed;border-radius:12px;background:#fff}
+  .pr-detail-summary span,.pr-detail-summary strong{display:block}
+  .pr-detail-summary span{color:#718096;font-size:10px;text-transform:uppercase}
+  .pr-detail-summary strong{margin-top:5px;font-size:19px}
+  .pr-detail-card{margin-bottom:12px}
+  .pr-detail-card h3{margin:0 0 12px}
+  .pr-detail-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .pr-detail-stat{padding:10px;border-radius:9px;background:#f3f5f9}
+  .pr-detail-stat span,.pr-detail-stat strong{display:block}
+  .pr-detail-stat span{color:#718096;font-size:10px;text-transform:uppercase}
+  .pr-history-table{width:100%;border-collapse:collapse}
+  .pr-history-table th,.pr-history-table td{padding:8px;border-bottom:1px solid #e7ebf1;text-align:right}
+  .pr-history-table th:first-child,.pr-history-table td:first-child{text-align:left}
+  .pr-news-heading{display:flex;justify-content:space-between;gap:12px;align-items:center}
+  .pr-news-item{padding:11px 0;border-bottom:1px solid #e7ebf1}
+
   @media (max-width: 1050px) {
     .pr-header {
       grid-template-columns: 1fr;
@@ -484,7 +539,7 @@
     }
 
     body.innerHTML = players.map(player => `
-      <tr>
+      <tr data-player-name="${escapeHtml(player.name)}">
         <td>${Number(player.adp) < 999
           ? formatNumber(player.adp, 1)
           : '<span class="pr-muted">NR</span>'}</td>
@@ -642,6 +697,94 @@
       state.position = button.dataset.position || "";
       loadPlayers();
     });
+  });
+
+
+  let activePlayerName = "";
+
+  function closePlayerDrawer() {
+    $("pr-player-overlay").hidden = true;
+    $("pr-player-drawer").hidden = true;
+    document.body.style.overflow = "";
+    activePlayerName = "";
+  }
+
+  function readable(value, decimals = 0) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n === 0) return "—";
+    return n.toLocaleString(undefined, {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
+  }
+
+  async function openPlayerDrawer(playerName) {
+    activePlayerName = playerName;
+    $("pr-player-overlay").hidden = false;
+    $("pr-player-drawer").hidden = false;
+    document.body.style.overflow = "hidden";
+    $("pr-detail-loading").hidden = false;
+    $("pr-detail-loading").textContent = "Loading player profile…";
+    $("pr-detail-content").hidden = true;
+
+    try {
+      const response = await fetch(`/api/player-research/profile-by-name/${encodeURIComponent(playerName)}?platform=${encodeURIComponent(state.platform)}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Unable to load player profile.");
+
+      const profile = data.profile, bio = profile.bio || {}, stats = profile.previous_year || {}, projection = profile.projection || {};
+      $("pr-detail-name").textContent = bio.name || playerName;
+      $("pr-detail-meta").textContent = `${bio.position || "—"} · ${bio.team || "FA"}${bio.age ? ` · Age ${bio.age}` : ""}`;
+      $("pr-detail-adp").textContent = Number(bio.adp) < 999 ? readable(bio.adp, 1) : "NR";
+      $("pr-detail-pos-adp").textContent = bio.position_adp || "—";
+      $("pr-detail-2025-ppr").textContent = readable(stats.fantasy_points_ppr, 1);
+      $("pr-detail-projection").textContent = readable(projection.fantasy_points_ppr, 1);
+
+      const fields = [
+        ["Games", stats.games],["PPR points", stats.fantasy_points_ppr],["Pass yards", stats.passing_yards],
+        ["Pass TD", stats.passing_tds],["Interceptions", stats.interceptions],["Carries", stats.carries],
+        ["Rush yards", stats.rushing_yards],["Rush TD", stats.rushing_tds],["Targets", stats.targets],
+        ["Receptions", stats.receptions],["Rec yards", stats.receiving_yards],["Rec TD", stats.receiving_tds]
+      ];
+      $("pr-detail-stats").innerHTML = fields.map(([label,value]) => `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value,label==="PPR points"?1:0)}</strong></div>`).join("");
+
+      const history = profile.history || [];
+      $("pr-detail-history").innerHTML = history.length ? `<table class="pr-history-table"><thead><tr><th>Season</th><th>Games</th><th>PPR</th><th>Rush Yds</th><th>Rec Yds</th><th>Pass Yds</th></tr></thead><tbody>${history.slice().reverse().map(s=>`<tr><td>${s.season}</td><td>${readable(s.games)}</td><td>${readable(s.fantasy_points_ppr,1)}</td><td>${readable(s.rushing_yards)}</td><td>${readable(s.receiving_yards)}</td><td>${readable(s.passing_yards)}</td></tr>`).join("")}</tbody></table>` : '<p class="pr-muted">Older season files have not been loaded.</p>';
+
+      $("pr-detail-injury").textContent = bio.injury_status || profile.injury?.status || "No current injury designation.";
+      $("pr-detail-news").innerHTML = profile.news_available ? '<p class="pr-muted">Select Load news for current updates.</p>' : '<p class="pr-muted">Live news requires FANTASYPROS_API_KEY in Render.</p>';
+      $("pr-detail-loading").hidden = true;
+      $("pr-detail-content").hidden = false;
+    } catch (error) {
+      $("pr-detail-loading").textContent = error.message;
+    }
+  }
+
+  async function loadPlayerNews() {
+    if (!activePlayerName) return;
+    const button = $("pr-load-news");
+    button.disabled = true;
+    button.textContent = "Loading…";
+    try {
+      const response = await fetch(`/api/player-research/news/${encodeURIComponent(activePlayerName)}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Unable to load news.");
+      const news = data.news || [];
+      $("pr-detail-news").innerHTML = news.length ? news.map(item => `<article class="pr-news-item"><strong>${escapeHtml(item.title || "Player update")}</strong><p>${escapeHtml(item.summary || item.analysis || "")}</p><span>${escapeHtml(item.source || "")} ${escapeHtml(item.published || "")}</span></article>`).join("") : `<p class="pr-muted">${escapeHtml(data.warnings?.slice(-1)[0] || "No current news was returned.")}</p>`;
+    } catch (error) {
+      $("pr-detail-news").innerHTML = `<p class="pr-muted">${escapeHtml(error.message)}</p>`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Load news";
+    }
+  }
+
+  $("pr-body").addEventListener("click", event => {
+    const row = event.target.closest("tr[data-player-name]");
+    if (row) openPlayerDrawer(row.dataset.playerName);
+  });
+  $("pr-detail-close").addEventListener("click", closePlayerDrawer);
+  $("pr-player-overlay").addEventListener("click", closePlayerDrawer);
+  $("pr-load-news").addEventListener("click", loadPlayerNews);
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closePlayerDrawer();
   });
 
   $("pr-league").addEventListener("change", event => {
