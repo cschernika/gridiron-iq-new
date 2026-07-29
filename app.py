@@ -2108,37 +2108,113 @@ def _pr_aggregate(rows, player_name):
         "fantasy_points_ppr": total("fantasy_points_ppr"),
     }
 
+CAREER_STATS_FILE = DATA_DIR / "nfl_player_career_history.json"
+
+
+def _career_stats_snapshot():
+    empty = {"updated_at": "", "loaded_seasons": [], "players": {}, "status": "missing"}
+    if not CAREER_STATS_FILE.exists():
+        return empty
+    try:
+        payload = json.loads(CAREER_STATS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return empty
+        payload.setdefault("loaded_seasons", [])
+        payload.setdefault("players", {})
+        return payload
+    except Exception as exc:
+        app.logger.warning("Career-history database could not be read: %s", exc)
+        return empty
+
+
+def _aggregate_season_rows(rows, season):
+    grouped = defaultdict(list)
+    for row in rows or []:
+        name = _pr_row_name(row)
+        if name:
+            grouped[_pr_norm(name)].append(row)
+
+    result = {}
+    for norm, matches in grouped.items():
+        name = _pr_row_name(matches[0])
+        stats = _pr_aggregate(matches, name)
+        if not stats:
+            continue
+        first = matches[0]
+        position = str(first.get("position") or first.get("position_group") or "").upper()
+        if position == "DST":
+            position = "DEF"
+        result[norm] = {
+            "season": int(season),
+            "name": name,
+            "player_id": str(first.get("player_id") or ""),
+            "team": str(first.get("recent_team") or first.get("team") or ""),
+            "position": position,
+            **stats,
+        }
+    return result
+
+
+def _build_career_history_season(season, force=False):
+    season = int(season)
+    if season < 1999 or season > 2025:
+        raise ValueError("Career-history season must be between 1999 and 2025.")
+
+    rows = _pr_rows(season, force=force)
+    season_players = _aggregate_season_rows(rows, season)
+    payload = _career_stats_snapshot()
+    players = payload.setdefault("players", {})
+
+    for norm in list(players):
+        seasons = players.get(norm)
+        if not isinstance(seasons, dict):
+            players[norm] = {}
+            continue
+        seasons.pop(str(season), None)
+        if not seasons:
+            players.pop(norm, None)
+
+    for norm, record in season_players.items():
+        players.setdefault(norm, {})[str(season)] = record
+
+    loaded = {int(value) for value in payload.get("loaded_seasons", [])}
+    loaded.add(season)
+    payload.update({
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "loaded_seasons": sorted(loaded),
+        "season_count": len(loaded),
+        "player_count": len(players),
+        "status": "local",
+        "source": "nflverse Player Summary Stats",
+    })
+
+    temp = CAREER_STATS_FILE.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    temp.replace(CAREER_STATS_FILE)
+    return payload, len(season_players)
+
+
 def _pr_history(player_name):
-    """
-    Request-safe career history.
+    norm = _pr_norm(player_name)
+    payload = _career_stats_snapshot()
+    season_map = payload.get("players", {}).get(norm, {})
+    history = []
 
-    2025 comes from the local JSON snapshot.
-    Older seasons are displayed only if their CSV files are already cached.
-    No historical download is started while a user waits for the player page.
-    """
-    out = []
-
-    for season in (2022, 2023, 2024):
-        cache = DATA_DIR / f"player_stats_{season}.csv"
-        if not cache.exists():
-            continue
-        try:
-            rows = list(csv.DictReader(io.StringIO(cache.read_text(encoding="utf-8"))))
-            stats = _pr_aggregate(rows, player_name)
-            if stats:
-                out.append({"season": season, **stats})
-        except Exception:
-            continue
+    if isinstance(season_map, dict):
+        for season_key, record in season_map.items():
+            if not isinstance(record, dict):
+                continue
+            clean = {k: v for k, v in record.items() if k not in {"name", "player_id", "team", "position"}}
+            clean["season"] = int(record.get("season") or season_key)
+            history.append(clean)
 
     stats_2025 = _stats_2025_for_name(player_name)
-    if stats_2025:
-        clean = {
-            k: v for k, v in stats_2025.items()
-            if k not in {"name", "player_id", "team", "position"}
-        }
-        out.append({"season": 2025, **clean})
+    if stats_2025 and not any(item.get("season") == 2025 for item in history):
+        clean = {k: v for k, v in stats_2025.items() if k not in {"name", "player_id", "team", "position"}}
+        history.append({"season": 2025, **clean})
 
-    return out
+    history.sort(key=lambda item: int(item.get("season", 0)))
+    return history
 
 
 STATS_2025_SNAPSHOT_FILE = DATA_DIR / "nfl_player_stats_2025.json"
@@ -2384,6 +2460,37 @@ def stats_2025_player_api(player_name):
         return jsonify(ok=False, error="Player not found in 2025 stats database."), 404
     return jsonify(ok=True, season=2025, player=player)
 
+
+
+
+@app.post("/api/data/career-history/season/<int:season>")
+def build_career_history_season_api(season):
+    body = request.get_json(silent=True) or {}
+    try:
+        payload, count = _build_career_history_season(season, force=bool(body.get("force", False)))
+        return jsonify(
+            ok=True,
+            season=season,
+            season_player_count=count,
+            loaded_seasons=payload.get("loaded_seasons", []),
+            total_player_count=payload.get("player_count", 0),
+            updated_at=payload.get("updated_at", ""),
+        )
+    except Exception as exc:
+        app.logger.exception("Career-history season %s failed", season)
+        return jsonify(ok=False, season=season, error=str(exc)), 500
+
+
+@app.get("/api/data/career-history/status")
+def career_history_status_api():
+    payload = _career_stats_snapshot()
+    return jsonify(
+        ok=bool(payload.get("loaded_seasons")),
+        loaded_seasons=payload.get("loaded_seasons", []),
+        season_count=len(payload.get("loaded_seasons", [])),
+        player_count=len(payload.get("players", {})),
+        updated_at=payload.get("updated_at", ""),
+    )
 
 
 # ============================================================
@@ -3050,51 +3157,90 @@ def _normalize_player_news(row):
 
 def _player_research_news(player_name):
     cache = _news_cache_path(player_name)
-
     try:
         if cache.exists() and (time.time() - cache.stat().st_mtime) < PLAYER_NEWS_CACHE_TTL:
-            return json.loads(cache.read_text(encoding="utf-8"))
+            cached = json.loads(cache.read_text(encoding="utf-8"))
+            if cached.get("news"):
+                return cached
     except Exception:
         pass
 
-    master = _player_research_master_row(player_name)
-    fp_id = master.get("fantasypros_id")
-    warnings = []
+    target = _pr_norm(player_name)
     news = []
+    warnings = []
 
-    queries = []
-    if fp_id:
-        queries.append({"player_id": fp_id, "limit": 15})
-    queries.append({"player": player_name, "limit": 15})
-    queries.append({"limit": 100})
+    try:
+        response = requests.get(
+            "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
+            params={"limit": 100},
+            headers={"User-Agent": "Gridiron-IQ/2026"},
+            timeout=(5, 10),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        for article in payload.get("articles", []) or []:
+            combined = " ".join([str(article.get("headline") or ""), str(article.get("description") or "")])
+            if target and target not in _pr_norm(combined):
+                continue
+            web_link = ((article.get("links") or {}).get("web") or {})
+            news.append({
+                "title": article.get("headline") or "Player update",
+                "summary": article.get("description") or "",
+                "analysis": "",
+                "published": article.get("published") or article.get("lastModified") or "",
+                "source": "ESPN",
+                "category": "NFL",
+                "url": web_link.get("href") or "",
+            })
+    except Exception as exc:
+        warnings.append(f"ESPN news: {exc}")
 
-    for params in queries:
+    if len(news) < 5:
         try:
-            payload = _fp_public_get("nfl/news", params=params)
-            rows = _extract_fp_list(payload, ("news","articles","results","data"))
-            matched = [
-                _normalize_player_news(row)
-                for row in rows
-                if _player_news_matches(row, player_name, fp_id)
-            ]
-            if matched:
-                news = matched[:10]
-                break
+            import xml.etree.ElementTree as ET
+            response = requests.get(
+                "https://news.google.com/rss/search",
+                params={"q": f'"{player_name}" NFL', "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                headers={"User-Agent": "Mozilla/5.0 Gridiron-IQ/2026"},
+                timeout=(5, 10),
+            )
+            response.raise_for_status()
+            rss_root = ET.fromstring(response.content)
+            seen = {item.get("url") for item in news}
+            for item in rss_root.findall("./channel/item")[:12]:
+                link = item.findtext("link") or ""
+                if link in seen:
+                    continue
+                source_node = item.find("source")
+                source_name = source_node.text.strip() if source_node is not None and source_node.text else "Google News"
+                news.append({
+                    "title": item.findtext("title") or "Player update",
+                    "summary": item.findtext("description") or "",
+                    "analysis": "",
+                    "published": item.findtext("pubDate") or "",
+                    "source": source_name,
+                    "category": "NFL",
+                    "url": link,
+                })
+                seen.add(link)
+                if len(news) >= 10:
+                    break
         except Exception as exc:
-            warnings.append(str(exc))
+            warnings.append(f"Google News: {exc}")
 
     result = {
         "player": player_name,
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "news": news,
+        "news": news[:10],
         "warnings": warnings[-2:],
+        "source": "ESPN and Google News",
     }
-
     try:
-        cache.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        cache.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
     return result
+
 
 def _player_research_injury(player_name):
     master = _player_research_master_row(player_name)
@@ -3417,14 +3563,6 @@ def _fetch_espn_native_adp(league_id=None, season=2026, swid=None, espn_s2=None)
                 if adp in (None, ""):
                     adp = (wrapper.get("ownership") or {}).get("averageDraftPosition")
 
-                if adp in (None, ""):
-                    continue
-
-                try:
-                    adp = round(float(adp), 2)
-                except Exception:
-                    continue
-
                 rank = None
                 rank_sets = p.get("draftRanksByRankType") or {}
                 for rank_key in ("PPR", "STANDARD"):
@@ -3433,8 +3571,19 @@ def _fetch_espn_native_adp(league_id=None, season=2026, swid=None, espn_s2=None)
                         try:
                             rank = int(rank_info["rank"])
                         except Exception:
-                            pass
+                            rank = None
                         break
+
+                if adp in (None, ""):
+                    adp = rank
+
+                if adp in (None, ""):
+                    continue
+
+                try:
+                    adp = round(float(adp), 2)
+                except Exception:
+                    continue
 
                 players[_pr_norm(name)] = {
                     "name": name,
@@ -3445,6 +3594,15 @@ def _fetch_espn_native_adp(league_id=None, season=2026, swid=None, espn_s2=None)
                 }
 
             if players:
+                by_position = defaultdict(list)
+                for norm_key, item in players.items():
+                    pos_key = str(item.get("position") or "").upper()
+                    by_position[pos_key].append((float(item.get("adp", 999)), norm_key))
+                for pos_key, ranked in by_position.items():
+                    ranked.sort(key=lambda pair: (pair[0], pair[1]))
+                    for pos_number, (_, norm_key) in enumerate(ranked, start=1):
+                        players[norm_key]["position_adp"] = f"{pos_key}{pos_number}"
+
                 result = {
                     "season": season,
                     "platform": "ESPN",
@@ -4363,7 +4521,7 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
             "status": row.get("injury_status") or "",
             "source": "Current player database",
         },
-        "news_available": bool(os.getenv("FANTASYPROS_API_KEY", "").strip()),
+        "news_available": True,
         "data_sources": row.get("data_sources", []),
     }
 
