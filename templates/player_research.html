@@ -55,6 +55,9 @@
           <button id="pr-refresh-stats" class="pr-secondary-button" type="button">
             Refresh 2025 Stats
           </button>
+          <button id="pr-refresh-adp" class="pr-secondary-button" type="button">
+            Refresh 2026 ADP
+          </button>
           <button id="pr-reload" class="pr-primary-button" type="button">
             Reload table
           </button>
@@ -694,10 +697,73 @@
     }
   }
 
+  async function refresh2026Adp() {
+    const button = $("pr-refresh-adp");
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "Refreshing…";
+    showAlert("");
+
+    try {
+      const response = await fetch("/api/player-research/adp/refresh", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          platform: state.platform,
+          force: true
+        })
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const body = await response.text();
+        throw new Error(
+          `The server returned ${response.status} instead of JSON: ${body.slice(0, 160)}`
+        );
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error
+          || data.message
+          || "The 2026 ADP refresh request failed."
+        );
+      }
+
+      if (!data.ok || !data.player_count) {
+        throw new Error(
+          data.warning
+          || data.message
+          || "No usable 2026 ADP players were returned."
+        );
+      }
+
+      $("pr-adp").textContent = "Loaded";
+
+      const source = data.source || state.platform;
+      showAlert(
+        `2026 ${state.platform} ADP refreshed for ${data.player_count} players from ${source}.`
+      );
+
+      await loadPlayers();
+    } catch (error) {
+      showAlert(`2026 ADP refresh failed: ${error.message}`);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+
   $("pr-sort").addEventListener("change", loadPlayers);
   $("pr-direction").addEventListener("change", loadPlayers);
   $("pr-reload").addEventListener("click", loadPlayers);
   $("pr-refresh-stats").addEventListener("click", refresh2025Stats);
+  $("pr-refresh-adp").addEventListener("click", refresh2026Adp);
 
   document.querySelectorAll(".pr-tabs button").forEach(button => {
     button.addEventListener("click", () => {
