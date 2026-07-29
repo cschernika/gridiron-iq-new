@@ -7,7 +7,7 @@
         <div class="pr-heading">
           <p class="pr-eyebrow">Player Database</p>
           <h1>Player Research</h1>
-          <p>Current NFL players, 2025 statistics, 2026 projections, and ADP rankings. Click any player for the full profile.</p>
+          <p>Current NFL players, 2025 statistics, 2026 projections, and ADP rankings. Click any player for the full profile. Historical seasons are read from the SQLite database.</p>
         </div>
 
         <div class="pr-league-control">
@@ -53,10 +53,10 @@
 
         <div class="pr-action-buttons">
           <button id="pr-refresh-stats" class="pr-secondary-button" type="button">
-            Refresh 2025 Stats
+            Import 2025 into Database
           </button>
           <button id="pr-refresh-adp" class="pr-secondary-button" type="button">
-            Update 2026 ADP
+            Import Saved 2026 ADP
           </button>
           <button id="pr-reload" class="pr-primary-button" type="button">
             Reload table
@@ -167,7 +167,7 @@
           <section class="pr-detail-card">
             <div class="pr-news-heading">
               <h3>Season History</h3>
-              <button id="pr-load-career" class="pr-secondary-button" type="button">Load all seasons</button>
+              <span class="pr-muted">Stored in SQLite</span>
             </div>
             <p id="pr-career-progress" class="pr-muted"></p>
             <div id="pr-detail-history"></div>
@@ -632,7 +632,7 @@
     });
 
     try {
-      const response = await fetch(`/api/player-research/table?${parameters}`, {
+      const response = await fetch(`/api/player-research-db/table?${parameters}`, {
         signal: state.controller.signal,
         headers: { "Accept": "application/json" }
       });
@@ -707,7 +707,7 @@
     showAlert("");
 
     try {
-      const response = await fetch("/api/data/build-2025-stats", {
+      const response = await fetch("/api/player-research-db/import-season/2025", {
         method: "POST",
         headers: {
           "Accept": "application/json",
@@ -733,11 +733,11 @@
 
       $("pr-stats").textContent = "Loaded";
       showAlert(
-        `2025 statistics loaded for ${data.player_count || 0} players.`
+        `2025 database import completed for ${(data.count || data.player_count) || 0} players.`
       );
       await loadPlayers();
     } catch (error) {
-      showAlert(`2025 statistics refresh failed: ${error.message}`);
+      showAlert(`2025 database import failed: ${error.message}`);
     } finally {
       button.disabled = false;
       button.textContent = originalText;
@@ -752,7 +752,7 @@
     showAlert("");
 
     try {
-      const response = await fetch("/api/player-research/adp/refresh", {
+      const response = await fetch("/api/player-research-db/import-adp", {
         method: "POST",
         headers: {
           "Accept": "application/json",
@@ -782,7 +782,7 @@
         );
       }
 
-      if (!data.ok || !data.player_count) {
+      if (!data.ok || !(data.count || data.player_count)) {
         throw new Error(
           data.warning
           || data.message
@@ -797,11 +797,11 @@
 
       if (usedSavedData) {
         showAlert(
-          `Using ${data.player_count} saved ADP players from ${source}. Reconnect ESPN under League Sync, then refresh ADP for a live update.`
+          `Using ${data.count || data.player_count} saved ADP players from ${source}. Reconnect ESPN under League Sync, then refresh ADP for a live update.`
         );
       } else {
         showAlert(
-          `2026 ${state.platform} ADP refreshed for ${data.player_count} players from ${source}.`
+          `2026 ${state.platform} ADP refreshed for ${data.count || data.player_count} players from ${source}.`
         );
       }
 
@@ -870,7 +870,7 @@
     $("pr-detail-content").hidden = true;
 
     try {
-      const response = await fetch(`/api/player-research/profile-by-name/${encodeURIComponent(playerName)}?platform=${encodeURIComponent(state.platform)}`);
+      const response = await fetch(`/api/player-research-db/profile/${encodeURIComponent(playerName)}?platform=${encodeURIComponent(state.platform)}`);
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || "Unable to load player profile.");
 
@@ -922,14 +922,6 @@
       $("pr-detail-loading").hidden = true;
       $("pr-detail-content").hidden = false;
 
-      if (
-        !skipAutomaticCareerLoad
-        && history.length <= 1
-        && !careerLoadsAttempted.has(playerName)
-      ) {
-        careerLoadsAttempted.add(playerName);
-        loadCareerHistory(bio.years_exp, true);
-      }
     } catch (error) {
       $("pr-detail-loading").textContent = error.message;
     }
@@ -1011,7 +1003,7 @@
   $("pr-detail-close").addEventListener("click", closePlayerDrawer);
   $("pr-player-overlay").addEventListener("click", closePlayerDrawer);
   $("pr-load-news").addEventListener("click", loadPlayerNews);
-  $("pr-load-career").addEventListener("click", () => loadCareerHistory());
+
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") closePlayerDrawer();
   });
