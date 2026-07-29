@@ -51,9 +51,14 @@
           </select>
         </label>
 
-        <button id="pr-reload" class="pr-primary-button" type="button">
-          Reload table
-        </button>
+        <div class="pr-action-buttons">
+          <button id="pr-refresh-stats" class="pr-secondary-button" type="button">
+            Refresh 2025 Stats
+          </button>
+          <button id="pr-reload" class="pr-primary-button" type="button">
+            Reload table
+          </button>
+        </div>
       </section>
 
       <nav class="pr-tabs" aria-label="Player positions">
@@ -221,6 +226,30 @@
     color: #fff;
     font-weight: 900;
     cursor: pointer;
+  }
+
+  .pr-action-buttons {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .pr-secondary-button {
+    min-height: 46px;
+    padding: 0 18px;
+    border: 1px solid #6652e8;
+    border-radius: 10px;
+    background: #fff;
+    color: #6652e8;
+    font-weight: 900;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .pr-primary-button:disabled,
+  .pr-secondary-button:disabled {
+    cursor: wait;
+    opacity: .65;
   }
 
   .pr-tabs {
@@ -554,9 +583,55 @@
     searchTimer = setTimeout(loadPlayers, 250);
   });
 
+  async function refresh2025Stats() {
+    const button = $("pr-refresh-stats");
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "Refreshing…";
+    showAlert("");
+
+    try {
+      const response = await fetch("/api/data/build-2025-stats", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ force: true })
+      });
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const body = await response.text();
+        throw new Error(
+          `The server returned ${response.status} instead of JSON: ${body.slice(0, 140)}`
+        );
+      }
+
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.error || data.message || "Unable to refresh 2025 statistics."
+        );
+      }
+
+      $("pr-stats").textContent = "Loaded";
+      showAlert(
+        `2025 statistics loaded for ${data.player_count || 0} players.`
+      );
+      await loadPlayers();
+    } catch (error) {
+      showAlert(`2025 statistics refresh failed: ${error.message}`);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+
   $("pr-sort").addEventListener("change", loadPlayers);
   $("pr-direction").addEventListener("change", loadPlayers);
   $("pr-reload").addEventListener("click", loadPlayers);
+  $("pr-refresh-stats").addEventListener("click", refresh2025Stats);
 
   document.querySelectorAll(".pr-tabs button").forEach(button => {
     button.addEventListener("click", () => {
