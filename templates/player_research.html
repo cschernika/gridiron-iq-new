@@ -251,7 +251,7 @@
 
   .pr-controls {
     display: grid;
-    grid-template-columns: minmax(280px, 2fr) minmax(200px, 1fr) 170px auto;
+    grid-template-columns: minmax(280px, 2fr) minmax(190px, 1fr) minmax(170px, .8fr);
     gap: 14px;
     align-items: end;
     padding: 18px;
@@ -272,9 +272,19 @@
   }
 
   .pr-action-buttons {
-    display: flex;
-    gap: 10px;
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
     align-items: stretch;
+  }
+
+  .pr-action-buttons button {
+    width: 100%;
+    min-width: 0;
+    min-height: 50px;
+    padding: 0 14px;
+    text-align: center;
   }
 
   .pr-secondary-button {
@@ -499,6 +509,12 @@
       padding-bottom: 4px;
     }
   }
+  @media (max-width: 760px) {
+    .pr-action-buttons {
+      grid-template-columns: 1fr;
+    }
+  }
+
 </style>
 
 <script>
