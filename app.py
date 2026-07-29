@@ -752,10 +752,28 @@ def espn_sync():
                     native_adp,
                     source_name=native_adp.get("source")
                     or "Authenticated ESPN League Sync",
+                    replace_existing=False,
+                    minimum_rows=1,
                 )
+                public_adp = None
+                try:
+                    from player_research_db import import_public_adp
+                    public_adp = import_public_adp("ESPN")
+                except Exception as public_exc:
+                    app.logger.warning(
+                        "Public full ESPN ADP import unavailable: %s",
+                        public_exc,
+                    )
+
                 sqlite_players = import_sqlite_current_players()
 
                 adp_info["sqlite_imported"] = bool(sqlite_adp.get("ok"))
+                adp_info["public_adp_imported"] = bool(
+                    public_adp and public_adp.get("ok")
+                )
+                adp_info["public_adp_count"] = (
+                    public_adp.get("count", 0) if public_adp else 0
+                )
                 adp_info["sqlite_adp_count"] = sqlite_adp.get("count", 0)
                 adp_info["sqlite_received_count"] = sqlite_adp.get(
                     "received_count", 0

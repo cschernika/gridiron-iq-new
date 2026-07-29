@@ -6,6 +6,7 @@ import json
 
 from player_research_db import (
     build_everything,
+    import_public_adp,
     import_adp,
     import_all_history,
     import_current_players,
@@ -27,6 +28,7 @@ def main() -> None:
     parser.add_argument("--players", action="store_true")
     parser.add_argument("--projections", action="store_true")
     parser.add_argument("--adp", choices=["ESPN", "YAHOO", "BOTH"])
+    parser.add_argument("--public-adp", choices=["ESPN", "YAHOO", "BOTH"])
     args = parser.parse_args()
 
     init_database()
@@ -47,6 +49,10 @@ def main() -> None:
             result["espn_adp"] = import_adp("ESPN")
         if args.adp in {"YAHOO", "BOTH"}:
             result["yahoo_adp"] = import_adp("YAHOO")
+        if args.public_adp in {"ESPN", "BOTH"}:
+            result["public_espn_adp"] = import_public_adp("ESPN")
+        if args.public_adp in {"YAHOO", "BOTH"}:
+            result["public_yahoo_adp"] = import_public_adp("YAHOO")
 
     print(json.dumps(result, indent=2))
 

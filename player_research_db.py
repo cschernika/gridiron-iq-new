@@ -12,6 +12,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -791,11 +792,265 @@ def _adp_candidates(platform: str) -> list[Path]:
 
 
 
+
+class _PublicAdpTableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tables: list[list[list[str]]] = []
+        self._table: list[list[str]] | None = None
+        self._row: list[str] | None = None
+        self._cell_parts: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag == "table":
+            self._table = []
+        elif tag == "tr" and self._table is not None:
+            self._row = []
+        elif tag in {"th", "td"} and self._row is not None:
+            self._cell_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._cell_parts is not None:
+            self._cell_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in {"th", "td"} and self._cell_parts is not None:
+            value = re.sub(r"\s+", " ", " ".join(self._cell_parts)).strip()
+            if self._row is not None:
+                self._row.append(value)
+            self._cell_parts = None
+        elif tag == "tr" and self._row is not None:
+            if self._table is not None and any(cell.strip() for cell in self._row):
+                self._table.append(self._row)
+            self._row = None
+        elif tag == "table" and self._table is not None:
+            if self._table:
+                self.tables.append(self._table)
+            self._table = None
+
+
+def _clean_public_name(value: Any) -> str:
+    text = str(value or "")
+    text = re.sub(r"\([^)]*\)", " ", text)
+    text = re.sub(r"\b[A-Z]\.\s+(?=[A-Z][a-z])", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # FantasyPros repeats an abbreviated version after the full name.
+    # Keep the first name sequence before a duplicate initial/surname pattern.
+    duplicate = re.search(r"\s+[A-Z]\.\s+[A-Z][A-Za-z'’-]+(?:\s|$)", text)
+    if duplicate:
+        text = text[:duplicate.start()].strip()
+
+    return text
+
+
+def _parse_adp_number(value: Any) -> float | None:
+    text = str(value or "").strip().replace(",", "")
+    if text in {"", "-", "—", "–", "NR", "N/A"}:
+        return None
+    match = re.search(r"\d+(?:\.\d+)?", text)
+    if not match:
+        return None
+    try:
+        number = float(match.group(0))
+        return number if 0 < number < 999 else None
+    except Exception:
+        return None
+
+
+def _find_header_column(header: list[str], *names: str) -> int | None:
+    normalized = [re.sub(r"\s+", " ", cell).strip().upper() for cell in header]
+    for name in names:
+        wanted = name.upper()
+        for index, value in enumerate(normalized):
+            if value == wanted or value.startswith(wanted + " "):
+                return index
+    return None
+
+
+def _parse_public_adp_html(
+    html_text: str,
+    *,
+    platform: str,
+    source_name: str,
+) -> dict[str, Any]:
+    parser = _PublicAdpTableParser()
+    parser.feed(html_text)
+
+    platform = platform.upper()
+    platform_headers = (
+        ("ESPN",)
+        if platform == "ESPN"
+        else ("Y!", "YAHOO", "YAHOO!")
+    )
+
+    selected = None
+    header_index = None
+    header = None
+
+    for table in parser.tables:
+        for index, row in enumerate(table[:10]):
+            player_col = _find_header_column(row, "PLAYER")
+            platform_col = _find_header_column(row, *platform_headers)
+            if player_col is not None and platform_col is not None:
+                selected = table
+                header_index = index
+                header = row
+                break
+        if selected is not None:
+            break
+
+    if selected is None or header is None or header_index is None:
+        raise RuntimeError(
+            f"{source_name} did not contain a recognizable {platform} ADP table."
+        )
+
+    player_col = _find_header_column(header, "PLAYER")
+    platform_col = _find_header_column(header, *platform_headers)
+    position_col = _find_header_column(header, "POS", "POSITION")
+    team_col = _find_header_column(header, "TEAM")
+    rank_col = _find_header_column(header, "RANK", "ADP")
+
+    if player_col is None or platform_col is None:
+        raise RuntimeError("Required player and platform columns were missing.")
+
+    players: dict[str, dict[str, Any]] = {}
+
+    for row in selected[header_index + 1:]:
+        if len(row) <= max(player_col, platform_col):
+            continue
+
+        name = _clean_public_name(row[player_col])
+        adp_value = _parse_adp_number(row[platform_col])
+
+        if not name or adp_value is None:
+            continue
+
+        position_text = (
+            str(row[position_col]).upper().strip()
+            if position_col is not None and len(row) > position_col
+            else ""
+        )
+        match = re.match(r"(QB|RB|WR|TE|K|DST|DEF)[-\s]?(\d+)?", position_text)
+        position = ""
+        position_adp = ""
+        if match:
+            position = "DEF" if match.group(1) == "DST" else match.group(1)
+            if match.group(2):
+                position_adp = f"{position}{match.group(2)}"
+
+        team = (
+            str(row[team_col]).upper().strip()
+            if team_col is not None and len(row) > team_col
+            else ""
+        )
+
+        players[_norm(name)] = {
+            "name": name,
+            "position": position,
+            "position_adp": position_adp,
+            "team": team,
+            "adp": adp_value,
+            "rank": (
+                _parse_adp_number(row[rank_col])
+                if rank_col is not None and len(row) > rank_col
+                else None
+            ),
+        }
+
+    if len(players) < 50:
+        raise RuntimeError(
+            f"{source_name} returned only {len(players)} usable {platform} rows."
+        )
+
+    return {
+        "season": 2026,
+        "platform": platform,
+        "source": source_name,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "players": players,
+    }
+
+
+def fetch_public_adp(platform: str = "ESPN") -> dict[str, Any]:
+    platform = str(platform or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        raise ValueError("Platform must be ESPN or YAHOO.")
+
+    sources = []
+
+    if platform == "ESPN":
+        sources.append(
+            (
+                "FantasyPros public 2026 PPR ESPN ADP",
+                "https://www.fantasypros.com/nfl/adp/ppr-overall.php",
+            )
+        )
+    else:
+        sources.append(
+            (
+                "FantasyPros public 2026 Half-PPR Yahoo ADP",
+                "https://www.fantasypros.com/nfl/adp/half-point-ppr-overall.php",
+            )
+        )
+
+    sources.append(
+        (
+            f"4for4 public 2026 {platform} ADP",
+            "https://www.4for4.com/adp",
+        )
+    )
+
+    errors = []
+    for source_name, url in sources:
+        try:
+            response = requests.get(
+                url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 Chrome/150 Safari/537.36"
+                    ),
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Cache-Control": "no-cache",
+                },
+                timeout=(10, 45),
+            )
+            response.raise_for_status()
+
+            payload = _parse_public_adp_html(
+                response.text,
+                platform=platform,
+                source_name=source_name,
+            )
+            return payload
+        except Exception as exc:
+            errors.append(f"{source_name}: {exc}")
+
+    raise RuntimeError(" | ".join(errors))
+
+
+def import_public_adp(platform: str = "ESPN") -> dict[str, Any]:
+    payload = fetch_public_adp(platform)
+    return import_adp_payload(
+        platform,
+        payload,
+        source_name=payload.get("source") or f"{platform} public ADP",
+        replace_existing=False,
+        minimum_rows=50,
+    )
+
+
 def import_adp_payload(
     platform: str,
     payload: dict[str, Any],
     *,
     source_name: str = "",
+    replace_existing: bool = True,
+    minimum_rows: int = 1,
 ) -> dict[str, Any]:
     """
     Insert an already-fetched ADP payload directly into SQLite.
@@ -905,6 +1160,19 @@ def import_adp_payload(
             }
         )
 
+    if len(prepared) < max(1, int(minimum_rows)):
+        return {
+            "ok": False,
+            "platform": platform,
+            "count": 0,
+            "received_count": len(raw_players),
+            "usable_count": len(prepared),
+            "message": (
+                f"Rejected incomplete {platform} ADP payload: "
+                f"only {len(prepared)} usable rows."
+            ),
+        }
+
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in prepared:
         if row["position"]:
@@ -973,10 +1241,11 @@ def import_adp_payload(
             player_rows,
         )
 
-        connection.execute(
-            "DELETE FROM adp WHERE season=2026 AND platform=?",
-            (platform,),
-        )
+        if replace_existing:
+            connection.execute(
+                "DELETE FROM adp WHERE season=2026 AND platform=?",
+                (platform,),
+            )
 
         connection.executemany(
             """
@@ -985,6 +1254,15 @@ def import_adp_payload(
                 rank_value, source, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(player_key, season, platform) DO UPDATE SET
+                adp=excluded.adp,
+                position_adp=CASE
+                    WHEN excluded.position_adp<>'' THEN excluded.position_adp
+                    ELSE adp.position_adp
+                END,
+                rank_value=COALESCE(excluded.rank_value, adp.rank_value),
+                source=excluded.source,
+                updated_at=excluded.updated_at
             """,
             adp_rows,
         )
@@ -1320,18 +1598,27 @@ def import_current_api():
 def import_adp_api():
     body = request.get_json(silent=True) or {}
     platform = str(body.get("platform") or "ESPN").upper()
+
     try:
+        result = import_public_adp(platform)
+    except Exception as public_exc:
+        current_app.logger.warning(
+            "Public %s ADP import failed: %s",
+            platform,
+            public_exc,
+        )
         result = import_adp(platform)
-        if result.get("ok"):
-            result["current_player_count"] = import_current_players()
-            result["message"] = (
-                f"Imported {result.get('count', 0)} {platform} ADP rows "
-                "and refreshed current teams."
-            )
-        return jsonify(result), 200 if result.get("ok") else 409
-    except Exception as exc:
-        current_app.logger.exception("Player database ADP import failed")
-        return jsonify(ok=False, error=str(exc)), 500
+        if not result.get("ok"):
+            result["public_error"] = str(public_exc)
+
+    if result.get("ok"):
+        result["current_player_count"] = import_current_players()
+        result["message"] = (
+            f"SQLite now contains {result.get('count', 0)} imported "
+            f"{platform} ADP rows from {result.get('source', 'the data source')}."
+        )
+
+    return jsonify(result), 200 if result.get("ok") else 409
 
 
 @bp.post("/api/player-research-db/import-projections")
