@@ -153,6 +153,10 @@
           </section>
           <section class="pr-detail-card"><h3>2025 Statistics</h3><div id="pr-detail-stats" class="pr-detail-stats"></div></section>
           <section class="pr-detail-card">
+            <h3>2026 Projected Statistics</h3>
+            <div id="pr-detail-projected-stats" class="pr-detail-stats"></div>
+          </section>
+          <section class="pr-detail-card">
             <div class="pr-news-heading">
               <h3>Season History</h3>
               <button id="pr-load-career" class="pr-secondary-button" type="button">Load all seasons</button>
@@ -708,6 +712,7 @@
 
 
   let activePlayerName = "";
+  const careerLoadsAttempted = new Set();
 
   function closePlayerDrawer() {
     $("pr-player-overlay").hidden = true;
@@ -722,7 +727,7 @@
     return n.toLocaleString(undefined, {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
   }
 
-  async function openPlayerDrawer(playerName) {
+  async function openPlayerDrawer(playerName, skipAutomaticCareerLoad = false) {
     activePlayerName = playerName;
     $("pr-player-overlay").hidden = false;
     $("pr-player-drawer").hidden = false;
@@ -752,45 +757,98 @@
       ];
       $("pr-detail-stats").innerHTML = fields.map(([label,value]) => `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value,label==="PPR points"?1:0)}</strong></div>`).join("");
 
+      const projectedFields = [
+        ["Games", projection.games],
+        ["PPR points", projection.fantasy_points_ppr],
+        ["Pass yards", projection.passing_yards],
+        ["Pass TD", projection.passing_tds],
+        ["Interceptions", projection.interceptions],
+        ["Carries", projection.carries],
+        ["Rush yards", projection.rushing_yards],
+        ["Rush TD", projection.rushing_tds],
+        ["Targets", projection.targets],
+        ["Receptions", projection.receptions],
+        ["Rec yards", projection.receiving_yards],
+        ["Rec TD", projection.receiving_tds]
+      ];
+      $("pr-detail-projected-stats").innerHTML = projectedFields.map(
+        ([label, value]) => `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value, label === "PPR points" ? 1 : 0)}</strong></div>`
+      ).join("");
+
       const history = profile.history || [];
       $("pr-detail-history").innerHTML = history.length ? `<table class="pr-history-table"><thead><tr><th>Season</th><th>Games</th><th>PPR</th><th>Rush Yds</th><th>Rec Yds</th><th>Pass Yds</th></tr></thead><tbody>${history.slice().reverse().map(s=>`<tr><td>${s.season}</td><td>${readable(s.games)}</td><td>${readable(s.fantasy_points_ppr,1)}</td><td>${readable(s.rushing_yards)}</td><td>${readable(s.receiving_yards)}</td><td>${readable(s.passing_yards)}</td></tr>`).join("")}</tbody></table>` : '<p class="pr-muted">Older season files have not been loaded.</p>';
 
-      $("pr-detail-injury").textContent = bio.injury_status || profile.injury?.status || "No current injury designation.";
-      $("pr-detail-news").innerHTML = profile.news_available ? '<p class="pr-muted">Select Load news for current updates.</p>' : '<p class="pr-muted">Current news is loaded from ESPN and Google News.</p>';
+      $("pr-detail-injury").textContent =
+        bio.injury_status
+        || profile.injury?.status
+        || "No current injury designation reported by the current player directory.";
+
+      $("pr-detail-news").innerHTML =
+        '<p class="pr-muted">Select Load news for current updates.</p>';
+
       $("pr-detail-loading").hidden = true;
       $("pr-detail-content").hidden = false;
+
+      if (
+        !skipAutomaticCareerLoad
+        && history.length <= 1
+        && !careerLoadsAttempted.has(playerName)
+      ) {
+        careerLoadsAttempted.add(playerName);
+        loadCareerHistory(bio.years_exp, true);
+      }
     } catch (error) {
       $("pr-detail-loading").textContent = error.message;
     }
   }
 
-  async function loadCareerHistory() {
+  async function loadCareerHistory(yearsExperience = null, automatic = false) {
     const button = $("pr-load-career");
     const progress = $("pr-career-progress");
     button.disabled = true;
+
+    const experience = Number(yearsExperience);
+    const firstSeason = Number.isFinite(experience) && experience > 0
+      ? Math.max(2005, 2025 - Math.ceil(experience) + 1)
+      : 2015;
+
     const seasons = [];
-    for (let season = 2005; season <= 2024; season += 1) seasons.push(season);
+    for (let season = firstSeason; season <= 2024; season += 1) {
+      seasons.push(season);
+    }
 
     try {
       for (let index = 0; index < seasons.length; index += 1) {
         const season = seasons[index];
         button.textContent = `${index + 1}/${seasons.length}`;
         progress.textContent = `Loading ${season} season…`;
-        const response = await fetch(`/api/data/career-history/season/${season}`, {
-          method: "POST",
-          headers: {"Accept": "application/json", "Content-Type": "application/json"},
-          body: JSON.stringify({force: false})
-        });
+
+        const response = await fetch(
+          `/api/data/career-history/season/${season}`,
+          {
+            method: "POST",
+            headers: {
+              "Accept": "application/json",
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({force: false})
+          }
+        );
+
         const data = await response.json();
-        if (!response.ok || !data.ok) throw new Error(data.error || `Season ${season} failed.`);
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error || `Season ${season} failed.`);
+        }
       }
+
       progress.textContent = "Career history loaded. Refreshing profile…";
-      await openPlayerDrawer(activePlayerName);
+      const playerName = activePlayerName;
+      await openPlayerDrawer(playerName, true);
     } catch (error) {
       progress.textContent = `Career-history load stopped: ${error.message}`;
     } finally {
       button.disabled = false;
-      button.textContent = "Load all seasons";
+      button.textContent = "Reload career";
     }
   }
 
@@ -820,7 +878,7 @@
   $("pr-detail-close").addEventListener("click", closePlayerDrawer);
   $("pr-player-overlay").addEventListener("click", closePlayerDrawer);
   $("pr-load-news").addEventListener("click", loadPlayerNews);
-  $("pr-load-career").addEventListener("click", loadCareerHistory);
+  $("pr-load-career").addEventListener("click", () => loadCareerHistory());
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") closePlayerDrawer();
   });
