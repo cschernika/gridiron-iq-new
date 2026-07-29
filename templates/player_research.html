@@ -1,45 +1,27 @@
 {% extends "base.html" %}
 {% block title %}Player Research | Gridiron IQ{% endblock %}
 
-{% macro player_research_page() %}
-<style>
-  .prx-shell{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:100vh;background:#f4f7fb;color:#142033}
-  .prx-main{min-width:0;padding:28px}
-  .prx-page{max-width:1600px;margin:0 auto}
-  .prx-header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:18px}
-  .prx-header h1{margin:0 0 7px;font-size:36px}.prx-header p{margin:0;color:#68778c}
-  .prx-eyebrow{text-transform:uppercase;letter-spacing:.12em;font-weight:900;font-size:12px;color:#6652e8!important}
-  .prx-league{display:grid;gap:6px;min-width:270px}.prx-league label,.prx-toolbar label span{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.07em;color:#718096}
-  .prx-league select,.prx-toolbar input,.prx-toolbar select{width:100%;min-height:44px;padding:10px 12px;border:1px solid #d5dde8;border-radius:10px;background:#fff}
-  .prx-toolbar{display:grid;grid-template-columns:minmax(240px,2fr) minmax(190px,1fr) 150px auto;gap:12px;align-items:end;padding:16px;background:#fff;border:1px solid #e0e6ee;border-radius:14px}
-  .prx-toolbar label{display:grid;gap:6px}.prx-button{min-height:44px;padding:0 16px;border:0;border-radius:10px;background:#6652e8;color:#fff;font-weight:900;cursor:pointer}
-  .prx-tabs{display:flex;gap:8px;overflow:auto;margin:16px 0}.prx-tabs button{display:flex;align-items:center;gap:7px;padding:10px 14px;border:1px solid #d9e0e9;border-radius:10px;background:#fff;color:#56657a;font-weight:900;cursor:pointer;white-space:nowrap}
-  .prx-tabs button.active{background:#6652e8;border-color:#6652e8;color:#fff}.prx-tabs small{opacity:.75}
-  .prx-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.prx-summary article{padding:14px;border:1px solid #e0e6ed;border-radius:12px;background:#fff}.prx-summary span,.prx-summary strong{display:block}.prx-summary span{font-size:11px;color:#758196;text-transform:uppercase}.prx-summary strong{font-size:18px;margin-top:5px}
-  .prx-table-wrap{max-height:72vh;overflow:auto;border:1px solid #dfe5ed;border-radius:14px;background:#fff}.prx-table{width:100%;min-width:1450px;border-collapse:collapse}.prx-table th{position:sticky;top:0;z-index:2;padding:11px 10px;border-bottom:1px solid #dbe2eb;background:#f4f6fa;text-align:right;font-size:11px;color:#59677b;white-space:nowrap}.prx-table td{padding:11px 10px;border-bottom:1px solid #edf0f4;text-align:right;font-size:13px;white-space:nowrap}.prx-table th:nth-child(3),.prx-table th:nth-child(4),.prx-table th:nth-child(5),.prx-table td:nth-child(3),.prx-table td:nth-child(4),.prx-table td:nth-child(5){text-align:left}.prx-table tbody tr:hover{background:#f7f6ff}
-  .prx-player{font-weight:900}.prx-pos{display:inline-block;min-width:34px;padding:4px 6px;border-radius:6px;background:#eeecff;color:#5545c8;font-weight:900;text-align:center}.prx-muted{color:#a0a9b7}.prx-loading{text-align:center!important;padding:45px!important;color:#6e7b8f}
-  .prx-alert{margin-bottom:14px;padding:12px 14px;border:1px solid #efbdc4;border-radius:10px;background:#fdebec;color:#99293a}.prx-footer{margin-top:10px;font-size:12px;color:#718096}
-  @media(max-width:900px){.prx-shell{display:block}.prx-main{padding:18px}.prx-header{align-items:flex-start;flex-direction:column}.prx-league{width:100%}.prx-toolbar{grid-template-columns:1fr}.prx-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
-</style>
+{% block body %}
+<div class="app-shell">
+  {% set active = "player-research" %}
+  {% include "_sidebar.html" %}
 
-<div class="prx-shell">
-  {% set active='player-research' %}
-  {% include "_sidebar.html" ignore missing %}
-
-  <main class="prx-main">
-    <section class="prx-page" data-platform="{{ active_platform|default('ESPN') }}">
-      <header class="prx-header">
-        <div>
-          <p class="prx-eyebrow">Player Database</p>
+  <main class="main pr-page-main">
+    <section class="pr-page" data-platform="{{ active_platform|default('ESPN') }}">
+      <header class="pr-header">
+        <div class="pr-heading">
+          <p class="pr-eyebrow">Player Database</p>
           <h1>Player Research</h1>
           <p>Current NFL players, 2025 statistics, 2026 projections, and ADP rankings.</p>
         </div>
-        <div class="prx-league">
-          <label for="prx-league">League</label>
-          <select id="prx-league">
+
+        <div class="pr-league-control">
+          <label for="pr-league">League</label>
+          <select id="pr-league">
             {% for league in draft_leagues|default([]) %}
-              <option value="{{ league.key }}" {% if league.key == active_league_key %}selected{% endif %}>
-                {{ league.name }} · {{ league.platform }}
+              <option value="{{ league.key }}"
+                {% if league.key == active_league_key %}selected{% endif %}>
+                {{ league.name }} — {{ league.platform }}
               </option>
             {% endfor %}
           </select>
@@ -47,12 +29,17 @@
         </div>
       </header>
 
-      <div id="prx-alert" class="prx-alert" hidden></div>
+      <div id="pr-alert" class="pr-alert" hidden></div>
 
-      <section class="prx-toolbar">
-        <label><span>Search</span><input id="prx-search" type="search" placeholder="Player or team"></label>
-        <label><span>Sort</span>
-          <select id="prx-sort">
+      <section class="pr-controls">
+        <label class="pr-search-control">
+          <span>Search</span>
+          <input id="pr-search" type="search" placeholder="Search player or team">
+        </label>
+
+        <label>
+          <span>Sort</span>
+          <select id="pr-sort">
             <option value="adp">ADP</option>
             <option value="projection_2026">2026 projected points</option>
             <option value="points_2025">2025 PPR points</option>
@@ -60,146 +47,547 @@
             <option value="team">Team</option>
           </select>
         </label>
-        <label><span>Order</span>
-          <select id="prx-direction"><option value="asc">Ascending</option><option value="desc">Descending</option></select>
+
+        <label>
+          <span>Order</span>
+          <select id="pr-direction">
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
         </label>
-        <button id="prx-reload" class="prx-button" type="button">Reload table</button>
+
+        <button id="pr-reload" class="pr-primary-button" type="button">
+          Reload table
+        </button>
       </section>
 
-      <nav class="prx-tabs">
-        {% for value, label in [("", "All Players"), ("QB","QB"), ("RB","RB"), ("WR","WR"), ("TE","TE"), ("K","K"), ("DEF","DEF")] %}
-          <button type="button" data-position="{{ value }}" class="{% if selected_position|default('') == value %}active{% endif %}">
-            {{ label }} <small data-count="{{ value or 'ALL' }}">—</small>
+      <nav class="pr-tabs" aria-label="Player positions">
+        {% for value, label in [
+          ("", "All Players"),
+          ("QB", "QB"),
+          ("RB", "RB"),
+          ("WR", "WR"),
+          ("TE", "TE"),
+          ("K", "K"),
+          ("DEF", "DEF")
+        ] %}
+          <button
+            type="button"
+            data-position="{{ value }}"
+            class="{% if selected_position|default('') == value %}active{% endif %}">
+            {{ label }}
+            <small data-count="{{ value or 'ALL' }}">—</small>
           </button>
         {% endfor %}
       </nav>
 
-      <section class="prx-summary">
-        <article><span>Players shown</span><strong id="prx-count">—</strong></article>
-        <article><span>Platform</span><strong id="prx-platform">{{ active_platform|default('ESPN') }}</strong></article>
-        <article><span>2025 stats</span><strong id="prx-stats">Loading</strong></article>
-        <article><span>2026 ADP</span><strong id="prx-adp">Loading</strong></article>
+      <section class="pr-summary">
+        <article>
+          <span>Players shown</span>
+          <strong id="pr-count">—</strong>
+        </article>
+        <article>
+          <span>Platform</span>
+          <strong id="pr-platform">{{ active_platform|default('ESPN') }}</strong>
+        </article>
+        <article>
+          <span>2025 stats</span>
+          <strong id="pr-stats">Loading</strong>
+        </article>
+        <article>
+          <span>2026 ADP</span>
+          <strong id="pr-adp">Loading</strong>
+        </article>
       </section>
 
-      <div class="prx-table-wrap">
-        <table class="prx-table">
-          <thead>
-            <tr>
-              <th>ADP</th><th>Pos. ADP</th><th>Player</th><th>Team</th><th>Pos.</th>
-              <th>2025 GP</th><th>2025 PPR</th><th>Pass Yds</th><th>Pass TD</th>
-              <th>Rush Yds</th><th>Rush TD</th><th>Rec</th><th>Rec Yds</th><th>Rec TD</th>
-              <th>2026 Proj. PPR</th>
-            </tr>
-          </thead>
-          <tbody id="prx-body"><tr><td colspan="15" class="prx-loading">Loading current players…</td></tr></tbody>
-        </table>
-      </div>
-      <p id="prx-source" class="prx-footer">Loading data sources…</p>
+      <section class="pr-table-card">
+        <div class="pr-table-wrap">
+          <table class="pr-table">
+            <thead>
+              <tr>
+                <th>ADP</th>
+                <th>Pos. ADP</th>
+                <th>Player</th>
+                <th>Team</th>
+                <th>Pos.</th>
+                <th>2025 GP</th>
+                <th>2025 PPR</th>
+                <th>Pass Yds</th>
+                <th>Pass TD</th>
+                <th>Rush Yds</th>
+                <th>Rush TD</th>
+                <th>Rec</th>
+                <th>Rec Yds</th>
+                <th>Rec TD</th>
+                <th>2026 Proj. PPR</th>
+              </tr>
+            </thead>
+            <tbody id="pr-body">
+              <tr>
+                <td colspan="15" class="pr-loading">Loading current players…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <p id="pr-source" class="pr-source">Loading data sources…</p>
     </section>
   </main>
 </div>
 
+<style>
+  .pr-page-main {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .pr-page {
+    width: 100%;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding-bottom: 32px;
+    color: #142033;
+  }
+
+  .pr-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
+    gap: 30px;
+    align-items: end;
+    margin-bottom: 22px;
+  }
+
+  .pr-heading h1 {
+    margin: 0 0 8px;
+    font-size: clamp(36px, 4vw, 54px);
+    line-height: 1.02;
+  }
+
+  .pr-heading p {
+    max-width: 760px;
+    margin: 0;
+    color: #68778c;
+    font-size: 17px;
+    line-height: 1.5;
+  }
+
+  .pr-eyebrow {
+    margin: 0 0 8px !important;
+    color: #6652e8 !important;
+    font-size: 12px !important;
+    font-weight: 900;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+  }
+
+  .pr-league-control,
+  .pr-controls label {
+    display: grid;
+    gap: 7px;
+  }
+
+  .pr-league-control label,
+  .pr-controls label span {
+    color: #718096;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+
+  .pr-league-control select,
+  .pr-controls input,
+  .pr-controls select {
+    width: 100%;
+    min-height: 46px;
+    padding: 10px 13px;
+    border: 1px solid #d5dde8;
+    border-radius: 10px;
+    background: #fff;
+    color: #172033;
+    font-size: 15px;
+  }
+
+  .pr-league-control small {
+    color: #718096;
+  }
+
+  .pr-controls {
+    display: grid;
+    grid-template-columns: minmax(280px, 2fr) minmax(200px, 1fr) 170px auto;
+    gap: 14px;
+    align-items: end;
+    padding: 18px;
+    border: 1px solid #e0e6ee;
+    border-radius: 14px;
+    background: #fff;
+  }
+
+  .pr-primary-button {
+    min-height: 46px;
+    padding: 0 20px;
+    border: 0;
+    border-radius: 10px;
+    background: #6652e8;
+    color: #fff;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .pr-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin: 18px 0;
+  }
+
+  .pr-tabs button {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 74px;
+    padding: 11px 16px;
+    border: 1px solid #d9e0e9;
+    border-radius: 10px;
+    background: #fff;
+    color: #56657a;
+    font-weight: 900;
+    cursor: pointer;
+  }
+
+  .pr-tabs button.active {
+    border-color: #6652e8;
+    background: #6652e8;
+    color: #fff;
+  }
+
+  .pr-tabs small {
+    opacity: .75;
+  }
+
+  .pr-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .pr-summary article {
+    padding: 15px 17px;
+    border: 1px solid #e0e6ed;
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  .pr-summary span,
+  .pr-summary strong {
+    display: block;
+  }
+
+  .pr-summary span {
+    color: #758196;
+    font-size: 11px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+
+  .pr-summary strong {
+    margin-top: 6px;
+    font-size: 21px;
+  }
+
+  .pr-table-card {
+    width: 100%;
+    overflow: hidden;
+    border: 1px solid #dfe5ed;
+    border-radius: 14px;
+    background: #fff;
+  }
+
+  .pr-table-wrap {
+    width: 100%;
+    max-height: 70vh;
+    overflow: auto;
+  }
+
+  .pr-table {
+    width: 100%;
+    min-width: 1450px;
+    border-collapse: collapse;
+  }
+
+  .pr-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 12px 11px;
+    border-bottom: 1px solid #dbe2eb;
+    background: #f4f6fa;
+    color: #59677b;
+    font-size: 11px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .pr-table td {
+    padding: 12px 11px;
+    border-bottom: 1px solid #edf0f4;
+    font-size: 13px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .pr-table th:nth-child(3),
+  .pr-table th:nth-child(4),
+  .pr-table th:nth-child(5),
+  .pr-table td:nth-child(3),
+  .pr-table td:nth-child(4),
+  .pr-table td:nth-child(5) {
+    text-align: left;
+  }
+
+  .pr-table tbody tr:hover {
+    background: #f7f6ff;
+  }
+
+  .pr-player-name {
+    font-weight: 900;
+  }
+
+  .pr-position {
+    display: inline-block;
+    min-width: 35px;
+    padding: 4px 7px;
+    border-radius: 6px;
+    background: #eeecff;
+    color: #5545c8;
+    font-weight: 900;
+    text-align: center;
+  }
+
+  .pr-muted {
+    color: #a0a9b7;
+  }
+
+  .pr-loading {
+    padding: 48px !important;
+    color: #6e7b8f;
+    text-align: center !important;
+  }
+
+  .pr-alert {
+    margin-bottom: 15px;
+    padding: 12px 14px;
+    border: 1px solid #efbdc4;
+    border-radius: 10px;
+    background: #fdebec;
+    color: #99293a;
+  }
+
+  .pr-source {
+    margin-top: 11px;
+    color: #718096;
+    font-size: 12px;
+  }
+
+  @media (max-width: 1050px) {
+    .pr-header {
+      grid-template-columns: 1fr;
+    }
+
+    .pr-controls {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 720px) {
+    .pr-controls,
+    .pr-summary {
+      grid-template-columns: 1fr;
+    }
+
+    .pr-tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+  }
+</style>
+
 <script>
 (() => {
-  const page = document.querySelector(".prx-page");
+  "use strict";
+
+  const page = document.querySelector(".pr-page");
   if (!page) return;
 
   const state = {
-    position: document.querySelector(".prx-tabs button.active")?.dataset.position || "",
+    position: document.querySelector(".pr-tabs button.active")?.dataset.position || "",
     platform: page.dataset.platform || "ESPN",
     controller: null
   };
+
   const $ = id => document.getElementById(id);
-  const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  const fmt = (value, decimals=0) => {
-    const n = Number(value);
-    return Number.isFinite(n) && n !== 0
-      ? n.toLocaleString(undefined,{minimumFractionDigits:decimals,maximumFractionDigits:decimals})
-      : '<span class="prx-muted">—</span>';
+
+  const escapeHtml = value =>
+    String(value ?? "").replace(/[&<>"']/g, character => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[character]);
+
+  const formatNumber = (value, decimals = 0) => {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number === 0) {
+      return '<span class="pr-muted">—</span>';
+    }
+
+    return number.toLocaleString(undefined, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
   };
-  function alertMessage(message) {
-    const box = $("prx-alert");
-    box.hidden = !message;
-    box.textContent = message || "";
+
+  function showAlert(message) {
+    const alert = $("pr-alert");
+    alert.hidden = !message;
+    alert.textContent = message || "";
   }
-  function render(players) {
-    $("prx-body").innerHTML = players.length ? players.map(p => `
+
+  function renderRows(players) {
+    const body = $("pr-body");
+
+    if (!players.length) {
+      body.innerHTML =
+        '<tr><td colspan="15" class="pr-loading">No matching players were found.</td></tr>';
+      return;
+    }
+
+    body.innerHTML = players.map(player => `
       <tr>
-        <td>${Number(p.adp)<999?fmt(p.adp,1):'<span class="prx-muted">NR</span>'}</td>
-        <td>${esc(p.position_adp||"—")}</td>
-        <td><span class="prx-player">${esc(p.name)}</span></td>
-        <td>${esc(p.team||"FA")}</td>
-        <td><span class="prx-pos">${esc(p.position)}</span></td>
-        <td>${fmt(p.games)}</td><td>${fmt(p.fantasy_points_ppr,1)}</td>
-        <td>${fmt(p.passing_yards)}</td><td>${fmt(p.passing_tds)}</td>
-        <td>${fmt(p.rushing_yards)}</td><td>${fmt(p.rushing_tds)}</td>
-        <td>${fmt(p.receptions)}</td><td>${fmt(p.receiving_yards)}</td>
-        <td>${fmt(p.receiving_tds)}</td><td><strong>${fmt(p.proj_2026_ppr,1)}</strong></td>
-      </tr>`).join("") : '<tr><td colspan="15" class="prx-loading">No players found.</td></tr>';
+        <td>${Number(player.adp) < 999
+          ? formatNumber(player.adp, 1)
+          : '<span class="pr-muted">NR</span>'}</td>
+        <td>${escapeHtml(player.position_adp || "—")}</td>
+        <td><span class="pr-player-name">${escapeHtml(player.name)}</span></td>
+        <td>${escapeHtml(player.team || "FA")}</td>
+        <td><span class="pr-position">${escapeHtml(player.position)}</span></td>
+        <td>${formatNumber(player.games)}</td>
+        <td>${formatNumber(player.fantasy_points_ppr, 1)}</td>
+        <td>${formatNumber(player.passing_yards)}</td>
+        <td>${formatNumber(player.passing_tds)}</td>
+        <td>${formatNumber(player.rushing_yards)}</td>
+        <td>${formatNumber(player.rushing_tds)}</td>
+        <td>${formatNumber(player.receptions)}</td>
+        <td>${formatNumber(player.receiving_yards)}</td>
+        <td>${formatNumber(player.receiving_tds)}</td>
+        <td><strong>${formatNumber(player.proj_2026_ppr, 1)}</strong></td>
+      </tr>
+    `).join("");
   }
-  async function load() {
+
+  async function loadPlayers() {
     state.controller?.abort();
     state.controller = new AbortController();
-    $("prx-body").innerHTML = '<tr><td colspan="15" class="prx-loading">Loading player data…</td></tr>';
-    alertMessage("");
-    const params = new URLSearchParams({
+
+    $("pr-body").innerHTML =
+      '<tr><td colspan="15" class="pr-loading">Loading player data…</td></tr>';
+    showAlert("");
+
+    const parameters = new URLSearchParams({
       position: state.position,
       platform: state.platform,
-      q: $("prx-search").value.trim(),
-      sort: $("prx-sort").value,
-      direction: $("prx-direction").value,
+      q: $("pr-search").value.trim(),
+      sort: $("pr-sort").value,
+      direction: $("pr-direction").value,
       limit: "2000"
     });
+
     try {
-      const response = await fetch(`/api/player-research/table?${params}`, {
+      const response = await fetch(`/api/player-research/table?${parameters}`, {
         signal: state.controller.signal,
-        headers: {"Accept":"application/json"}
+        headers: { "Accept": "application/json" }
       });
-      const type = response.headers.get("content-type") || "";
-      if (!type.includes("application/json")) throw new Error(`Server returned ${response.status} instead of JSON.`);
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Server returned ${response.status} instead of JSON.`);
+      }
+
       const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data.error || data.message || "Player data could not be loaded.");
-      render(data.players || []);
-      $("prx-count").textContent = data.count || 0;
-      $("prx-platform").textContent = data.platform || state.platform;
-      $("prx-stats").textContent = data.updated_at?.stats_2025 ? "Loaded" : "Not loaded";
-      $("prx-adp").textContent = data.updated_at?.adp_2026 ? "Loaded" : "Not loaded";
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.error || data.message || "Player data could not be loaded."
+        );
+      }
+
+      renderRows(data.players || []);
+
+      $("pr-count").textContent = data.count ?? 0;
+      $("pr-platform").textContent = data.platform || state.platform;
+      $("pr-stats").textContent =
+        data.updated_at?.stats_2025 ? "Loaded" : "Not loaded";
+      $("pr-adp").textContent =
+        data.updated_at?.adp_2026 ? "Loaded" : "Not loaded";
+
       document.querySelectorAll("[data-count]").forEach(node => {
         if (data.selected_position === "ALL") {
-          node.textContent = node.dataset.count === "ALL" ? data.count : (data.position_counts?.[node.dataset.count] || 0);
+          node.textContent = node.dataset.count === "ALL"
+            ? data.count
+            : (data.position_counts?.[node.dataset.count] || 0);
         } else if (node.dataset.count === data.selected_position) {
           node.textContent = data.count;
         }
       });
-      $("prx-source").textContent =
+
+      $("pr-source").textContent =
         `2025 stats: ${data.sources?.stats_2025 || "not loaded"} · ` +
         `2026 projections: ${data.sources?.projections_2026 || "not loaded"} · ` +
         `ADP: ${data.sources?.adp_2026 || "not loaded"}`;
-      if (data.warnings?.length) alertMessage(data.warnings.join(" "));
+
+      if (data.warnings?.length) {
+        showAlert(data.warnings.join(" "));
+      }
     } catch (error) {
       if (error.name === "AbortError") return;
-      render([]);
-      alertMessage(error.message);
+      renderRows([]);
+      showAlert(error.message);
     }
   }
 
-  let timer;
-  $("prx-search").addEventListener("input", () => { clearTimeout(timer); timer=setTimeout(load,250); });
-  $("prx-sort").addEventListener("change", load);
-  $("prx-direction").addEventListener("change", load);
-  $("prx-reload").addEventListener("click", load);
-  document.querySelectorAll(".prx-tabs button").forEach(button => button.addEventListener("click", () => {
-    document.querySelectorAll(".prx-tabs button").forEach(x => x.classList.toggle("active",x===button));
-    state.position=button.dataset.position||"";
-    load();
-  }));
-  $("prx-league")?.addEventListener("change", e => {
-    const url = new URL(location.href); url.searchParams.set("league",e.target.value); location.href=url;
+  let searchTimer;
+
+  $("pr-search").addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadPlayers, 250);
   });
-  load();
+
+  $("pr-sort").addEventListener("change", loadPlayers);
+  $("pr-direction").addEventListener("change", loadPlayers);
+  $("pr-reload").addEventListener("click", loadPlayers);
+
+  document.querySelectorAll(".pr-tabs button").forEach(button => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll(".pr-tabs button").forEach(tab => {
+        tab.classList.toggle("active", tab === button);
+      });
+
+      state.position = button.dataset.position || "";
+      loadPlayers();
+    });
+  });
+
+  $("pr-league").addEventListener("change", event => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("league", event.target.value);
+    window.location.href = url.toString();
+  });
+
+  loadPlayers();
 })();
 </script>
-{% endmacro %}
-
-{% block body %}{{ player_research_page() }}{% endblock %}
-{% block content %}{{ player_research_page() }}{% endblock %}
+{% endblock %}
