@@ -709,6 +709,15 @@ def espn_sync():
         league={"platform":"ESPN","league_id":str(data["league_id"]),"league_name":settings["name"],"season":int(data["season"]),"teams":len(teams),"current_week":getattr(espn,"current_week",None),"synced_at":datetime.now(timezone.utc).isoformat()}
         save_snapshot({"league":league,"settings":settings,"teams":teams})
 
+        # Keep the ESPN credentials in this user's signed Flask session so
+        # Player Research can perform an authenticated ADP refresh later.
+        session["espn_adp_credentials"] = {
+            "league_id": str(data["league_id"]),
+            "season": int(data["season"]),
+            "swid": str(data["swid"]).strip(),
+            "espn_s2": str(data["espn_s2"]).strip(),
+        }
+
         adp_info = {
             "ok": False,
             "player_count": 0,
@@ -3396,11 +3405,11 @@ def player_research_table_api():
     direction = request.args.get("direction", "asc").strip().lower()
 
     try:
-        limit = min(2500, max(1, int(request.args.get("limit", 500))))
+        limit = min(2500, max(1, int(request.args.get("limit", 1000))))
     except Exception:
         limit = 2000
 
-    rows = _pr_position_rows(position, limit=min(limit, 500), platform=platform)
+    rows = _pr_position_rows(position, limit=min(limit, 1000), platform=platform)
 
     if query:
         rows = [
@@ -3456,7 +3465,11 @@ def player_research_table_api():
             "stats_2025": stats.get("updated_at", ""),
             "adp_2026": adp.get("updated_at", ""),
         },
-        warnings=[x for x in [adp.get("warning", "")] if x],
+        warnings=(
+            []
+            if adp.get("players")
+            else [x for x in [adp.get("warning", "")] if x]
+        ),
     )
 
 @app.get("/api/diagnostics/player-research")
@@ -3524,16 +3537,20 @@ def _fetch_espn_native_adp(league_id=None, season=2026, swid=None, espn_s2=None)
     """
     season = int(season or 2026)
 
-    urls = [
-        # ESPN default PPR player pool. ESPN sometimes blocks one hostname
-        # while allowing its read-only API hostname.
+    urls = []
+
+    # When the user has synced ESPN successfully, use the authenticated league
+    # endpoint first. It is substantially more reliable than anonymous access.
+    if league_id and swid and espn_s2:
+        urls.extend([
+            f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leagues/{int(league_id)}?view=kona_player_info",
+            f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leagues/{int(league_id)}?view=kona_player_info",
+        ])
+
+    urls.extend([
         f"https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3?view=kona_player_info",
         f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leaguedefaults/3?view=kona_player_info",
-    ]
-    if league_id:
-        urls.append(
-            f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{season}/segments/0/leagues/{int(league_id)}?view=kona_player_info"
-        )
+    ])
 
     fantasy_filter = {
         "players": {
@@ -4600,63 +4617,36 @@ def _fast_2026_projection_from_2025(stats, position):
     return projected
 
 
-def _pr_position_rows(position="", limit=500, platform="ESPN"):
-    """Merge current players, 2025 stats, 2026 ADP and master projections."""
+def _pr_position_rows(position="", limit=1000, platform="ESPN"):
+    """
+    Build the current fantasy-player universe.
+
+    Current active players and current ADP form the pool. Historical statistics
+    and the master projection file only enrich matching current players; they
+    cannot add retired or stale players to the table.
+    """
     position = str(position or "").upper()
     platform = str(platform or "ESPN").upper()
 
-    stats_players = (_stats_2025_snapshot().get("players", {}) or {})
-    adp_players = (_platform_2026_adp_data(platform).get("players", {}) or {})
+    stats_players = _stats_2025_snapshot().get("players", {}) or {}
+    adp_players = _platform_2026_adp_data(platform).get("players", {}) or {}
+
     master_payload = _master_players_2026()
     master_players = (
         master_payload.get("players", {})
         if isinstance(master_payload, dict)
         else {}
     )
-    directory = _pr_players()
 
+    directory = _pr_players()
     pool = {}
 
-    def merge(norm, values, source):
-        if not norm or not isinstance(values, dict):
-            return
-        row = pool.setdefault(norm, {"player_key": norm, "data_sources": set()})
-        row["data_sources"].add(source)
-        for key, value in values.items():
-            if value in (None, "", [], {}):
-                continue
-            if key not in row or source in {"master", "directory"}:
-                row[key] = value
-
-    for norm, stats in stats_players.items():
-        merge(norm, {
-            "name": stats.get("name"),
-            "position": stats.get("position"),
-            "team_2025": stats.get("team"),
-            "stats_2025": stats,
-        }, "stats")
-
-    for norm, adp in adp_players.items():
-        merge(norm, {
-            "name": adp.get("name") or adp.get("player_name"),
-            "position": adp.get("position") or adp.get("pos"),
-            "team": adp.get("team"),
-            "adp_row": adp,
-        }, "adp")
-
-    for norm, master in master_players.items():
-        if not isinstance(master, dict):
-            continue
-        merge(norm, {
-            **master,
-            "name": master.get("name") or master.get("full_name"),
-            "master_row": master,
-        }, "master")
-
+    # Current active players are the primary universe.
     for player_id, current in directory.items():
         if not isinstance(current, dict):
             continue
-        name = (
+
+        name = str(
             current.get("full_name")
             or " ".join(
                 value for value in [
@@ -4664,78 +4654,111 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
                     current.get("last_name"),
                 ] if value
             )
+            or ""
         ).strip()
         if not name:
             continue
 
-        current_position = str(
+        pos = str(
             current.get("position")
             or ((current.get("fantasy_positions") or [""])[0])
-            or ""
-        ).upper()
-        if current_position == "DST":
-            current_position = "DEF"
-
-        current_status = str(current.get("status") or "").lower()
-        current_team = str(current.get("team") or "").upper()
-        current_is_relevant = (
-            current_position in {"QB", "RB", "WR", "TE", "K", "DEF"}
-            and (
-                bool(current_team)
-                or current_status in {
-                    "active",
-                    "injured reserve",
-                    "pup",
-                    "suspended",
-                }
-            )
-        )
-        if not current_is_relevant:
-            continue
-
-        merge(_pr_norm(name), {
-            "player_id": str(player_id),
-            "name": name,
-            "position": current.get("position")
-                or ((current.get("fantasy_positions") or [""])[0]),
-            "team": current.get("team"),
-            "age": current.get("age"),
-            "college": current.get("college"),
-            "years_exp": current.get("years_exp"),
-            "status": current.get("status"),
-            "injury_status": current.get("injury_status"),
-            "rookie": bool(current.get("rookie")),
-        }, "directory")
-
-    rows = []
-    for norm, player in pool.items():
-        name = str(player.get("name") or "").strip()
-        if not name:
-            continue
-
-        stats = player.get("stats_2025") or stats_players.get(norm, {}) or {}
-        adp_row = player.get("adp_row") or adp_players.get(norm, {}) or {}
-        master = player.get("master_row") or master_players.get(norm, {}) or {}
-
-        pos = str(
-            player.get("position")
-            or master.get("position")
-            or stats.get("position")
             or ""
         ).upper()
         if pos == "DST":
             pos = "DEF"
         if pos not in {"QB", "RB", "WR", "TE", "K", "DEF"}:
             continue
+
+        active_flag = current.get("active")
+        status = str(current.get("status") or "").lower()
+        team = str(current.get("team") or "").upper()
+
+        # Sleeper's full player endpoint includes retired and inactive records.
+        # Require an explicit active flag or a current active roster status.
+        is_current = (
+            active_flag is True
+            or status in {
+                "active",
+                "injured reserve",
+                "pup",
+                "physically unable to perform",
+                "suspended",
+                "non-football injury",
+            }
+        )
+
+        if not is_current:
+            continue
+
+        norm = _pr_norm(name)
+        pool[norm] = {
+            "player_key": norm,
+            "player_id": str(player_id),
+            "name": name,
+            "position": pos,
+            "team": team or "FA",
+            "age": current.get("age"),
+            "college": current.get("college"),
+            "years_exp": current.get("years_exp"),
+            "status": current.get("status"),
+            "injury_status": current.get("injury_status"),
+            "rookie": bool(current.get("rookie")),
+            "data_sources": {"directory"},
+        }
+
+    # Add ranked ADP players that may not yet exist in the current directory,
+    # such as newly added rookies or defenses.
+    for norm, adp in adp_players.items():
+        if not isinstance(adp, dict):
+            continue
+
+        try:
+            adp_value = float(adp.get("adp", 999) or 999)
+        except Exception:
+            adp_value = 999
+
+        if adp_value >= 999:
+            continue
+
+        if norm not in pool:
+            adp_pos = str(adp.get("position") or adp.get("pos") or "").upper()
+            if adp_pos == "DST":
+                adp_pos = "DEF"
+            if adp_pos not in {"QB", "RB", "WR", "TE", "K", "DEF"}:
+                continue
+
+            pool[norm] = {
+                "player_key": norm,
+                "player_id": str(adp.get("player_id") or ""),
+                "name": adp.get("name") or adp.get("player_name") or norm,
+                "position": adp_pos,
+                "team": adp.get("team") or "FA",
+                "status": "ranked",
+                "injury_status": "",
+                "rookie": False,
+                "data_sources": {"adp"},
+            }
+
+        pool[norm]["adp_row"] = adp
+        pool[norm]["data_sources"].add("adp")
+
+    rows = []
+
+    for norm, player in pool.items():
+        pos = str(player.get("position") or "").upper()
         if position and pos != position:
             continue
+
+        stats = stats_players.get(norm, {}) or {}
+        master = master_players.get(norm, {}) or {}
+        adp_row = player.get("adp_row") or adp_players.get(norm, {}) or {}
 
         try:
             adp = float(adp_row.get("adp", 999) or 999)
         except Exception:
             adp = 999.0
 
-        projection = master.get("projection") or player.get("projection") or {}
+        projection = master.get("projection") or {}
         if not isinstance(projection, dict):
             projection = {}
 
@@ -4748,44 +4771,23 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
                 or projection.get("points")
                 or 0
             ),
-            "passing_yards": (
-                projection.get("pass_yards")
-                or projection.get("passing_yards")
-                or 0
-            ),
-            "passing_tds": (
-                projection.get("pass_tds")
-                or projection.get("passing_tds")
-                or 0
-            ),
+            "passing_yards": projection.get("passing_yards")
+                or projection.get("pass_yards") or 0,
+            "passing_tds": projection.get("passing_tds")
+                or projection.get("pass_tds") or 0,
             "interceptions": projection.get("interceptions") or 0,
-            "carries": (
-                projection.get("rush_attempts")
-                or projection.get("carries")
-                or 0
-            ),
-            "rushing_yards": (
-                projection.get("rush_yards")
-                or projection.get("rushing_yards")
-                or 0
-            ),
-            "rushing_tds": (
-                projection.get("rush_tds")
-                or projection.get("rushing_tds")
-                or 0
-            ),
+            "carries": projection.get("carries")
+                or projection.get("rush_attempts") or 0,
+            "rushing_yards": projection.get("rushing_yards")
+                or projection.get("rush_yards") or 0,
+            "rushing_tds": projection.get("rushing_tds")
+                or projection.get("rush_tds") or 0,
             "targets": projection.get("targets") or 0,
             "receptions": projection.get("receptions") or 0,
-            "receiving_yards": (
-                projection.get("receiving_yards")
-                or projection.get("rec_yards")
-                or 0
-            ),
-            "receiving_tds": (
-                projection.get("receiving_tds")
-                or projection.get("rec_tds")
-                or 0
-            ),
+            "receiving_yards": projection.get("receiving_yards")
+                or projection.get("rec_yards") or 0,
+            "receiving_tds": projection.get("receiving_tds")
+                or projection.get("rec_tds") or 0,
         }
 
         try:
@@ -4793,23 +4795,21 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
                 projected_stats.get("fantasy_points_ppr", 0) or 0
             )
         except Exception:
-            projection_total = 0.0
+            projection_total = 0
 
         if projection_total <= 0:
             projected_stats = _fast_2026_projection_from_2025(stats, pos)
 
         rows.append({
             "player_key": norm,
-            "player_id": player.get("player_id") or master.get("sleeper_id") or "",
-            "name": name,
+            "player_id": player.get("player_id") or "",
+            "name": player.get("name") or norm,
             "team": master.get("team") or player.get("team")
                 or adp_row.get("team") or stats.get("team") or "FA",
             "position": pos,
             "adp": round(adp, 1) if adp < 999 else 999,
             "position_adp": adp_row.get("position_adp")
-                or adp_row.get("positional_rank")
-                or adp_row.get("pos_rank")
-                or "",
+                or adp_row.get("positional_rank") or "",
             "games": stats.get("games", 0),
             "fantasy_points": stats.get("fantasy_points", 0),
             "fantasy_points_ppr": stats.get(
@@ -4858,7 +4858,8 @@ def _pr_position_rows(position="", limit=500, platform="ESPN"):
         -float(row.get("proj_2026_ppr", 0) or 0),
         row.get("name", ""),
     ))
-    return rows[:max(1, min(int(limit or 500), 1000))]
+
+    return rows[:max(1, min(int(limit or 1000), 1000))]
 
 
 def player_research_adp_status():
@@ -4895,55 +4896,88 @@ def player_research_adp_refresh():
     if platform not in {"ESPN", "YAHOO"}:
         platform = "ESPN"
 
-    app.logger.info(
-        "Starting 2026 ADP refresh for platform=%s",
-        platform,
-    )
+    app.logger.info("Starting 2026 ADP refresh platform=%s", platform)
 
     try:
-        data = _platform_2026_adp_data(platform, force=True)
+        if platform == "ESPN":
+            credentials = session.get("espn_adp_credentials") or {}
+
+            if credentials.get("swid") and credentials.get("espn_s2"):
+                data = _fetch_espn_native_adp(
+                    league_id=credentials.get("league_id"),
+                    season=credentials.get("season") or 2026,
+                    swid=credentials.get("swid"),
+                    espn_s2=credentials.get("espn_s2"),
+                )
+
+                # Also update the platform cache consumed by Player Research.
+                path = _local_platform_adp_path("ESPN")
+                path.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            else:
+                data = _platform_2026_adp_data("ESPN", force=True)
+        else:
+            data = _platform_2026_adp_data("YAHOO", force=True)
+
         players = data.get("players", {}) or {}
+        ranked_count = sum(
+            1 for item in players.values()
+            if float(item.get("adp", 999) or 999) < 999
+        )
 
         app.logger.info(
-            "Completed 2026 ADP refresh platform=%s source=%s players=%s status=%s diagnostics=%s",
+            "Completed ADP refresh platform=%s source=%s players=%s ranked=%s status=%s",
             platform,
             data.get("source"),
             len(players),
+            ranked_count,
             data.get("status"),
-            data.get("diagnostic_errors", []),
         )
 
         return jsonify(
             ok=bool(players),
             season=2026,
             platform=platform,
-            scoring=data.get("scoring"),
             source=data.get("source"),
             status=data.get("status"),
             updated_at=data.get("updated_at"),
             player_count=len(players),
-            api_configured=_fp_api_status()["configured"],
+            players_with_platform_adp=ranked_count,
             warning=data.get("warning", ""),
-            warnings=data.get("warnings", []),
-            diagnostic_errors=data.get("diagnostic_errors", []),
             message=(
-                f"Loaded {len(players)} {platform} ADP players."
-                if players
-                else "No usable ADP players were returned."
+                f"Loaded {ranked_count} ranked {platform} players."
+                if ranked_count
+                else "No ranked ADP players were returned."
             ),
         )
     except Exception as exc:
-        app.logger.exception(
-            "2026 ADP refresh failed for platform=%s",
-            platform,
-        )
+        app.logger.exception("2026 ADP refresh failed platform=%s", platform)
+
+        cached = _platform_2026_adp_data(platform, force=False)
+        cached_players = cached.get("players", {}) or {}
+
         return jsonify(
-            ok=False,
+            ok=bool(cached_players),
             season=2026,
             platform=platform,
-            error=str(exc),
-            message="The 2026 ADP refresh failed.",
-        ), 500
+            source=cached.get("source"),
+            status="cached" if cached_players else "unavailable",
+            updated_at=cached.get("updated_at"),
+            player_count=len(cached_players),
+            players_with_platform_adp=sum(
+                1 for item in cached_players.values()
+                if float(item.get("adp", 999) or 999) < 999
+            ),
+            warning=(
+                "Authenticated ESPN ADP refresh failed. "
+                "Reconnect ESPN under League Sync and refresh again."
+                if platform == "ESPN"
+                else "Yahoo ADP refresh failed."
+            ),
+            diagnostic_error=str(exc),
+        ), 200 if cached_players else 500
 
 @app.get("/api/player-research/position")
 def player_research_position():
