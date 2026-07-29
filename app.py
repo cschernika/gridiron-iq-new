@@ -3804,6 +3804,250 @@ def _parse_platform_adp(html, platform):
     return result
 
 
+
+class _SimpleHtmlTableParser(HTMLParser):
+    """Small dependency-free HTML table parser for public ADP pages."""
+
+    def __init__(self):
+        super().__init__()
+        self.tables = []
+        self._table = None
+        self._row = None
+        self._cell = None
+        self._cell_parts = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "table":
+            self._table = []
+        elif tag == "tr" and self._table is not None:
+            self._row = []
+        elif tag in {"th", "td"} and self._row is not None:
+            self._cell = tag
+            self._cell_parts = []
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell_parts.append(data)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if tag in {"th", "td"} and self._cell is not None:
+            value = re.sub(r"\s+", " ", " ".join(self._cell_parts)).strip()
+            self._row.append(value)
+            self._cell = None
+            self._cell_parts = []
+        elif tag == "tr" and self._row is not None:
+            if any(str(value).strip() for value in self._row):
+                self._table.append(self._row)
+            self._row = None
+        elif tag == "table" and self._table is not None:
+            if self._table:
+                self.tables.append(self._table)
+            self._table = None
+
+
+def _clean_public_player_name(value):
+    value = html.unescape(str(value or ""))
+    value = re.sub(r"\([^)]*\)", " ", value)
+    value = re.sub(r"\b[A-Z]\.\s+(?=[A-Z][a-z])", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _parse_public_adp_number(value):
+    text = str(value or "").strip()
+    if text in {"", "-", "—", "–", "NR", "N/A"}:
+        return None
+
+    # Round/pick formats such as 1.03 are still valid draft-position values.
+    match = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
+    if not match:
+        return None
+
+    try:
+        return float(match.group(0))
+    except Exception:
+        return None
+
+
+def _fourforfour_platform_adp_dataset(platform):
+    """
+    Parse 4for4's public cross-platform ADP table.
+
+    The table includes columns for ESPN and Yahoo as well as a consensus ADP.
+    No FantasyPros API key is required.
+    """
+    platform = str(platform or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+
+    response = requests.get(
+        "https://www.4for4.com/adp",
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/150 Safari/537.36"
+            ),
+        },
+        timeout=(8, 30),
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+
+    content_type = str(response.headers.get("content-type") or "").lower()
+    if "html" not in content_type and "<table" not in response.text.lower():
+        raise RuntimeError(
+            f"4for4 returned non-table content ({content_type or 'unknown type'})."
+        )
+
+    parser = _SimpleHtmlTableParser()
+    parser.feed(response.text)
+
+    selected_table = None
+    header_index = None
+    header = None
+
+    for table in parser.tables:
+        for index, row in enumerate(table[:8]):
+            normalized = [re.sub(r"\s+", " ", cell).strip().upper() for cell in row]
+            has_player = any(cell == "PLAYER" or cell.startswith("PLAYER ") for cell in normalized)
+            has_platform = (
+                any(cell == "ESPN" for cell in normalized)
+                if platform == "ESPN"
+                else any(cell in {"Y!", "YAHOO", "YAHOO!"} for cell in normalized)
+            )
+            if has_player and has_platform:
+                selected_table = table
+                header_index = index
+                header = normalized
+                break
+        if selected_table is not None:
+            break
+
+    if selected_table is None or header is None:
+        raise RuntimeError("The public 4for4 ADP table could not be identified.")
+
+    def find_column(*names):
+        for name in names:
+            for index, value in enumerate(header):
+                if value == name or value.startswith(name + " "):
+                    return index
+        return None
+
+    player_col = find_column("PLAYER")
+    position_col = find_column("POSITION", "POS")
+    team_col = find_column("TEAM")
+    consensus_col = find_column("ADP", "AVG")
+    platform_col = (
+        find_column("ESPN")
+        if platform == "ESPN"
+        else find_column("Y!", "YAHOO", "YAHOO!")
+    )
+
+    if player_col is None or platform_col is None:
+        raise RuntimeError("Required player or platform ADP columns were missing.")
+
+    players = {}
+
+    for row in selected_table[header_index + 1:]:
+        if len(row) <= max(player_col, platform_col):
+            continue
+
+        name = _clean_public_player_name(row[player_col])
+        if not name or name.upper() == "PLAYER":
+            continue
+
+        platform_adp = _parse_public_adp_number(row[platform_col])
+        consensus_adp = (
+            _parse_public_adp_number(row[consensus_col])
+            if consensus_col is not None and len(row) > consensus_col
+            else None
+        )
+
+        # Prefer the platform-specific value. Use consensus only when the
+        # platform has no value so the player does not incorrectly display NR.
+        adp = platform_adp if platform_adp is not None else consensus_adp
+        if adp is None:
+            continue
+
+        position_text = (
+            str(row[position_col]).strip().upper()
+            if position_col is not None and len(row) > position_col
+            else ""
+        )
+        position_match = re.match(r"(QB|RB|WR|TE|K|DST|DEF)(?:[-\s]?(\d+))?", position_text)
+        position = ""
+        position_adp = ""
+
+        if position_match:
+            position = position_match.group(1)
+            if position == "DST":
+                position = "DEF"
+            if position_match.group(2):
+                position_adp = f"{position}{position_match.group(2)}"
+
+        team = (
+            str(row[team_col]).strip().upper()
+            if team_col is not None and len(row) > team_col
+            else ""
+        )
+
+        players[_pr_norm(name)] = {
+            "name": name,
+            "adp": round(float(adp), 2),
+            "platform_adp": platform_adp,
+            "consensus_adp": consensus_adp,
+            "position": position,
+            "position_adp": position_adp,
+            "team": team,
+            "source": f"4for4 public {platform} ADP",
+        }
+
+    if len(players) < 50:
+        raise RuntimeError(
+            f"The public 4for4 table returned only {len(players)} usable players."
+        )
+
+    # Complete missing positional ranks.
+    by_position = defaultdict(list)
+    for norm, item in players.items():
+        position = str(item.get("position") or "").upper()
+        if position in {"QB", "RB", "WR", "TE", "K", "DEF"}:
+            by_position[position].append(
+                (float(item.get("adp", 999) or 999), norm)
+            )
+
+    for position, ranked in by_position.items():
+        ranked.sort(key=lambda pair: (pair[0], pair[1]))
+        for number, (_, norm) in enumerate(ranked, start=1):
+            if not players[norm].get("position_adp"):
+                players[norm]["position_adp"] = f"{position}{number}"
+
+    payload = {
+        "season": 2026,
+        "platform": platform,
+        "scoring": "PPR" if platform == "ESPN" else "Half PPR",
+        "source": f"4for4 public webpage — {platform} ADP",
+        "source_url": "https://www.4for4.com/adp",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "public",
+        "players": players,
+    }
+
+    path = _local_platform_adp_path(platform)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temp.replace(path)
+    return payload
+
+
 def _public_platform_adp_dataset(platform):
     """
     Load the public FantasyPros ADP table without an API key.
@@ -4247,18 +4491,20 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
         except Exception as exc:
             errors.append(f"ESPN saved data: {exc}")
 
-    # This source does not require FANTASYPROS_API_KEY.
+    # Public cross-platform table with explicit ESPN and Yahoo columns.
+    try:
+        return _fourforfour_platform_adp_dataset(platform)
+    except Exception as exc:
+        errors.append(f"4for4 public ADP: {exc}")
+
+    # Secondary public webpage source.
     try:
         return _public_platform_adp_dataset(platform)
     except Exception as exc:
-        errors.append(f"Public ADP table: {exc}")
+        errors.append(f"FantasyPros public ADP: {exc}")
 
-    # Keep the restricted API as an optional final online source.
-    if _fp_api_key():
-        try:
-            return _fp_build_platform_dataset(platform)
-        except Exception as exc:
-            errors.append(f"FantasyPros API: {exc}")
+    # Do not repeatedly call a restricted FantasyPros endpoint after a 403.
+    # The public sources above are preferred and require no API subscription.
 
     if cached and cached.get("players"):
         cached["status"] = "cached"
@@ -4659,11 +4905,12 @@ def player_research_adp_refresh():
         players = data.get("players", {}) or {}
 
         app.logger.info(
-            "Completed 2026 ADP refresh platform=%s source=%s players=%s status=%s",
+            "Completed 2026 ADP refresh platform=%s source=%s players=%s status=%s diagnostics=%s",
             platform,
             data.get("source"),
             len(players),
             data.get("status"),
+            data.get("diagnostic_errors", []),
         )
 
         return jsonify(
