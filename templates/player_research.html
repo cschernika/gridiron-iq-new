@@ -801,7 +801,7 @@
         );
       } else {
         showAlert(
-          `Imported ${data.count || data.player_count} ${state.platform} ADP rows and refreshed current teams from ${source}.`
+          `Inserted ${data.count || data.player_count || 0} ${state.platform} ADP rows into SQLite and refreshed current teams from ${source}.`
         );
       }
 
