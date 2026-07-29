@@ -152,7 +152,14 @@
             <article><span>2026 Projection</span><strong id="pr-detail-projection">—</strong></article>
           </section>
           <section class="pr-detail-card"><h3>2025 Statistics</h3><div id="pr-detail-stats" class="pr-detail-stats"></div></section>
-          <section class="pr-detail-card"><h3>Season History</h3><div id="pr-detail-history"></div></section>
+          <section class="pr-detail-card">
+            <div class="pr-news-heading">
+              <h3>Season History</h3>
+              <button id="pr-load-career" class="pr-secondary-button" type="button">Load all seasons</button>
+            </div>
+            <p id="pr-career-progress" class="pr-muted"></p>
+            <div id="pr-detail-history"></div>
+          </section>
           <section class="pr-detail-card"><h3>Injury and Status</h3><p id="pr-detail-injury">No current injury designation.</p></section>
           <section class="pr-detail-card">
             <div class="pr-news-heading"><h3>Current News</h3><button id="pr-load-news" class="pr-secondary-button" type="button">Load news</button></div>
@@ -749,11 +756,41 @@
       $("pr-detail-history").innerHTML = history.length ? `<table class="pr-history-table"><thead><tr><th>Season</th><th>Games</th><th>PPR</th><th>Rush Yds</th><th>Rec Yds</th><th>Pass Yds</th></tr></thead><tbody>${history.slice().reverse().map(s=>`<tr><td>${s.season}</td><td>${readable(s.games)}</td><td>${readable(s.fantasy_points_ppr,1)}</td><td>${readable(s.rushing_yards)}</td><td>${readable(s.receiving_yards)}</td><td>${readable(s.passing_yards)}</td></tr>`).join("")}</tbody></table>` : '<p class="pr-muted">Older season files have not been loaded.</p>';
 
       $("pr-detail-injury").textContent = bio.injury_status || profile.injury?.status || "No current injury designation.";
-      $("pr-detail-news").innerHTML = profile.news_available ? '<p class="pr-muted">Select Load news for current updates.</p>' : '<p class="pr-muted">Live news requires FANTASYPROS_API_KEY in Render.</p>';
+      $("pr-detail-news").innerHTML = profile.news_available ? '<p class="pr-muted">Select Load news for current updates.</p>' : '<p class="pr-muted">Current news is loaded from ESPN and Google News.</p>';
       $("pr-detail-loading").hidden = true;
       $("pr-detail-content").hidden = false;
     } catch (error) {
       $("pr-detail-loading").textContent = error.message;
+    }
+  }
+
+  async function loadCareerHistory() {
+    const button = $("pr-load-career");
+    const progress = $("pr-career-progress");
+    button.disabled = true;
+    const seasons = [];
+    for (let season = 2005; season <= 2024; season += 1) seasons.push(season);
+
+    try {
+      for (let index = 0; index < seasons.length; index += 1) {
+        const season = seasons[index];
+        button.textContent = `${index + 1}/${seasons.length}`;
+        progress.textContent = `Loading ${season} season…`;
+        const response = await fetch(`/api/data/career-history/season/${season}`, {
+          method: "POST",
+          headers: {"Accept": "application/json", "Content-Type": "application/json"},
+          body: JSON.stringify({force: false})
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || `Season ${season} failed.`);
+      }
+      progress.textContent = "Career history loaded. Refreshing profile…";
+      await openPlayerDrawer(activePlayerName);
+    } catch (error) {
+      progress.textContent = `Career-history load stopped: ${error.message}`;
+    } finally {
+      button.disabled = false;
+      button.textContent = "Load all seasons";
     }
   }
 
@@ -783,6 +820,7 @@
   $("pr-detail-close").addEventListener("click", closePlayerDrawer);
   $("pr-player-overlay").addEventListener("click", closePlayerDrawer);
   $("pr-load-news").addEventListener("click", loadPlayerNews);
+  $("pr-load-career").addEventListener("click", loadCareerHistory);
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") closePlayerDrawer();
   });
