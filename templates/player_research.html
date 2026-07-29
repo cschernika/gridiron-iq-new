@@ -2,12 +2,7 @@
 {% block title %}Player Research | Gridiron IQ{% endblock %}
 
 {% block body %}
-<div class="app-shell">
-  {% set active = "player-research" %}
-  {% include "_sidebar.html" %}
-
-  <main class="main pr-page-main">
-    <section class="pr-page" data-platform="{{ active_platform|default('ESPN') }}">
+<section class="pr-page" data-platform="{{ active_platform|default('ESPN') }}">
       <header class="pr-header">
         <div class="pr-heading">
           <p class="pr-eyebrow">Player Database</p>
@@ -132,16 +127,9 @@
       </section>
 
       <p id="pr-source" class="pr-source">Loading data sources…</p>
-    </section>
-  </main>
-</div>
+</section>
 
 <style>
-  .pr-page-main {
-    width: 100%;
-    min-width: 0;
-  }
-
   .pr-page {
     width: 100%;
     max-width: 1600px;
