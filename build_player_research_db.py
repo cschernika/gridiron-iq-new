@@ -12,6 +12,7 @@ from player_research_db import (
     import_current_players,
     import_projections,
     import_season,
+    repair_recent_player_aliases,
     init_database,
 )
 
@@ -26,6 +27,11 @@ def main() -> None:
     parser.add_argument("--start", type=int, default=1999)
     parser.add_argument("--end", type=int, default=2025)
     parser.add_argument("--players", action="store_true")
+    parser.add_argument(
+        "--repair-identities",
+        action="store_true",
+        help="Merge safe recent name/suffix variants without rebuilding history.",
+    )
     parser.add_argument("--projections", action="store_true")
     parser.add_argument("--adp", choices=["ESPN", "YAHOO", "BOTH"])
     parser.add_argument("--public-adp", choices=["ESPN", "YAHOO", "BOTH"])
@@ -39,6 +45,8 @@ def main() -> None:
     else:
         if args.players:
             result["current_players"] = import_current_players()
+        if args.repair_identities:
+            result["identity_repair"] = repair_recent_player_aliases()
         if args.history:
             result["history"] = import_all_history(args.start, args.end)
         if args.season:
