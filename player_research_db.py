@@ -1567,120 +1567,180 @@ def import_season(season: int) -> int:
 
 
 
-def _download_complete_player_history() -> list[dict[str, str]]:
-    """
-    Download nflverse's all-season weekly player-stat file.
-
-    This is more reliable for building complete careers than depending on one
-    separate release asset per season. The file contains a `season` column and
-    weekly rows that are aggregated into player-season totals below.
-    """
-    cache_path = DATA_DIR / "nflverse_complete_player_history.csv"
-
-    cached = _read_cached_stats(cache_path)
-    if cached and any(row.get("season") for row in cached):
-        return cached
-
-    candidates = [
-        (
-            "nflverse weekly_data player_stats.csv",
-            "https://github.com/nflverse/nflverse-data/releases/download/weekly_data/player_stats.csv",
-            False,
-        ),
-        (
-            "nflverse weekly_data player_stats.csv.gz",
-            "https://github.com/nflverse/nflverse-data/releases/download/weekly_data/player_stats.csv.gz",
-            True,
-        ),
-    ]
-
-    errors = []
-
-    for source_name, url, compressed in candidates:
-        try:
-            response = requests.get(
-                url,
-                headers={
-                    "User-Agent": "Gridiron-IQ/2026",
-                    "Accept": "text/csv,application/gzip,*/*",
-                },
-                timeout=(15, 180),
-            )
-            response.raise_for_status()
-
-            content = response.content
-            if compressed:
-                content = gzip.decompress(content)
-
-            text = content.decode("utf-8-sig", errors="replace")
-            reader = csv.DictReader(io.StringIO(text))
-
-            if not _valid_stats_headers(reader.fieldnames):
-                raise RuntimeError("required player-stat columns were missing")
-
-            fieldnames = {
-                str(field or "").strip()
-                for field in (reader.fieldnames or [])
-            }
-            if "season" not in fieldnames:
-                raise RuntimeError("the all-season file did not include season")
-
-            rows = list(reader)
-            if len(rows) < 1000:
-                raise RuntimeError(
-                    f"only {len(rows)} rows were returned"
-                )
-
-            cache_path.write_text(text, encoding="utf-8")
-            return rows
-        except Exception as exc:
-            errors.append(f"{source_name}: {exc}")
-
-    raise RuntimeError(
-        "Unable to download the complete nflverse player-stat history: "
-        + " | ".join(errors)
+def _official_regular_season_url(season: int) -> str:
+    return (
+        "https://github.com/nflverse/nflverse-data/releases/download/"
+        f"stats_player/stats_player_reg_{int(season)}.csv"
     )
+
+
+def _download_official_regular_season(
+    season: int,
+    *,
+    force_refresh: bool = False,
+) -> list[dict[str, str]]:
+    """
+    Download the official nflverse regular-season player summary for one year.
+    """
+    cache_path = DATA_DIR / f"stats_player_reg_{int(season)}.csv"
+
+    if force_refresh and cache_path.exists():
+        try:
+            cache_path.unlink()
+        except Exception:
+            pass
+
+    cached_rows = _read_cached_stats(cache_path)
+    if cached_rows:
+        cached_seasons = {
+            int(float(row.get("season") or season))
+            for row in cached_rows
+            if str(row.get("season") or season).strip()
+        }
+        if cached_seasons == {int(season)}:
+            return cached_rows
+
+    url = _official_regular_season_url(season)
+    response = requests.get(
+        url,
+        headers={
+            "User-Agent": "Gridiron-IQ/2026",
+            "Accept": "text/csv,*/*",
+            "Cache-Control": "no-cache",
+        },
+        timeout=(15, 120),
+    )
+    response.raise_for_status()
+
+    text = response.content.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+
+    if not _valid_stats_headers(reader.fieldnames):
+        raise RuntimeError(
+            f"{season}: nflverse file did not contain player-stat columns"
+        )
+
+    rows = list(reader)
+    if not rows:
+        raise RuntimeError(f"{season}: nflverse file contained no rows")
+
+    wrong_seasons = {
+        int(float(row.get("season") or season))
+        for row in rows
+        if str(row.get("season") or season).strip()
+    }
+    if wrong_seasons != {int(season)}:
+        raise RuntimeError(
+            f"{season}: downloaded file contained seasons "
+            f"{sorted(wrong_seasons)}"
+        )
+
+    cache_path.write_text(text, encoding="utf-8")
+    return rows
+
+
+def _historical_identity_key(row: dict[str, Any]) -> str:
+    """
+    Prefer nflverse's stable GSIS player ID for grouping within an import.
+    Fall back to the normalized display name when an ID is unavailable.
+    """
+    player_id = str(
+        row.get("player_id")
+        or row.get("gsis_id")
+        or ""
+    ).strip()
+    if player_id:
+        return f"id:{player_id}"
+
+    return f"name:{_norm(_row_name(row))}"
 
 
 def import_complete_history(
     start_season: int = 1999,
     end_season: int = 2025,
+    *,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     """
-    Import all available player seasons from one complete nflverse data file.
+    Import each official nflverse regular-season summary file independently.
 
-    Weekly records are grouped by normalized player name and season, then
-    written to SQLite as one season row per player.
+    Success is not reported unless more than one season is stored when the
+    requested range contains more than one season.
     """
     init_database()
     start_season = max(1999, int(start_season))
     end_season = min(2025, int(end_season))
 
-    raw_rows = _download_complete_player_history()
-    grouped: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    imported: dict[str, int] = {}
+    failures: dict[str, str] = {}
+    all_rows: list[tuple[int, dict[str, Any]]] = []
 
-    for row in raw_rows:
+    for season in range(start_season, end_season + 1):
         try:
-            season = int(float(row.get("season") or 0))
-        except Exception:
-            continue
+            rows = _download_official_regular_season(
+                season,
+                force_refresh=force_refresh,
+            )
+            imported[str(season)] = len(rows)
+            all_rows.extend((season, row) for row in rows)
+        except Exception as exc:
+            failures[str(season)] = str(exc)
 
-        if season < start_season or season > end_season:
-            continue
+    if not all_rows:
+        raise RuntimeError(
+            "No official nflverse regular-season files were imported. "
+            + json.dumps(failures, ensure_ascii=False)
+        )
 
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    identity_names: dict[str, str] = {}
+    identity_ids: dict[str, str] = {}
+
+    for season, row in all_rows:
         name = _row_name(row)
         if not name:
             continue
 
-        grouped[(_norm(name), season)].append(row)
+        identity = _historical_identity_key(row)
+        grouped[(identity, season)].append(row)
+        identity_names[identity] = name
+
+        player_id = str(
+            row.get("player_id")
+            or row.get("gsis_id")
+            or ""
+        ).strip()
+        if player_id:
+            identity_ids[identity] = player_id
 
     now = datetime.now(timezone.utc).isoformat()
     player_accumulator: dict[str, dict[str, Any]] = {}
     stat_rows = []
 
-    for (player_key, season), matches in grouped.items():
+    # Map GSIS IDs already present in players to their current canonical keys.
+    with connect() as connection:
+        existing_by_id = {
+            str(row["player_id"]): str(row["player_key"])
+            for row in connection.execute(
+                """
+                SELECT player_id, player_key
+                FROM players
+                WHERE player_id IS NOT NULL AND player_id<>''
+                """
+            ).fetchall()
+        }
+
+    for (identity, season), matches in grouped.items():
         first = matches[0]
-        name = _row_name(first)
+        name = identity_names.get(identity) or _row_name(first)
+        player_id = identity_ids.get(identity, "")
+
+        canonical_key = (
+            existing_by_id.get(player_id)
+            if player_id
+            else None
+        ) or _norm(name)
+
         position = _position(
             first.get("position")
             or first.get("position_group")
@@ -1688,38 +1748,37 @@ def import_complete_history(
 
         teams = [
             str(
-                row.get("recent_team")
-                or row.get("team")
+                row.get("team")
+                or row.get("recent_team")
                 or ""
             ).upper().strip()
             for row in matches
             if str(
-                row.get("recent_team")
-                or row.get("team")
+                row.get("team")
+                or row.get("recent_team")
                 or ""
             ).strip()
         ]
         team = teams[-1] if teams else "FA"
-
         stats = _aggregate_rows(matches, name)
 
         stat_rows.append(
             (
-                player_key,
+                canonical_key,
                 season,
                 team,
                 position,
                 *[stats[field] for field in STAT_FIELDS],
-                "nflverse complete weekly history",
+                f"nflverse stats_player_reg_{season}.csv",
                 now,
             )
         )
 
-        existing = player_accumulator.get(player_key)
-        if existing is None:
-            player_accumulator[player_key] = {
-                "player_key": player_key,
-                "player_id": str(first.get("player_id") or ""),
+        current = player_accumulator.get(canonical_key)
+        if current is None:
+            player_accumulator[canonical_key] = {
+                "player_key": canonical_key,
+                "player_id": player_id,
                 "name": name,
                 "position": position,
                 "team": team,
@@ -1727,20 +1786,16 @@ def import_complete_history(
                 "last_season": season,
             }
         else:
-            existing["first_season"] = min(
-                existing["first_season"],
+            current["first_season"] = min(
+                current["first_season"],
                 season,
             )
-            existing["last_season"] = max(
-                existing["last_season"],
-                season,
-            )
-            if season >= existing["last_season"]:
-                existing["team"] = team
+            if season >= current["last_season"]:
+                current["last_season"] = season
                 if position:
-                    existing["position"] = position
-            if not existing["player_id"] and first.get("player_id"):
-                existing["player_id"] = str(first.get("player_id"))
+                    current["position"] = position
+            if not current["player_id"] and player_id:
+                current["player_id"] = player_id
 
     player_rows = [
         (
@@ -1774,13 +1829,6 @@ def import_complete_history(
                 position=CASE
                     WHEN excluded.position<>'' THEN excluded.position
                     ELSE players.position
-                END,
-                team=CASE
-                    WHEN players.team IS NULL
-                      OR players.team=''
-                      OR players.team='FA'
-                    THEN excluded.team
-                    ELSE players.team
                 END,
                 active=MAX(players.active, excluded.active),
                 first_season=CASE
@@ -1850,36 +1898,64 @@ def import_complete_history(
             """
         ).fetchone()
 
+        season_rows = [
+            dict(row)
+            for row in connection.execute(
+                """
+                SELECT season, COUNT(*) AS player_count
+                FROM season_stats
+                GROUP BY season
+                ORDER BY season
+                """
+            ).fetchall()
+        ]
+
         _set_status(
             connection,
             "complete_history",
             {
-                "imported_rows": len(stat_rows),
+                "downloaded_seasons": sorted(int(x) for x in imported),
+                "failed_seasons": failures,
                 "stored_rows": stored["row_count"],
-                "players": stored["player_count"],
-                "seasons": stored["season_count"],
+                "stored_players": stored["player_count"],
+                "stored_seasons": stored["season_count"],
                 "first_season": stored["first_season"],
                 "last_season": stored["last_season"],
+                "season_rows": season_rows,
             },
         )
 
     exact_result = repair_exact_player_duplicates()
     suffix_result = repair_recent_player_aliases()
 
+    requested_count = end_season - start_season + 1
+    enough_seasons = (
+        stored["season_count"] > 1
+        if requested_count > 1
+        else stored["season_count"] == 1
+    )
+
     return {
-        "ok": len(stat_rows) > 0,
-        "imported_rows": len(stat_rows),
-        "imported_players": len(player_rows),
-        "start_season": start_season,
-        "end_season": end_season,
+        "ok": bool(stat_rows) and enough_seasons,
+        "imported_file_count": len(imported),
+        "imported_files": imported,
+        "failures": failures,
         "stored_rows": stored["row_count"],
         "stored_players": stored["player_count"],
         "stored_seasons": stored["season_count"],
         "first_stored_season": stored["first_season"],
         "last_stored_season": stored["last_season"],
+        "season_rows": season_rows,
         "exact_duplicate_merges": exact_result.get("merged_count", 0),
         "suffix_merges": suffix_result.get("merged_count", 0),
+        "message": (
+            f"Imported {stored['season_count']} seasons and "
+            f"{stored['row_count']} player-season rows."
+            if enough_seasons
+            else "Import completed but SQLite still contains only one season."
+        ),
     }
+
 
 
 def import_all_history(start_season: int = 1999, end_season: int = 2025) -> dict[str, Any]:
@@ -2835,6 +2911,45 @@ def adp_player_api(player_name: str):
     return jsonify(ok=row["adp"] is not None, **dict(row))
 
 
+@bp.get("/api/player-research-db/player-history-status/<path:player_name>")
+def player_history_status_api(player_name: str):
+    init_database()
+    key = _norm(player_name)
+
+    with connect() as connection:
+        player = connection.execute(
+            """
+            SELECT player_key, name, team, position, player_id
+            FROM players
+            WHERE player_key=? OR name=? COLLATE NOCASE
+            LIMIT 1
+            """,
+            (key, player_name),
+        ).fetchone()
+
+        if not player:
+            return jsonify(ok=False, error="Player was not found."), 404
+
+        seasons = connection.execute(
+            """
+            SELECT
+                season, team, games, fantasy_points,
+                fantasy_points_ppr, source
+            FROM season_stats
+            WHERE player_key=?
+            ORDER BY season
+            """,
+            (player["player_key"],),
+        ).fetchall()
+
+    return jsonify(
+        ok=bool(seasons),
+        player=dict(player),
+        season_count=len(seasons),
+        seasons=[dict(row) for row in seasons],
+    )
+
+
 @bp.get("/api/player-research-db/history-status")
 def history_status_api():
     init_database()
@@ -3015,7 +3130,11 @@ def import_complete_history_api():
     end_season = _int_or_none(body.get("end_season")) or 2025
 
     try:
-        result = import_complete_history(start_season, end_season)
+        result = import_complete_history(
+            start_season,
+            end_season,
+            force_refresh=bool(body.get("force_refresh", True)),
+        )
         return jsonify(result), 200 if result.get("ok") else 409
     except Exception as exc:
         current_app.logger.exception(

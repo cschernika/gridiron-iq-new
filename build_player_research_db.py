@@ -58,7 +58,11 @@ def main() -> None:
         if args.history:
             result["history"] = import_all_history(args.start, args.end)
         if args.career_history:
-            result["career_history"] = import_complete_history(1999, 2025)
+            result["career_history"] = import_complete_history(
+                1999,
+                2025,
+                force_refresh=True,
+            )
             from player_research_db import database_status
             result["database_status"] = database_status()
         if args.season:
