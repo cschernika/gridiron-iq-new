@@ -203,16 +203,244 @@ def user_team(teams):
             return t
     return None
 
+
+def _safe_float(value, default=0.0):
+    try:
+        return float(value if value is not None else default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _normalize_metric(value, values, neutral=0.5):
+    numeric = [_safe_float(item) for item in values]
+    if not numeric:
+        return neutral
+
+    low = min(numeric)
+    high = max(numeric)
+    if high <= low:
+        return neutral
+
+    return (_safe_float(value) - low) / (high - low)
+
+
+def league_power_rankings(teams):
+    """
+    Calculate dashboard power rankings from the teams in the synced league.
+
+    The ranking uses actual league records, points scored and roster
+    projections. Before the season or draft, all synced teams still appear
+    using their real names in the league's saved order.
+    """
+    clean_teams = [team for team in (teams or []) if isinstance(team, dict)]
+    if not clean_teams:
+        return []
+
+    points_values = [
+        _safe_float(team.get("points_for"))
+        for team in clean_teams
+    ]
+    projection_values = [
+        sum(
+            _safe_float(player.get("projected_points"))
+            for player in (team.get("roster") or [])
+            if isinstance(player, dict)
+        )
+        for team in clean_teams
+    ]
+    roster_point_values = [
+        sum(
+            _safe_float(player.get("total_points"))
+            for player in (team.get("roster") or [])
+            if isinstance(player, dict)
+        )
+        for team in clean_teams
+    ]
+
+    ranked = []
+
+    for original_index, team in enumerate(clean_teams):
+        wins = int(_safe_float(team.get("wins")))
+        losses = int(_safe_float(team.get("losses")))
+        ties = int(_safe_float(team.get("ties")))
+        games = wins + losses + ties
+
+        win_percentage = (
+            (wins + 0.5 * ties) / games
+            if games > 0
+            else 0.5
+        )
+
+        points_for = _safe_float(team.get("points_for"))
+        roster_projection = projection_values[original_index]
+        roster_points = roster_point_values[original_index]
+
+        points_score = _normalize_metric(
+            points_for,
+            points_values,
+        )
+        projection_score = _normalize_metric(
+            roster_projection,
+            projection_values,
+        )
+        roster_score = _normalize_metric(
+            roster_points,
+            roster_point_values,
+        )
+
+        has_season_results = (
+            games > 0
+            or any(value > 0 for value in points_values)
+        )
+        has_rosters = any(
+            int(team_row.get("roster_size", 0) or 0) > 0
+            for team_row in clean_teams
+        )
+
+        if has_season_results:
+            power_score = (
+                win_percentage * 0.48
+                + points_score * 0.32
+                + projection_score * 0.12
+                + roster_score * 0.08
+            )
+        elif has_rosters:
+            power_score = (
+                projection_score * 0.65
+                + roster_score * 0.35
+            )
+        else:
+            # A connected pre-draft league has no meaningful performance
+            # metrics yet. Preserve the actual league-team order rather than
+            # inventing placeholder rankings.
+            power_score = 0.5 - original_index * 0.0001
+
+        rating = max(50, min(99, round(55 + power_score * 40)))
+        playoff_probability = max(
+            5,
+            min(95, round(15 + power_score * 75)),
+        )
+
+        team_name = str(
+            team.get("team_name")
+            or team.get("name")
+            or f"Team {original_index + 1}"
+        ).strip()
+        owner = str(team.get("owner") or "").strip()
+
+        ranked.append(
+            {
+                "team_id": str(team.get("team_id") or ""),
+                "team": team_name,
+                "team_name": team_name,
+                "owner": owner,
+                "wins": wins,
+                "losses": losses,
+                "ties": ties,
+                "record": (
+                    f"{wins}-{losses}"
+                    + (f"-{ties}" if ties else "")
+                ),
+                "points_for": round(points_for, 2),
+                "roster_size": int(team.get("roster_size", 0) or 0),
+                "roster_projection": round(roster_projection, 2),
+                "rating": rating,
+                "playoffs": playoff_probability,
+                "_power_score": power_score,
+                "_original_index": original_index,
+            }
+        )
+
+    ranked.sort(
+        key=lambda row: (
+            row["_power_score"],
+            row["wins"],
+            row["points_for"],
+            row["roster_projection"],
+            -row["_original_index"],
+        ),
+        reverse=True,
+    )
+
+    for rank, row in enumerate(ranked, start=1):
+        row["rank"] = rank
+        row.pop("_power_score", None)
+        row.pop("_original_index", None)
+
+    return ranked
+
+
+def dashboard_analytics(teams):
+    analytics = copy.deepcopy(DEMO)
+    rankings = league_power_rankings(teams)
+
+    if not rankings:
+        return analytics
+
+    analytics["power_rankings"] = rankings
+
+    selected_team = user_team(teams) or rankings[0]
+    selected_id = str(selected_team.get("team_id") or "")
+    selected_name = str(
+        selected_team.get("team_name")
+        or selected_team.get("team")
+        or ""
+    ).strip().lower()
+
+    selected_ranking = next(
+        (
+            row for row in rankings
+            if (
+                selected_id
+                and str(row.get("team_id") or "") == selected_id
+            )
+            or (
+                selected_name
+                and str(row.get("team") or "").strip().lower()
+                == selected_name
+            )
+        ),
+        rankings[0],
+    )
+
+    analytics["team_strength"] = selected_ranking["rating"]
+    analytics["team_rank"] = selected_ranking["rank"]
+    analytics["playoff_probability"] = selected_ranking["playoffs"]
+
+    # Keep a conservative championship estimate tied to league size and rank.
+    team_count = max(1, len(rankings))
+    base_chance = 100 / team_count
+    rank_adjustment = max(
+        0.55,
+        1.45 - (selected_ranking["rank"] - 1) * 0.08,
+    )
+    analytics["championship_probability"] = max(
+        1,
+        min(75, round(base_chance * rank_adjustment)),
+    )
+
+    return analytics
+
+
 def page(template, **ctx):
     snap = load_snapshot()
     connected = bool(snap)
     league = snap.get("league") if snap else None
     settings = snap.get("settings") if snap else None
-    teams = snap.get("teams",[]) if snap else []
+    teams = snap.get("teams", []) if snap else []
+    actual_user_team = user_team(teams)
+    analytics = dashboard_analytics(teams)
+
     return render_template(
-        template, user=USER, connected=connected, league=league,
-        league_settings=settings, teams=teams, user_team=user_team(teams),
-        analytics=DEMO, **ctx
+        template,
+        user=USER,
+        connected=connected,
+        league=league,
+        league_settings=settings,
+        teams=teams,
+        user_team=actual_user_team,
+        analytics=analytics,
+        **ctx,
     )
 
 def draft_state(key):
@@ -569,7 +797,23 @@ def league_summary_api():
 @app.get("/api/league/teams")
 def league_teams_api():
     data = connected_league_data()
-    return jsonify(ok=bool(data["league"]), league=data["league"], teams=data["teams"])
+    return jsonify(
+        ok=bool(data["league"]),
+        league=data["league"],
+        teams=data["teams"],
+    )
+
+
+@app.get("/api/league/power-rankings")
+def league_power_rankings_api():
+    data = connected_league_data()
+    rankings = league_power_rankings(data["teams"])
+    return jsonify(
+        ok=bool(data["league"]) and bool(rankings),
+        league=data["league"],
+        team_count=len(data["teams"]),
+        rankings=rankings,
+    )
 
 @app.get("/lineup-optimizer")
 def lineup_optimizer(): return page("lineup.html")
