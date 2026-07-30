@@ -246,6 +246,296 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 
+
+def repair_exact_player_duplicates() -> dict[str, Any]:
+    """
+    Merge duplicate records whose display names differ only by punctuation,
+    spacing, or capitalization, while requiring the same fantasy position.
+
+    Examples:
+      C.J. Stroud
+      CJ Stroud
+      C J Stroud
+
+    Statistics, ADP, projections and current bio data are consolidated onto
+    one canonical player record.
+    """
+    init_database()
+    now = datetime.now(timezone.utc).isoformat()
+    merged: list[dict[str, Any]] = []
+
+    with connect() as connection:
+        players = connection.execute(
+            """
+            SELECT
+                p.*,
+                (SELECT COUNT(*) FROM season_stats s
+                 WHERE s.player_key=p.player_key) AS stats_count,
+                (SELECT COUNT(*) FROM adp a
+                 WHERE a.player_key=p.player_key AND a.season=2026) AS adp_count,
+                (SELECT COUNT(*) FROM projections pr
+                 WHERE pr.player_key=p.player_key AND pr.season=2026) AS projection_count
+            FROM players p
+            WHERE p.position IN ('QB','RB','WR','TE','K','DEF')
+            """
+        ).fetchall()
+
+        groups: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
+        for player in players:
+            compact_name = _norm(player["name"])
+            if compact_name:
+                groups[(compact_name, player["position"])].append(player)
+
+        for (compact_name, position), candidates in groups.items():
+            if len(candidates) < 2:
+                continue
+
+            def canonical_score(row: sqlite3.Row) -> tuple[int, int, int, int, int]:
+                team = str(row["team"] or "").upper()
+                current_team = int(bool(team and team != "FA"))
+                current_bio = int(
+                    bool(row["player_id"])
+                    or row["years_exp"] is not None
+                    or row["age"] is not None
+                    or bool(row["status"])
+                )
+                data_total = int(row["stats_count"] or 0) + int(
+                    row["adp_count"] or 0
+                ) + int(row["projection_count"] or 0)
+                has_adp = int((row["adp_count"] or 0) > 0)
+                clean_display = int("." not in str(row["name"] or ""))
+                return (
+                    current_bio,
+                    has_adp,
+                    current_team,
+                    data_total,
+                    clean_display,
+                )
+
+            canonical = max(candidates, key=canonical_score)
+            canonical_key = canonical["player_key"]
+
+            for duplicate in candidates:
+                duplicate_key = duplicate["player_key"]
+                if duplicate_key == canonical_key:
+                    continue
+
+                # Merge the strongest available bio/current-team fields first.
+                connection.execute(
+                    """
+                    UPDATE players
+                    SET
+                        player_id=CASE
+                            WHEN player_id IS NULL OR player_id=''
+                            THEN ? ELSE player_id END,
+                        team=CASE
+                            WHEN (team IS NULL OR team='' OR team='FA')
+                                 AND ?<>'' AND ?<>'FA'
+                            THEN ? ELSE team END,
+                        age=COALESCE(age, ?),
+                        college=CASE
+                            WHEN college IS NULL OR college=''
+                            THEN ? ELSE college END,
+                        years_exp=COALESCE(years_exp, ?),
+                        status=CASE
+                            WHEN status IS NULL OR status=''
+                            THEN ? ELSE status END,
+                        injury_status=CASE
+                            WHEN injury_status IS NULL OR injury_status=''
+                            THEN ? ELSE injury_status END,
+                        rookie=MAX(rookie, ?),
+                        active=MAX(active, ?),
+                        updated_at=?
+                    WHERE player_key=?
+                    """,
+                    (
+                        duplicate["player_id"] or "",
+                        duplicate["team"] or "",
+                        duplicate["team"] or "",
+                        duplicate["team"] or "",
+                        duplicate["age"],
+                        duplicate["college"] or "",
+                        duplicate["years_exp"],
+                        duplicate["status"] or "",
+                        duplicate["injury_status"] or "",
+                        int(duplicate["rookie"] or 0),
+                        int(duplicate["active"] or 0),
+                        now,
+                        canonical_key,
+                    ),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO season_stats(
+                        player_key, season, team, position,
+                        games, completions, attempts, passing_yards,
+                        passing_tds, interceptions, carries, rushing_yards,
+                        rushing_tds, targets, receptions, receiving_yards,
+                        receiving_tds, fantasy_points, fantasy_points_ppr,
+                        source, updated_at
+                    )
+                    SELECT
+                        ?, season, team, position,
+                        games, completions, attempts, passing_yards,
+                        passing_tds, interceptions, carries, rushing_yards,
+                        rushing_tds, targets, receptions, receiving_yards,
+                        receiving_tds, fantasy_points, fantasy_points_ppr,
+                        source, ?
+                    FROM season_stats
+                    WHERE player_key=?
+                    ON CONFLICT(player_key, season) DO UPDATE SET
+                        team=CASE
+                            WHEN excluded.games >= season_stats.games
+                            THEN excluded.team ELSE season_stats.team END,
+                        position=excluded.position,
+                        games=MAX(season_stats.games, excluded.games),
+                        completions=MAX(season_stats.completions, excluded.completions),
+                        attempts=MAX(season_stats.attempts, excluded.attempts),
+                        passing_yards=MAX(season_stats.passing_yards, excluded.passing_yards),
+                        passing_tds=MAX(season_stats.passing_tds, excluded.passing_tds),
+                        interceptions=MAX(season_stats.interceptions, excluded.interceptions),
+                        carries=MAX(season_stats.carries, excluded.carries),
+                        rushing_yards=MAX(season_stats.rushing_yards, excluded.rushing_yards),
+                        rushing_tds=MAX(season_stats.rushing_tds, excluded.rushing_tds),
+                        targets=MAX(season_stats.targets, excluded.targets),
+                        receptions=MAX(season_stats.receptions, excluded.receptions),
+                        receiving_yards=MAX(season_stats.receiving_yards, excluded.receiving_yards),
+                        receiving_tds=MAX(season_stats.receiving_tds, excluded.receiving_tds),
+                        fantasy_points=MAX(season_stats.fantasy_points, excluded.fantasy_points),
+                        fantasy_points_ppr=MAX(season_stats.fantasy_points_ppr, excluded.fantasy_points_ppr),
+                        source=excluded.source,
+                        updated_at=excluded.updated_at
+                    """,
+                    (canonical_key, now, duplicate_key),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO adp(
+                        player_key, season, platform, adp, position_adp,
+                        rank_value, source, updated_at
+                    )
+                    SELECT
+                        ?, season, platform, adp, position_adp,
+                        rank_value, source, ?
+                    FROM adp
+                    WHERE player_key=?
+                    ON CONFLICT(player_key, season, platform) DO UPDATE SET
+                        adp=MIN(adp.adp, excluded.adp),
+                        position_adp=CASE
+                            WHEN adp.position_adp IS NULL OR adp.position_adp=''
+                            THEN excluded.position_adp
+                            ELSE adp.position_adp
+                        END,
+                        rank_value=COALESCE(adp.rank_value, excluded.rank_value),
+                        source=CASE
+                            WHEN excluded.updated_at >= adp.updated_at
+                            THEN excluded.source ELSE adp.source END,
+                        updated_at=MAX(adp.updated_at, excluded.updated_at)
+                    """,
+                    (canonical_key, now, duplicate_key),
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO projections(
+                        player_key, season, games, passing_yards, passing_tds,
+                        interceptions, carries, rushing_yards, rushing_tds,
+                        targets, receptions, receiving_yards, receiving_tds,
+                        fantasy_points_ppr, method, source, updated_at
+                    )
+                    SELECT
+                        ?, season, games, passing_yards, passing_tds,
+                        interceptions, carries, rushing_yards, rushing_tds,
+                        targets, receptions, receiving_yards, receiving_tds,
+                        fantasy_points_ppr, method, source, ?
+                    FROM projections
+                    WHERE player_key=?
+                    ON CONFLICT(player_key, season) DO UPDATE SET
+                        games=MAX(projections.games, excluded.games),
+                        passing_yards=MAX(projections.passing_yards, excluded.passing_yards),
+                        passing_tds=MAX(projections.passing_tds, excluded.passing_tds),
+                        interceptions=MAX(projections.interceptions, excluded.interceptions),
+                        carries=MAX(projections.carries, excluded.carries),
+                        rushing_yards=MAX(projections.rushing_yards, excluded.rushing_yards),
+                        rushing_tds=MAX(projections.rushing_tds, excluded.rushing_tds),
+                        targets=MAX(projections.targets, excluded.targets),
+                        receptions=MAX(projections.receptions, excluded.receptions),
+                        receiving_yards=MAX(projections.receiving_yards, excluded.receiving_yards),
+                        receiving_tds=MAX(projections.receiving_tds, excluded.receiving_tds),
+                        fantasy_points_ppr=MAX(
+                            projections.fantasy_points_ppr,
+                            excluded.fantasy_points_ppr
+                        ),
+                        method=excluded.method,
+                        source=excluded.source,
+                        updated_at=excluded.updated_at
+                    """,
+                    (canonical_key, now, duplicate_key),
+                )
+
+                connection.execute(
+                    "DELETE FROM season_stats WHERE player_key=?",
+                    (duplicate_key,),
+                )
+                connection.execute(
+                    "DELETE FROM adp WHERE player_key=?",
+                    (duplicate_key,),
+                )
+                connection.execute(
+                    "DELETE FROM projections WHERE player_key=?",
+                    (duplicate_key,),
+                )
+                connection.execute(
+                    "DELETE FROM players WHERE player_key=?",
+                    (duplicate_key,),
+                )
+
+                seasons = connection.execute(
+                    """
+                    SELECT MIN(season), MAX(season)
+                    FROM season_stats
+                    WHERE player_key=?
+                    """,
+                    (canonical_key,),
+                ).fetchone()
+
+                connection.execute(
+                    """
+                    UPDATE players
+                    SET first_season=?, last_season=?, updated_at=?
+                    WHERE player_key=?
+                    """,
+                    (seasons[0], seasons[1], now, canonical_key),
+                )
+
+                merged.append(
+                    {
+                        "canonical": canonical["name"],
+                        "duplicate": duplicate["name"],
+                        "position": position,
+                        "career_rows_moved": int(duplicate["stats_count"] or 0),
+                        "adp_rows_moved": int(duplicate["adp_count"] or 0),
+                    }
+                )
+
+        _set_status(
+            connection,
+            "exact_duplicate_repair",
+            {
+                "merged_count": len(merged),
+                "records": merged[:100],
+            },
+        )
+
+    return {
+        "ok": True,
+        "merged_count": len(merged),
+        "records": merged,
+    }
+
+
 def repair_recent_player_aliases() -> dict[str, Any]:
     """
     Merge recent suffix/name variants that represent the same NFL player.
@@ -838,7 +1128,8 @@ def import_current_players() -> int:
             {"count": len(rows), "source": "Sleeper + 2026 master + saved ADP"},
         )
 
-    # Join recent suffix variants after current roster data has been applied.
+    # Consolidate punctuation variants, then suffix variants.
+    repair_exact_player_duplicates()
     repair_recent_player_aliases()
     return len(rows)
 
@@ -1243,7 +1534,8 @@ def import_season(season: int) -> int:
             {"season": season, "players": len(stat_rows)},
         )
 
-    # A season import may introduce a historical suffix/name variant.
+    # A season import may introduce punctuation or suffix variants.
+    repair_exact_player_duplicates()
     repair_recent_player_aliases()
     return len(stat_rows)
 
@@ -1772,6 +2064,7 @@ def import_adp_payload(
             },
         )
 
+    exact_repair = repair_exact_player_duplicates()
     alias_repair = repair_recent_player_aliases()
 
     return {
@@ -1783,6 +2076,7 @@ def import_adp_payload(
         "source": source_name
         or payload.get("source")
         or f"{platform} direct sync",
+        "exact_duplicate_merges": exact_repair.get("merged_count", 0),
         "alias_merges": alias_repair.get("merged_count", 0),
         "message": (
             f"Inserted {inserted_count} {platform} ADP rows into SQLite."
@@ -2027,6 +2321,49 @@ def status_api():
     return jsonify(database_status())
 
 
+@bp.get("/api/player-research-db/duplicate-status")
+def duplicate_status_api():
+    init_database()
+
+    with connect() as connection:
+        players = connection.execute(
+            """
+            SELECT
+                p.player_key,
+                p.name,
+                p.position,
+                p.team,
+                (SELECT COUNT(*) FROM season_stats s
+                 WHERE s.player_key=p.player_key) AS career_rows,
+                (SELECT COUNT(*) FROM adp a
+                 WHERE a.player_key=p.player_key AND a.season=2026) AS adp_rows
+            FROM players p
+            WHERE p.active=1
+            ORDER BY p.name COLLATE NOCASE
+            """
+        ).fetchall()
+
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for player in players:
+        grouped[(_norm(player["name"]), player["position"])].append(dict(player))
+
+    duplicates = [
+        {
+            "normalized_name": key[0],
+            "position": key[1],
+            "records": records,
+        }
+        for key, records in grouped.items()
+        if len(records) > 1
+    ]
+
+    return jsonify(
+        ok=not duplicates,
+        duplicate_group_count=len(duplicates),
+        duplicates=duplicates,
+    )
+
+
 @bp.get("/api/player-research-db/history-status")
 def history_status_api():
     init_database()
@@ -2125,7 +2462,15 @@ def adp_status_api():
 @bp.post("/api/player-research-db/repair-identities")
 def repair_identities_api():
     try:
-        return jsonify(repair_recent_player_aliases())
+        exact = repair_exact_player_duplicates()
+        suffixes = repair_recent_player_aliases()
+        return jsonify(
+            ok=True,
+            exact_duplicate_merges=exact.get("merged_count", 0),
+            suffix_merges=suffixes.get("merged_count", 0),
+            exact_records=exact.get("records", []),
+            suffix_records=suffixes.get("pairs", []),
+        )
     except Exception as exc:
         current_app.logger.exception("Player identity repair failed")
         return jsonify(ok=False, error=str(exc)), 500
@@ -2195,6 +2540,7 @@ def import_career_history_api():
 
     try:
         result = import_all_history(start_season, end_season)
+        exact_result = repair_exact_player_duplicates()
         identity_result = repair_recent_player_aliases()
         status = database_status()
         return jsonify(
@@ -2211,6 +2557,7 @@ def import_career_history_api():
             stored_seasons=status.get("seasons", 0),
             first_stored_season=status.get("first_season"),
             last_stored_season=status.get("last_season"),
+            exact_duplicate_merges=exact_result.get("merged_count", 0),
             identity_merges=identity_result.get("merged_count", 0),
         )
     except Exception as exc:
