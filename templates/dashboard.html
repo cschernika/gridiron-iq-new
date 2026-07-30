@@ -40,21 +40,31 @@
 <section class="dash-grid">
   <article class="panel">
     <div class="panel-head"><div><div class="panel-kicker">LEAGUE SNAPSHOT</div><h2>Power Rankings</h2></div><a href="/league-intelligence">View analyzer →</a></div>
-    <table><thead><tr><th>RANK</th><th>TEAM</th><th>RATING</th><th>PLAYOFF %</th></tr></thead><tbody>
-    {% if analytics and analytics.power_rankings %}
-      {% for t in analytics.power_rankings[:5] %}
-      <tr class="{% if user_team and t.team == user_team.team_name %}user-rank{% endif %}">
-        <td>#{{ t.rank }}</td><td><span class="mini-logo">{{ t.team[:1] }}</span>{{ t.team }}{% if user_team and t.team == user_team.team_name %} (You){% endif %}</td><td>{{ t.rating }}</td><td>{{ t.playoffs }}%</td>
-      </tr>
-      {% endfor %}
-    {% else %}
-      <tr><td>#1</td><td><span class="mini-logo">S</span>Sunday Crushers</td><td>91</td><td>82%</td></tr>
-      <tr><td>#2</td><td><span class="mini-logo">F</span>Fourth & Long</td><td>88</td><td>77%</td></tr>
-      <tr class="user-rank"><td>#3</td><td><span class="mini-logo">C</span>Chad's Team (You)</td><td>86</td><td>74%</td></tr>
-      <tr><td>#4</td><td><span class="mini-logo">G</span>Gridiron Gurus</td><td>84</td><td>69%</td></tr>
-      <tr><td>#5</td><td><span class="mini-logo">R</span>Red Zone Renegades</td><td>82</td><td>63%</td></tr>
-    {% endif %}
-    </tbody></table>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr><th>RANK</th><th>TEAM</th><th>RATING</th><th>PLAYOFF %</th></tr>
+        </thead>
+        <tbody>
+        {% if analytics and analytics.power_rankings %}
+          {% for t in analytics.power_rankings %}
+          <tr class="{% if user_team and t.team == user_team.team_name %}user-rank{% endif %}">
+            <td>#{{ t.rank }}</td>
+            <td><span class="mini-logo">{{ t.team[:1] }}</span>{{ t.team }}{% if user_team and t.team == user_team.team_name %} (You){% endif %}</td>
+            <td>{{ t.rating }}</td>
+            <td>{{ t.playoffs }}%</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr><td>#1</td><td><span class="mini-logo">S</span>Sunday Crushers</td><td>91</td><td>82%</td></tr>
+          <tr><td>#2</td><td><span class="mini-logo">F</span>Fourth & Long</td><td>88</td><td>77%</td></tr>
+          <tr class="user-rank"><td>#3</td><td><span class="mini-logo">C</span>Chad's Team (You)</td><td>86</td><td>74%</td></tr>
+          <tr><td>#4</td><td><span class="mini-logo">G</span>Gridiron Gurus</td><td>84</td><td>69%</td></tr>
+          <tr><td>#5</td><td><span class="mini-logo">R</span>Red Zone Renegades</td><td>82</td><td>63%</td></tr>
+        {% endif %}
+        </tbody>
+      </table>
+    </div>
     <a class="footer-link" href="/league-intelligence">View full league analyzer →</a>
   </article>
 
