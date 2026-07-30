@@ -203,16 +203,148 @@ def user_team(teams):
             return t
     return None
 
+def dashboard_analytics_with_actual_teams(
+    teams,
+    expected_team_count=None,
+):
+    """
+    Preserve the dashboard's existing analytics schema while showing every
+    configured league slot.
+
+    ESPN can return fewer team objects than the configured league size when a
+    slot is unclaimed or a manager has not joined yet. Missing slots are shown
+    as Open Team Slot rather than disappearing from Power Rankings.
+    """
+    analytics = {
+        key: (
+            [dict(item) for item in value]
+            if isinstance(value, list)
+            else value
+        )
+        for key, value in DEMO.items()
+    }
+
+    actual_teams = [
+        dict(team)
+        for team in (teams or [])
+        if isinstance(team, dict)
+    ]
+
+    try:
+        configured_count = int(expected_team_count or 0)
+    except (TypeError, ValueError):
+        configured_count = 0
+
+    total_slots = max(configured_count, len(actual_teams))
+
+    if total_slots <= 0:
+        return analytics
+
+    # Keep every ESPN team exactly once. Empty or duplicate names receive a
+    # stable fallback label rather than being omitted.
+    ranking_rows = []
+    seen_names = {}
+
+    for index in range(1, total_slots + 1):
+        team = actual_teams[index - 1] if index <= len(actual_teams) else {}
+
+        raw_name = str(
+            team.get("team_name")
+            or team.get("name")
+            or ""
+        ).strip()
+
+        if raw_name:
+            base_name = raw_name
+            duplicate_number = seen_names.get(base_name.lower(), 0) + 1
+            seen_names[base_name.lower()] = duplicate_number
+            name = (
+                base_name
+                if duplicate_number == 1
+                else f"{base_name} ({duplicate_number})"
+            )
+        else:
+            name = f"Open Team Slot {index}"
+
+        rating = max(50, 92 - ((index - 1) * 3))
+        playoffs = max(5, 85 - ((index - 1) * 6))
+
+        ranking_rows.append(
+            {
+                "rank": index,
+                "team": name,
+                "rating": rating,
+                "playoffs": playoffs,
+            }
+        )
+
+    analytics["power_rankings"] = ranking_rows
+
+    selected = user_team(actual_teams)
+    if selected:
+        selected_name = str(
+            selected.get("team_name")
+            or selected.get("name")
+            or ""
+        ).strip().lower()
+
+        for row in ranking_rows:
+            if str(row["team"]).strip().lower() == selected_name:
+                analytics["team_rank"] = row["rank"]
+                analytics["team_strength"] = row["rating"]
+                analytics["playoff_probability"] = row["playoffs"]
+                break
+
+    analytics["championship_probability"] = max(
+        1,
+        min(
+            50,
+            round(
+                analytics.get("playoff_probability", 50)
+                / max(2, total_slots)
+            ),
+        ),
+    )
+
+    return analytics
+
+
+
 def page(template, **ctx):
     snap = load_snapshot()
     connected = bool(snap)
     league = snap.get("league") if snap else None
     settings = snap.get("settings") if snap else None
-    teams = snap.get("teams",[]) if snap else []
+    teams = snap.get("teams", []) if snap else []
+
+    # This helper cannot take down the dashboard. It preserves the exact
+    # original analytics structure expected by the existing template.
+    try:
+        expected_team_count = (
+            (league or {}).get("teams")
+            or (settings or {}).get("team_count")
+            or len(teams)
+        )
+        analytics = dashboard_analytics_with_actual_teams(
+            teams,
+            expected_team_count,
+        )
+    except Exception:
+        app.logger.exception(
+            "Unable to replace demo power-ranking team names"
+        )
+        analytics = DEMO
+
     return render_template(
-        template, user=USER, connected=connected, league=league,
-        league_settings=settings, teams=teams, user_team=user_team(teams),
-        analytics=DEMO, **ctx
+        template,
+        user=USER,
+        connected=connected,
+        league=league,
+        league_settings=settings,
+        teams=teams,
+        user_team=user_team(teams),
+        analytics=analytics,
+        **ctx,
     )
 
 def draft_state(key):
@@ -570,6 +702,60 @@ def league_summary_api():
 def league_teams_api():
     data = connected_league_data()
     return jsonify(ok=bool(data["league"]), league=data["league"], teams=data["teams"])
+
+
+@app.get("/api/league/power-ranking-teams")
+def league_power_ranking_teams_api():
+    data = connected_league_data()
+    league = data["league"] or {}
+    settings = data["settings"] or {}
+    actual_teams = [
+        team
+        for team in data["teams"]
+        if isinstance(team, dict)
+    ]
+
+    try:
+        configured_count = int(
+            league.get("teams")
+            or settings.get("team_count")
+            or len(actual_teams)
+        )
+    except (TypeError, ValueError):
+        configured_count = len(actual_teams)
+
+    analytics = dashboard_analytics_with_actual_teams(
+        actual_teams,
+        configured_count,
+    )
+
+    return jsonify(
+        ok=bool(league),
+        configured_team_count=configured_count,
+        synced_team_count=len(actual_teams),
+        ranking_row_count=len(analytics.get("power_rankings", [])),
+        teams=analytics.get("power_rankings", []),
+    )
+
+def league_power_ranking_teams_api():
+    data = connected_league_data()
+    teams = [
+        {
+            "rank": index,
+            "team": str(
+                team.get("team_name")
+                or team.get("name")
+                or f"Team {index}"
+            ).strip(),
+        }
+        for index, team in enumerate(data["teams"], start=1)
+        if isinstance(team, dict)
+    ]
+    return jsonify(
+        ok=bool(data["league"]),
+        team_count=len(teams),
+        teams=teams,
+    )
 
 @app.get("/lineup-optimizer")
 def lineup_optimizer(): return page("lineup.html")
