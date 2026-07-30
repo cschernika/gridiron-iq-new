@@ -203,114 +203,16 @@ def user_team(teams):
             return t
     return None
 
-
-def dashboard_analytics_with_actual_teams(teams):
-    """
-    Preserve the dashboard's original analytics schema while replacing demo
-    power-ranking names with the actual teams from the synced league.
-
-    This deliberately returns only the fields the existing dashboard template
-    already expects: rank, team, rating and playoffs.
-    """
-    analytics = {
-        key: (
-            [dict(item) for item in value]
-            if isinstance(value, list)
-            else value
-        )
-        for key, value in DEMO.items()
-    }
-
-    actual_teams = [
-        team for team in (teams or [])
-        if isinstance(team, dict)
-    ]
-    if not actual_teams:
-        return analytics
-
-    ranking_rows = []
-    team_count = len(actual_teams)
-
-    for index, team in enumerate(actual_teams, start=1):
-        name = str(
-            team.get("team_name")
-            or team.get("name")
-            or f"Team {index}"
-        ).strip()
-
-        # Keep safe placeholder rating values until the league has enough
-        # results to calculate meaningful rankings.
-        rating = max(50, 92 - ((index - 1) * 3))
-        playoffs = max(5, 85 - ((index - 1) * 6))
-
-        ranking_rows.append(
-            {
-                "rank": index,
-                "team": name,
-                "rating": rating,
-                "playoffs": playoffs,
-            }
-        )
-
-    analytics["power_rankings"] = ranking_rows
-
-    selected = user_team(actual_teams)
-    if selected:
-        selected_name = str(
-            selected.get("team_name")
-            or selected.get("name")
-            or ""
-        ).strip().lower()
-
-        for row in ranking_rows:
-            if str(row["team"]).strip().lower() == selected_name:
-                analytics["team_rank"] = row["rank"]
-                analytics["team_strength"] = row["rating"]
-                analytics["playoff_probability"] = row["playoffs"]
-                break
-
-    # Keep the existing championship field in a safe range.
-    analytics["championship_probability"] = max(
-        1,
-        min(
-            50,
-            round(
-                analytics.get("playoff_probability", 50)
-                / max(2, team_count)
-            ),
-        ),
-    )
-
-    return analytics
-
-
 def page(template, **ctx):
     snap = load_snapshot()
     connected = bool(snap)
     league = snap.get("league") if snap else None
     settings = snap.get("settings") if snap else None
-    teams = snap.get("teams", []) if snap else []
-
-    # This helper cannot take down the dashboard. It preserves the exact
-    # original analytics structure expected by the existing template.
-    try:
-        analytics = dashboard_analytics_with_actual_teams(teams)
-    except Exception:
-        app.logger.exception(
-            "Unable to replace demo power-ranking team names"
-        )
-        analytics = DEMO
-
+    teams = snap.get("teams",[]) if snap else []
     return render_template(
-        template,
-        user=USER,
-        connected=connected,
-        league=league,
-        league_settings=settings,
-        teams=teams,
-        user_team=user_team(teams),
-        analytics=analytics,
-        **ctx,
+        template, user=USER, connected=connected, league=league,
+        league_settings=settings, teams=teams, user_team=user_team(teams),
+        analytics=DEMO, **ctx
     )
 
 def draft_state(key):
@@ -667,33 +569,7 @@ def league_summary_api():
 @app.get("/api/league/teams")
 def league_teams_api():
     data = connected_league_data()
-    return jsonify(
-        ok=bool(data["league"]),
-        league=data["league"],
-        teams=data["teams"],
-    )
-
-
-@app.get("/api/league/power-ranking-teams")
-def league_power_ranking_teams_api():
-    data = connected_league_data()
-    teams = [
-        {
-            "rank": index,
-            "team": str(
-                team.get("team_name")
-                or team.get("name")
-                or f"Team {index}"
-            ).strip(),
-        }
-        for index, team in enumerate(data["teams"], start=1)
-        if isinstance(team, dict)
-    ]
-    return jsonify(
-        ok=bool(data["league"]),
-        team_count=len(teams),
-        teams=teams,
-    )
+    return jsonify(ok=bool(data["league"]), league=data["league"], teams=data["teams"])
 
 @app.get("/lineup-optimizer")
 def lineup_optimizer(): return page("lineup.html")

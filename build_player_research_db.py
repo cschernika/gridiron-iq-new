@@ -9,6 +9,7 @@ from player_research_db import (
     import_public_adp,
     import_adp,
     import_all_history,
+    import_complete_history,
     import_current_players,
     import_projections,
     import_season,
@@ -57,9 +58,7 @@ def main() -> None:
         if args.history:
             result["history"] = import_all_history(args.start, args.end)
         if args.career_history:
-            result["career_history"] = import_all_history(1999, 2025)
-            result["exact_duplicate_repair"] = repair_exact_player_duplicates()
-            result["identity_repair"] = repair_recent_player_aliases()
+            result["career_history"] = import_complete_history(1999, 2025)
             from player_research_db import database_status
             result["database_status"] = database_status()
         if args.season:

@@ -1566,21 +1566,351 @@ def import_season(season: int) -> int:
     return len(stat_rows)
 
 
-def import_all_history(start_season: int = 1999, end_season: int = 2025) -> dict[str, Any]:
-    imported = {}
-    failures = {}
 
-    for season in range(int(start_season), int(end_season) + 1):
+def _download_complete_player_history() -> list[dict[str, str]]:
+    """
+    Download nflverse's all-season weekly player-stat file.
+
+    This is more reliable for building complete careers than depending on one
+    separate release asset per season. The file contains a `season` column and
+    weekly rows that are aggregated into player-season totals below.
+    """
+    cache_path = DATA_DIR / "nflverse_complete_player_history.csv"
+
+    cached = _read_cached_stats(cache_path)
+    if cached and any(row.get("season") for row in cached):
+        return cached
+
+    candidates = [
+        (
+            "nflverse weekly_data player_stats.csv",
+            "https://github.com/nflverse/nflverse-data/releases/download/weekly_data/player_stats.csv",
+            False,
+        ),
+        (
+            "nflverse weekly_data player_stats.csv.gz",
+            "https://github.com/nflverse/nflverse-data/releases/download/weekly_data/player_stats.csv.gz",
+            True,
+        ),
+    ]
+
+    errors = []
+
+    for source_name, url, compressed in candidates:
         try:
-            imported[str(season)] = import_season(season)
+            response = requests.get(
+                url,
+                headers={
+                    "User-Agent": "Gridiron-IQ/2026",
+                    "Accept": "text/csv,application/gzip,*/*",
+                },
+                timeout=(15, 180),
+            )
+            response.raise_for_status()
+
+            content = response.content
+            if compressed:
+                content = gzip.decompress(content)
+
+            text = content.decode("utf-8-sig", errors="replace")
+            reader = csv.DictReader(io.StringIO(text))
+
+            if not _valid_stats_headers(reader.fieldnames):
+                raise RuntimeError("required player-stat columns were missing")
+
+            fieldnames = {
+                str(field or "").strip()
+                for field in (reader.fieldnames or [])
+            }
+            if "season" not in fieldnames:
+                raise RuntimeError("the all-season file did not include season")
+
+            rows = list(reader)
+            if len(rows) < 1000:
+                raise RuntimeError(
+                    f"only {len(rows)} rows were returned"
+                )
+
+            cache_path.write_text(text, encoding="utf-8")
+            return rows
         except Exception as exc:
-            failures[str(season)] = str(exc)
+            errors.append(f"{source_name}: {exc}")
+
+    raise RuntimeError(
+        "Unable to download the complete nflverse player-stat history: "
+        + " | ".join(errors)
+    )
+
+
+def import_complete_history(
+    start_season: int = 1999,
+    end_season: int = 2025,
+) -> dict[str, Any]:
+    """
+    Import all available player seasons from one complete nflverse data file.
+
+    Weekly records are grouped by normalized player name and season, then
+    written to SQLite as one season row per player.
+    """
+    init_database()
+    start_season = max(1999, int(start_season))
+    end_season = min(2025, int(end_season))
+
+    raw_rows = _download_complete_player_history()
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+
+    for row in raw_rows:
+        try:
+            season = int(float(row.get("season") or 0))
+        except Exception:
+            continue
+
+        if season < start_season or season > end_season:
+            continue
+
+        name = _row_name(row)
+        if not name:
+            continue
+
+        grouped[(_norm(name), season)].append(row)
+
+    now = datetime.now(timezone.utc).isoformat()
+    player_accumulator: dict[str, dict[str, Any]] = {}
+    stat_rows = []
+
+    for (player_key, season), matches in grouped.items():
+        first = matches[0]
+        name = _row_name(first)
+        position = _position(
+            first.get("position")
+            or first.get("position_group")
+        )
+
+        teams = [
+            str(
+                row.get("recent_team")
+                or row.get("team")
+                or ""
+            ).upper().strip()
+            for row in matches
+            if str(
+                row.get("recent_team")
+                or row.get("team")
+                or ""
+            ).strip()
+        ]
+        team = teams[-1] if teams else "FA"
+
+        stats = _aggregate_rows(matches, name)
+
+        stat_rows.append(
+            (
+                player_key,
+                season,
+                team,
+                position,
+                *[stats[field] for field in STAT_FIELDS],
+                "nflverse complete weekly history",
+                now,
+            )
+        )
+
+        existing = player_accumulator.get(player_key)
+        if existing is None:
+            player_accumulator[player_key] = {
+                "player_key": player_key,
+                "player_id": str(first.get("player_id") or ""),
+                "name": name,
+                "position": position,
+                "team": team,
+                "first_season": season,
+                "last_season": season,
+            }
+        else:
+            existing["first_season"] = min(
+                existing["first_season"],
+                season,
+            )
+            existing["last_season"] = max(
+                existing["last_season"],
+                season,
+            )
+            if season >= existing["last_season"]:
+                existing["team"] = team
+                if position:
+                    existing["position"] = position
+            if not existing["player_id"] and first.get("player_id"):
+                existing["player_id"] = str(first.get("player_id"))
+
+    player_rows = [
+        (
+            row["player_key"],
+            row["player_id"],
+            row["name"],
+            row["position"],
+            row["team"] or "FA",
+            1,
+            row["first_season"],
+            row["last_season"],
+            now,
+        )
+        for row in player_accumulator.values()
+    ]
+
+    with connect() as connection:
+        connection.executemany(
+            """
+            INSERT INTO players(
+                player_key, player_id, name, position, team, active,
+                first_season, last_season, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(player_key) DO UPDATE SET
+                player_id=CASE
+                    WHEN excluded.player_id<>'' THEN excluded.player_id
+                    ELSE players.player_id
+                END,
+                name=excluded.name,
+                position=CASE
+                    WHEN excluded.position<>'' THEN excluded.position
+                    ELSE players.position
+                END,
+                team=CASE
+                    WHEN players.team IS NULL
+                      OR players.team=''
+                      OR players.team='FA'
+                    THEN excluded.team
+                    ELSE players.team
+                END,
+                active=MAX(players.active, excluded.active),
+                first_season=CASE
+                    WHEN players.first_season IS NULL
+                    THEN excluded.first_season
+                    ELSE MIN(players.first_season, excluded.first_season)
+                END,
+                last_season=CASE
+                    WHEN players.last_season IS NULL
+                    THEN excluded.last_season
+                    ELSE MAX(players.last_season, excluded.last_season)
+                END,
+                updated_at=excluded.updated_at
+            """,
+            player_rows,
+        )
+
+        connection.executemany(
+            """
+            INSERT INTO season_stats(
+                player_key, season, team, position,
+                games, completions, attempts, passing_yards, passing_tds,
+                interceptions, carries, rushing_yards, rushing_tds,
+                targets, receptions, receiving_yards, receiving_tds,
+                fantasy_points, fantasy_points_ppr, source, updated_at
+            )
+            VALUES (
+                ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?
+            )
+            ON CONFLICT(player_key, season) DO UPDATE SET
+                team=excluded.team,
+                position=excluded.position,
+                games=excluded.games,
+                completions=excluded.completions,
+                attempts=excluded.attempts,
+                passing_yards=excluded.passing_yards,
+                passing_tds=excluded.passing_tds,
+                interceptions=excluded.interceptions,
+                carries=excluded.carries,
+                rushing_yards=excluded.rushing_yards,
+                rushing_tds=excluded.rushing_tds,
+                targets=excluded.targets,
+                receptions=excluded.receptions,
+                receiving_yards=excluded.receiving_yards,
+                receiving_tds=excluded.receiving_tds,
+                fantasy_points=excluded.fantasy_points,
+                fantasy_points_ppr=excluded.fantasy_points_ppr,
+                source=excluded.source,
+                updated_at=excluded.updated_at
+            """,
+            stat_rows,
+        )
+
+        stored = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS row_count,
+                COUNT(DISTINCT player_key) AS player_count,
+                COUNT(DISTINCT season) AS season_count,
+                MIN(season) AS first_season,
+                MAX(season) AS last_season
+            FROM season_stats
+            """
+        ).fetchone()
+
+        _set_status(
+            connection,
+            "complete_history",
+            {
+                "imported_rows": len(stat_rows),
+                "stored_rows": stored["row_count"],
+                "players": stored["player_count"],
+                "seasons": stored["season_count"],
+                "first_season": stored["first_season"],
+                "last_season": stored["last_season"],
+            },
+        )
+
+    exact_result = repair_exact_player_duplicates()
+    suffix_result = repair_recent_player_aliases()
 
     return {
-        "imported": imported,
-        "failures": failures,
-        "season_count": len(imported),
+        "ok": len(stat_rows) > 0,
+        "imported_rows": len(stat_rows),
+        "imported_players": len(player_rows),
+        "start_season": start_season,
+        "end_season": end_season,
+        "stored_rows": stored["row_count"],
+        "stored_players": stored["player_count"],
+        "stored_seasons": stored["season_count"],
+        "first_stored_season": stored["first_season"],
+        "last_stored_season": stored["last_season"],
+        "exact_duplicate_merges": exact_result.get("merged_count", 0),
+        "suffix_merges": suffix_result.get("merged_count", 0),
     }
+
+
+def import_all_history(start_season: int = 1999, end_season: int = 2025) -> dict[str, Any]:
+    try:
+        complete = import_complete_history(start_season, end_season)
+        return {
+            "imported": {
+                "complete_history": complete.get("imported_rows", 0)
+            },
+            "failures": {},
+            "season_count": complete.get("stored_seasons", 0),
+            "complete_history": complete,
+        }
+    except Exception as complete_exc:
+        imported = {}
+        failures = {
+            "complete_history": str(complete_exc)
+        }
+
+        # Retain the old per-season importer as a fallback.
+        for season in range(int(start_season), int(end_season) + 1):
+            try:
+                imported[str(season)] = import_season(season)
+            except Exception as exc:
+                failures[str(season)] = str(exc)
+
+        return {
+            "imported": imported,
+            "failures": failures,
+            "season_count": len(imported),
+        }
 
 
 def _adp_candidates(platform: str) -> list[Path]:
@@ -2675,6 +3005,22 @@ def import_projection_api():
         return jsonify(ok=True, projection_count=count)
     except Exception as exc:
         current_app.logger.exception("Player database projection import failed")
+        return jsonify(ok=False, error=str(exc)), 500
+
+
+@bp.post("/api/player-research-db/import-complete-history")
+def import_complete_history_api():
+    body = request.get_json(silent=True) or {}
+    start_season = _int_or_none(body.get("start_season")) or 1999
+    end_season = _int_or_none(body.get("end_season")) or 2025
+
+    try:
+        result = import_complete_history(start_season, end_season)
+        return jsonify(result), 200 if result.get("ok") else 409
+    except Exception as exc:
+        current_app.logger.exception(
+            "Complete multi-season history import failed"
+        )
         return jsonify(ok=False, error=str(exc)), 500
 
 
