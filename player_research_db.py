@@ -3354,6 +3354,285 @@ def table_api():
     )
 
 
+
+def hydrate_player_career(player_key: str) -> dict[str, Any]:
+    """
+    Import missing completed seasons for one player when their profile opens.
+
+    This avoids depending on a long all-player import. Matching prefers the
+    stable nflverse player ID and falls back to normalized name matching.
+    """
+    init_database()
+
+    with connect() as connection:
+        player = connection.execute(
+            "SELECT * FROM players WHERE player_key=?",
+            (player_key,),
+        ).fetchone()
+
+        if not player:
+            return {
+                "ok": False,
+                "imported_seasons": [],
+                "error": "Player was not found.",
+            }
+
+        stored_seasons = {
+            int(row["season"])
+            for row in connection.execute(
+                """
+                SELECT season
+                FROM season_stats
+                WHERE player_key=?
+                """,
+                (player_key,),
+            ).fetchall()
+        }
+
+    years_exp = int(_number(player["years_exp"]))
+    first_season_value = (
+        int(player["first_season"])
+        if player["first_season"] is not None
+        else None
+    )
+
+    # Estimate the first NFL season from experience when the existing database
+    # incorrectly says the career began in 2025.
+    experience_first = (
+        max(1999, 2026 - years_exp - 1)
+        if years_exp > 0
+        else 2025
+    )
+
+    start_season = min(
+        value
+        for value in (first_season_value, experience_first)
+        if value is not None
+    )
+    start_season = max(1999, min(start_season, 2025))
+
+    expected_seasons = set(range(start_season, 2026))
+    missing_seasons = sorted(expected_seasons - stored_seasons)
+
+    if not missing_seasons:
+        return {
+            "ok": True,
+            "imported_seasons": [],
+            "stored_seasons": sorted(stored_seasons),
+        }
+
+    player_id = str(player["player_id"] or "").strip()
+    target_names = {
+        _norm(player["name"]),
+        _identity_base_key(player["name"]),
+    }
+
+    now = datetime.now(timezone.utc).isoformat()
+    inserted = []
+    failures = {}
+
+    for season in missing_seasons:
+        try:
+            rows = _download_official_regular_season(season)
+            matches = []
+
+            for row in rows:
+                row_id = str(
+                    row.get("player_id")
+                    or row.get("gsis_id")
+                    or ""
+                ).strip()
+                row_name = _row_name(row)
+
+                id_match = bool(
+                    player_id
+                    and row_id
+                    and row_id == player_id
+                )
+                name_match = (
+                    _norm(row_name) in target_names
+                    or _identity_base_key(row_name) in target_names
+                )
+
+                if id_match or name_match:
+                    matches.append(row)
+
+            if not matches:
+                failures[str(season)] = "Player was not present in that season file."
+                continue
+
+            first = matches[0]
+            position = _position(
+                first.get("position")
+                or first.get("position_group")
+                or player["position"]
+            )
+
+            team_values = [
+                str(
+                    row.get("team")
+                    or row.get("recent_team")
+                    or ""
+                ).upper().strip()
+                for row in matches
+                if str(
+                    row.get("team")
+                    or row.get("recent_team")
+                    or ""
+                ).strip()
+            ]
+            team = team_values[-1] if team_values else "FA"
+            stats = _aggregate_rows(matches, player["name"])
+
+            with connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO season_stats(
+                        player_key, season, team, position,
+                        games, completions, attempts, passing_yards,
+                        passing_tds, interceptions, carries, rushing_yards,
+                        rushing_tds, targets, receptions, receiving_yards,
+                        receiving_tds, fantasy_points, fantasy_points_ppr,
+                        source, updated_at
+                    )
+                    VALUES (
+                        ?, ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?
+                    )
+                    ON CONFLICT(player_key, season) DO UPDATE SET
+                        team=excluded.team,
+                        position=excluded.position,
+                        games=excluded.games,
+                        completions=excluded.completions,
+                        attempts=excluded.attempts,
+                        passing_yards=excluded.passing_yards,
+                        passing_tds=excluded.passing_tds,
+                        interceptions=excluded.interceptions,
+                        carries=excluded.carries,
+                        rushing_yards=excluded.rushing_yards,
+                        rushing_tds=excluded.rushing_tds,
+                        targets=excluded.targets,
+                        receptions=excluded.receptions,
+                        receiving_yards=excluded.receiving_yards,
+                        receiving_tds=excluded.receiving_tds,
+                        fantasy_points=excluded.fantasy_points,
+                        fantasy_points_ppr=excluded.fantasy_points_ppr,
+                        source=excluded.source,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        player_key,
+                        season,
+                        team,
+                        position,
+                        *[stats[field] for field in STAT_FIELDS],
+                        f"nflverse on-demand stats_player_reg_{season}.csv",
+                        now,
+                    ),
+                )
+
+                discovered_id = str(
+                    first.get("player_id")
+                    or first.get("gsis_id")
+                    or ""
+                ).strip()
+
+                connection.execute(
+                    """
+                    UPDATE players
+                    SET
+                        player_id=CASE
+                            WHEN (player_id IS NULL OR player_id='')
+                                 AND ?<>''
+                            THEN ?
+                            ELSE player_id
+                        END,
+                        first_season=CASE
+                            WHEN first_season IS NULL
+                            THEN ?
+                            ELSE MIN(first_season, ?)
+                        END,
+                        last_season=CASE
+                            WHEN last_season IS NULL
+                            THEN ?
+                            ELSE MAX(last_season, ?)
+                        END,
+                        updated_at=?
+                    WHERE player_key=?
+                    """,
+                    (
+                        discovered_id,
+                        discovered_id,
+                        season,
+                        season,
+                        season,
+                        season,
+                        now,
+                        player_key,
+                    ),
+                )
+
+            if not player_id:
+                player_id = str(
+                    first.get("player_id")
+                    or first.get("gsis_id")
+                    or ""
+                ).strip()
+
+            inserted.append(season)
+
+        except Exception as exc:
+            failures[str(season)] = str(exc)
+
+    repair_exact_player_duplicates()
+    repair_recent_player_aliases()
+
+    with connect() as connection:
+        final_seasons = [
+            int(row["season"])
+            for row in connection.execute(
+                """
+                SELECT season
+                FROM season_stats
+                WHERE player_key=?
+                ORDER BY season
+                """,
+                (player_key,),
+            ).fetchall()
+        ]
+
+    return {
+        "ok": bool(final_seasons),
+        "imported_seasons": inserted,
+        "stored_seasons": final_seasons,
+        "failures": failures,
+    }
+
+
+@bp.post("/api/player-research-db/refresh-player-career/<path:player_name>")
+def refresh_player_career_api(player_name: str):
+    init_database()
+    with connect() as connection:
+        player = connection.execute(
+            """
+            SELECT player_key
+            FROM players
+            WHERE player_key=? OR name=? COLLATE NOCASE
+            LIMIT 1
+            """,
+            (_norm(player_name), player_name),
+        ).fetchone()
+
+    if not player:
+        return jsonify(ok=False, error="Player was not found."), 404
+
+    result = hydrate_player_career(player["player_key"])
+    return jsonify(result), 200 if result.get("ok") else 409
+
+
 @bp.get("/api/player-research-db/profile/<path:player_name>")
 def profile_api(player_name: str):
     init_database()
@@ -3379,6 +3658,16 @@ def profile_api(player_name: str):
             return jsonify(ok=False, error="Player not found in database."), 404
 
         player_key = player["player_key"]
+
+    # Import missing career seasons before reading the profile history.
+    hydration = hydrate_player_career(player_key)
+
+    with connect() as db:
+        player = db.execute(
+            "SELECT * FROM players WHERE player_key=?",
+            (player_key,),
+        ).fetchone()
+
         history = db.execute(
             """
             SELECT *
@@ -3493,6 +3782,7 @@ def profile_api(player_name: str):
                 "per_season": career_per_season,
                 "per_game": career_per_game,
             },
+            "career_hydration": hydration,
             "projection": projection_data,
             "injury": {
                 "status": player["injury_status"] or "",
