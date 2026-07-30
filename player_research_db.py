@@ -223,6 +223,19 @@ def init_database() -> None:
             """
         )
 
+        # Add richer ADP source fields to existing databases without requiring
+        # the persistent SQLite file to be deleted.
+        existing_adp_columns = {
+            row["name"]
+            for row in db.execute("PRAGMA table_info(adp)").fetchall()
+        }
+        if "adp_type" not in existing_adp_columns:
+            db.execute("ALTER TABLE adp ADD COLUMN adp_type TEXT")
+        if "platform_adp" not in existing_adp_columns:
+            db.execute("ALTER TABLE adp ADD COLUMN platform_adp REAL")
+        if "consensus_adp" not in existing_adp_columns:
+            db.execute("ALTER TABLE adp ADD COLUMN consensus_adp REAL")
+
 
 def _set_status(db: sqlite3.Connection, key: str, value: Any) -> None:
     db.execute(
@@ -414,11 +427,13 @@ def repair_exact_player_duplicates() -> dict[str, Any]:
                     """
                     INSERT INTO adp(
                         player_key, season, platform, adp, position_adp,
-                        rank_value, source, updated_at
+                        rank_value, source, updated_at, adp_type,
+                        platform_adp, consensus_adp
                     )
                     SELECT
                         ?, season, platform, adp, position_adp,
-                        rank_value, source, ?
+                        rank_value, source, ?, adp_type,
+                        platform_adp, consensus_adp
                     FROM adp
                     WHERE player_key=?
                     ON CONFLICT(player_key, season, platform) DO UPDATE SET
@@ -432,7 +447,16 @@ def repair_exact_player_duplicates() -> dict[str, Any]:
                         source=CASE
                             WHEN excluded.updated_at >= adp.updated_at
                             THEN excluded.source ELSE adp.source END,
-                        updated_at=MAX(adp.updated_at, excluded.updated_at)
+                        updated_at=MAX(adp.updated_at, excluded.updated_at),
+                        adp_type=COALESCE(excluded.adp_type, adp.adp_type),
+                        platform_adp=COALESCE(
+                            excluded.platform_adp,
+                            adp.platform_adp
+                        ),
+                        consensus_adp=COALESCE(
+                            excluded.consensus_adp,
+                            adp.consensus_adp
+                        )
                     """,
                     (canonical_key, now, duplicate_key),
                 )
@@ -698,11 +722,13 @@ def repair_recent_player_aliases() -> dict[str, Any]:
                     """
                     INSERT INTO adp(
                         player_key, season, platform, adp, position_adp,
-                        rank_value, source, updated_at
+                        rank_value, source, updated_at, adp_type,
+                        platform_adp, consensus_adp
                     )
                     SELECT
                         ?, season, platform, adp, position_adp,
-                        rank_value, source, ?
+                        rank_value, source, ?, adp_type,
+                        platform_adp, consensus_adp
                     FROM adp
                     WHERE player_key=?
                     ON CONFLICT(player_key, season, platform) DO UPDATE SET
@@ -1687,10 +1713,22 @@ def _parse_public_adp_html(
     platform_col = _find_header_column(header, *platform_headers)
     position_col = _find_header_column(header, "POS", "POSITION")
     team_col = _find_header_column(header, "TEAM")
-    rank_col = _find_header_column(header, "RANK", "ADP")
+    rank_col = _find_header_column(header, "RANK")
+    consensus_col = _find_header_column(
+        header,
+        "AVG",
+        "ADP",
+        "CONSENSUS",
+        "AVERAGE",
+    )
 
-    if player_col is None or platform_col is None:
-        raise RuntimeError("Required player and platform columns were missing.")
+    if player_col is None:
+        raise RuntimeError("The player column was missing.")
+
+    if platform_col is None and consensus_col is None:
+        raise RuntimeError(
+            "Neither a platform-specific nor consensus ADP column was found."
+        )
 
     players: dict[str, dict[str, Any]] = {}
 
@@ -1699,7 +1737,26 @@ def _parse_public_adp_html(
             continue
 
         name = _clean_public_name(row[player_col])
-        adp_value = _parse_adp_number(row[platform_col])
+
+        platform_adp = (
+            _parse_adp_number(row[platform_col])
+            if platform_col is not None and len(row) > platform_col
+            else None
+        )
+        consensus_adp = (
+            _parse_adp_number(row[consensus_col])
+            if consensus_col is not None and len(row) > consensus_col
+            else None
+        )
+
+        # Prefer the actual ESPN/Yahoo value. When that platform has not ranked
+        # a deeper player, retain the published consensus PPR ADP instead of
+        # incorrectly displaying NR.
+        adp_value = (
+            platform_adp
+            if platform_adp is not None
+            else consensus_adp
+        )
 
         if not name or adp_value is None:
             continue
@@ -1729,6 +1786,13 @@ def _parse_public_adp_html(
             "position_adp": position_adp,
             "team": team,
             "adp": adp_value,
+            "platform_adp": platform_adp,
+            "consensus_adp": consensus_adp,
+            "adp_type": (
+                f"{platform} specific"
+                if platform_adp is not None
+                else "consensus fallback"
+            ),
             "rank": (
                 _parse_adp_number(row[rank_col])
                 if rank_col is not None and len(row) > rank_col
@@ -1923,6 +1987,32 @@ def import_adp_payload(
                 "position": position,
                 "team": team,
                 "adp": round(adp_value, 2),
+                "platform_adp": (
+                    _number(row.get("platform_adp"))
+                    if row.get("platform_adp") not in (None, "")
+                    else (
+                        round(adp_value, 2)
+                        if str(row.get("adp_type") or "").lower().startswith(
+                            platform.lower()
+                        )
+                        else None
+                    )
+                ),
+                "consensus_adp": (
+                    _number(row.get("consensus_adp"))
+                    if row.get("consensus_adp") not in (None, "")
+                    else (
+                        round(adp_value, 2)
+                        if str(row.get("adp_type") or "").lower().startswith(
+                            "consensus"
+                        )
+                        else None
+                    )
+                ),
+                "adp_type": str(
+                    row.get("adp_type")
+                    or f"{platform} specific"
+                ),
                 "position_adp": str(
                     row.get("position_adp")
                     or row.get("positional_rank")
@@ -1985,6 +2075,9 @@ def import_adp_payload(
             or payload.get("source")
             or f"{platform} direct sync",
             payload.get("updated_at") or now,
+            row.get("adp_type") or f"{platform} specific",
+            row.get("platform_adp"),
+            row.get("consensus_adp"),
         )
         for row in prepared
     ]
@@ -2027,9 +2120,10 @@ def import_adp_payload(
             """
             INSERT INTO adp(
                 player_key, season, platform, adp, position_adp,
-                rank_value, source, updated_at
+                rank_value, source, updated_at, adp_type,
+                platform_adp, consensus_adp
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(player_key, season, platform) DO UPDATE SET
                 adp=excluded.adp,
                 position_adp=CASE
@@ -2038,7 +2132,16 @@ def import_adp_payload(
                 END,
                 rank_value=COALESCE(excluded.rank_value, adp.rank_value),
                 source=excluded.source,
-                updated_at=excluded.updated_at
+                updated_at=excluded.updated_at,
+                adp_type=excluded.adp_type,
+                platform_adp=COALESCE(
+                    excluded.platform_adp,
+                    adp.platform_adp
+                ),
+                consensus_adp=COALESCE(
+                    excluded.consensus_adp,
+                    adp.consensus_adp
+                )
             """,
             adp_rows,
         )
@@ -2364,6 +2467,44 @@ def duplicate_status_api():
     )
 
 
+@bp.get("/api/player-research-db/adp-player/<path:player_name>")
+def adp_player_api(player_name: str):
+    init_database()
+    platform = str(request.args.get("platform") or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+
+    with connect() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                p.name,
+                p.team,
+                p.position,
+                a.adp,
+                a.position_adp,
+                a.adp_type,
+                a.platform_adp,
+                a.consensus_adp,
+                a.source,
+                a.updated_at
+            FROM players p
+            LEFT JOIN adp a
+              ON a.player_key=p.player_key
+             AND a.season=2026
+             AND a.platform=?
+            WHERE p.player_key=? OR p.name=? COLLATE NOCASE
+            LIMIT 1
+            """,
+            (platform, _norm(player_name), player_name),
+        ).fetchone()
+
+    if not row:
+        return jsonify(ok=False, error="Player was not found."), 404
+
+    return jsonify(ok=row["adp"] is not None, **dict(row))
+
+
 @bp.get("/api/player-research-db/history-status")
 def history_status_api():
     init_database()
@@ -2427,6 +2568,10 @@ def adp_status_api():
             """
             SELECT
                 COUNT(*) AS row_count,
+                SUM(CASE WHEN adp_type LIKE '%specific%' THEN 1 ELSE 0 END)
+                    AS platform_specific_count,
+                SUM(CASE WHEN adp_type='consensus fallback' THEN 1 ELSE 0 END)
+                    AS consensus_fallback_count,
                 MIN(adp) AS best_adp,
                 MAX(adp) AS worst_adp,
                 MAX(updated_at) AS updated_at
@@ -2438,7 +2583,15 @@ def adp_status_api():
 
         samples = connection.execute(
             """
-            SELECT p.name, p.team, p.position, a.adp, a.position_adp
+            SELECT
+                p.name,
+                p.team,
+                p.position,
+                a.adp,
+                a.position_adp,
+                a.adp_type,
+                a.platform_adp,
+                a.consensus_adp
             FROM adp a
             JOIN players p ON p.player_key=a.player_key
             WHERE a.season=2026 AND a.platform=?
@@ -2452,6 +2605,8 @@ def adp_status_api():
         ok=bool(summary["row_count"]),
         platform=platform,
         row_count=summary["row_count"],
+        platform_specific_count=summary["platform_specific_count"] or 0,
+        consensus_fallback_count=summary["consensus_fallback_count"] or 0,
         best_adp=summary["best_adp"],
         worst_adp=summary["worst_adp"],
         updated_at=summary["updated_at"],
@@ -2661,6 +2816,9 @@ def table_api():
                 p.last_season,
                 COALESCE(a.adp, 999) AS adp,
                 COALESCE(a.position_adp, '') AS position_adp,
+                COALESCE(a.adp_type, '') AS adp_type,
+                a.platform_adp,
+                a.consensus_adp,
                 COALESCE(s.games, 0) AS games,
                 COALESCE(s.fantasy_points_ppr, 0) AS fantasy_points_ppr,
                 COALESCE(s.passing_yards, 0) AS passing_yards,
@@ -2842,6 +3000,9 @@ def profile_api(player_name: str):
                 **dict(player),
                 "adp": adp["adp"] if adp else 999,
                 "position_adp": adp["position_adp"] if adp else "",
+                "adp_type": adp["adp_type"] if adp and "adp_type" in adp.keys() else "",
+                "platform_adp": adp["platform_adp"] if adp and "platform_adp" in adp.keys() else None,
+                "consensus_adp": adp["consensus_adp"] if adp and "consensus_adp" in adp.keys() else None,
             },
             "previous_year": previous_year,
             "history": [
