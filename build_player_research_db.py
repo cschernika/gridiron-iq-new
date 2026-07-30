@@ -57,6 +57,8 @@ def main() -> None:
         if args.career_history:
             result["career_history"] = import_all_history(1999, 2025)
             result["identity_repair"] = repair_recent_player_aliases()
+            from player_research_db import database_status
+            result["database_status"] = database_status()
         if args.season:
             result[f"season_{args.season}"] = import_season(args.season)
         if args.projections:

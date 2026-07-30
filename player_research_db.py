@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import io
 import json
 import math
@@ -842,51 +843,195 @@ def import_current_players() -> int:
     return len(rows)
 
 
-def _stats_urls(season: int) -> list[str]:
-    return [
-        f"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_reg_{season}.csv",
-        f"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_{season}.csv",
-        f"https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_reg_{season}.csv",
-        f"https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_{season}.csv",
+def _github_stats_player_assets() -> list[dict[str, Any]]:
+    """
+    Discover the current official nflverse Player Summary Stats assets.
+
+    The release contains many formats and summary levels. We prefer regular
+    season CSV assets and use compressed CSV when necessary.
+    """
+    cache_path = DATA_DIR / "nflverse_stats_player_assets.json"
+
+    try:
+        if cache_path.exists() and time.time() - cache_path.stat().st_mtime < 86400:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            if isinstance(cached, list) and cached:
+                return cached
+    except Exception:
+        pass
+
+    response = requests.get(
+        "https://api.github.com/repos/nflverse/nflverse-data/releases/tags/stats_player",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "Gridiron-IQ/2026",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        timeout=(10, 45),
+    )
+    response.raise_for_status()
+    payload = response.json()
+    assets = payload.get("assets") or []
+
+    normalized = [
+        {
+            "name": str(asset.get("name") or ""),
+            "url": str(asset.get("browser_download_url") or ""),
+            "size": int(asset.get("size") or 0),
+        }
+        for asset in assets
+        if asset.get("name") and asset.get("browser_download_url")
     ]
+
+    if not normalized:
+        raise RuntimeError("The nflverse stats_player release returned no assets.")
+
+    cache_path.write_text(
+        json.dumps(normalized, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return normalized
+
+
+def _season_asset_candidates(season: int) -> list[dict[str, Any]]:
+    assets = _github_stats_player_assets()
+    season_text = str(int(season))
+
+    preferred_names = [
+        f"stats_player_reg_{season_text}.csv",
+        f"stats_player_reg_{season_text}.csv.gz",
+        f"stats_player_week_{season_text}.csv",
+        f"stats_player_week_{season_text}.csv.gz",
+    ]
+
+    by_name = {asset["name"]: asset for asset in assets}
+    candidates = [
+        by_name[name]
+        for name in preferred_names
+        if name in by_name
+    ]
+
+    # Handle future nflverse naming adjustments without accepting postseason
+    # or unrelated formats.
+    if not candidates:
+        candidates = sorted(
+            [
+                asset
+                for asset in assets
+                if season_text in asset["name"]
+                and "player" in asset["name"].lower()
+                and (
+                    asset["name"].lower().endswith(".csv")
+                    or asset["name"].lower().endswith(".csv.gz")
+                )
+                and "post" not in asset["name"].lower()
+            ],
+            key=lambda asset: (
+                "reg" not in asset["name"].lower(),
+                "week" in asset["name"].lower(),
+                asset["name"],
+            ),
+        )
+
+    return candidates
+
+
+def _valid_stats_headers(fieldnames: list[str] | None) -> bool:
+    fields = {str(field or "").strip() for field in (fieldnames or [])}
+    has_name = bool(
+        fields.intersection(
+            {"player_display_name", "player_name", "full_name", "name"}
+        )
+    )
+    has_stats = bool(
+        fields.intersection(
+            {
+                "passing_yards",
+                "rushing_yards",
+                "receiving_yards",
+                "fantasy_points",
+                "fantasy_points_ppr",
+            }
+        )
+    )
+    return has_name and has_stats
+
+
+def _decode_stats_asset(content: bytes, filename: str) -> str:
+    if filename.lower().endswith(".gz"):
+        content = gzip.decompress(content)
+    return content.decode("utf-8-sig", errors="replace")
+
+
+def _read_cached_stats(path: Path) -> list[dict[str, str]]:
+    if not path.exists() or path.stat().st_size < 500:
+        return []
+
+    try:
+        text = path.read_text(encoding="utf-8")
+        reader = csv.DictReader(io.StringIO(text))
+        if not _valid_stats_headers(reader.fieldnames):
+            return []
+        rows = list(reader)
+        return rows if rows else []
+    except Exception:
+        return []
 
 
 def _download_season_rows(season: int) -> list[dict[str, str]]:
     cache_path = DATA_DIR / f"player_stats_{season}.csv"
+    cached_rows = _read_cached_stats(cache_path)
+    if cached_rows:
+        return cached_rows
 
-    if cache_path.exists() and cache_path.stat().st_size > 1000:
-        text = cache_path.read_text(encoding="utf-8")
-        rows = list(csv.DictReader(io.StringIO(text)))
-        if rows:
-            return rows
+    # Remove an invalid HTML/error/cache file so it cannot be reused.
+    try:
+        if cache_path.exists():
+            cache_path.unlink()
+    except Exception:
+        pass
+
+    candidates = _season_asset_candidates(season)
+    if not candidates:
+        raise RuntimeError(
+            f"No official nflverse Player Summary Stats CSV asset was found for {season}."
+        )
 
     errors = []
-    for url in _stats_urls(season):
+
+    for asset in candidates:
         try:
             response = requests.get(
-                url,
+                asset["url"],
                 headers={"User-Agent": "Gridiron-IQ/2026"},
-                timeout=(10, 90),
+                timeout=(10, 120),
             )
-            if response.status_code != 200:
-                errors.append(f"{url}: HTTP {response.status_code}")
+            response.raise_for_status()
+
+            text = _decode_stats_asset(response.content, asset["name"])
+            reader = csv.DictReader(io.StringIO(text))
+
+            if not _valid_stats_headers(reader.fieldnames):
+                errors.append(
+                    f"{asset['name']}: required player-stat columns were missing"
+                )
                 continue
 
-            text = response.content.decode("utf-8-sig", errors="replace")
-            rows = list(csv.DictReader(io.StringIO(text)))
+            rows = list(reader)
             if not rows:
-                errors.append(f"{url}: empty")
+                errors.append(f"{asset['name']}: no rows")
                 continue
 
             cache_path.write_text(text, encoding="utf-8")
             return rows
         except Exception as exc:
-            errors.append(f"{url}: {exc}")
+            errors.append(f"{asset['name']}: {exc}")
 
     raise RuntimeError(
-        f"Unable to load {season} nflverse statistics: "
-        + " | ".join(errors[-4:])
+        f"Unable to import {season} nflverse player statistics: "
+        + " | ".join(errors[-6:])
     )
+
 
 
 def _row_name(row: dict[str, Any]) -> str:
@@ -903,15 +1048,41 @@ def _aggregate_rows(rows: list[dict[str, Any]], name: str) -> dict[str, float]:
     if not rows:
         return {}
 
-    # nflverse player-summary files contain one row per player; weekly files
-    # require summing. Max games prevents weekly files from summing cumulative
-    # game values incorrectly.
     result = {field: 0.0 for field in STAT_FIELDS}
+
+    # Summary assets normally contain one row per player/season. Weekly assets
+    # contain one row per week and must be summed.
+    weekly_data = any(
+        row.get("week") not in (None, "")
+        for row in rows
+    )
 
     for field in STAT_FIELDS:
         values = [_number(row.get(field)) for row in rows]
+
         if field == "games":
-            result[field] = max(values or [0])
+            if weekly_data:
+                result[field] = sum(
+                    1
+                    for row in rows
+                    if (
+                        _number(row.get("snap_count")) > 0
+                        or _number(row.get("attempts")) > 0
+                        or _number(row.get("carries")) > 0
+                        or _number(row.get("targets")) > 0
+                        or _number(row.get("fantasy_points_ppr")) != 0
+                    )
+                )
+                if result[field] <= 0:
+                    result[field] = len(
+                        {
+                            row.get("week")
+                            for row in rows
+                            if row.get("week") not in (None, "")
+                        }
+                    )
+            else:
+                result[field] = max(values or [0])
         else:
             result[field] = sum(values)
 
@@ -1856,6 +2027,57 @@ def status_api():
     return jsonify(database_status())
 
 
+@bp.get("/api/player-research-db/history-status")
+def history_status_api():
+    init_database()
+
+    with connect() as connection:
+        summary = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS row_count,
+                COUNT(DISTINCT player_key) AS player_count,
+                COUNT(DISTINCT season) AS season_count,
+                MIN(season) AS first_season,
+                MAX(season) AS last_season
+            FROM season_stats
+            """
+        ).fetchone()
+
+        seasons = connection.execute(
+            """
+            SELECT season, COUNT(*) AS player_count
+            FROM season_stats
+            GROUP BY season
+            ORDER BY season DESC
+            """
+        ).fetchall()
+
+        missing_current = connection.execute(
+            """
+            SELECT p.name, p.team, p.position
+            FROM players p
+            LEFT JOIN season_stats s ON s.player_key=p.player_key
+            WHERE p.active=1
+            GROUP BY p.player_key
+            HAVING COUNT(s.season)=0
+            ORDER BY p.name COLLATE NOCASE
+            LIMIT 50
+            """
+        ).fetchall()
+
+    return jsonify(
+        ok=bool(summary["row_count"]),
+        row_count=summary["row_count"],
+        player_count=summary["player_count"],
+        season_count=summary["season_count"],
+        first_season=summary["first_season"],
+        last_season=summary["last_season"],
+        seasons=[dict(row) for row in seasons],
+        current_players_without_history=[dict(row) for row in missing_current],
+    )
+
+
 @bp.get("/api/player-research-db/adp-status")
 def adp_status_api():
     init_database()
@@ -1974,13 +2196,21 @@ def import_career_history_api():
     try:
         result = import_all_history(start_season, end_season)
         identity_result = repair_recent_player_aliases()
+        status = database_status()
         return jsonify(
-            ok=not bool(result.get("failures")),
+            ok=(
+                not bool(result.get("failures"))
+                and status.get("season_rows", 0) > 0
+            ),
             start_season=start_season,
             end_season=end_season,
             imported=result.get("imported", {}),
             failures=result.get("failures", {}),
             season_count=result.get("season_count", 0),
+            stored_season_rows=status.get("season_rows", 0),
+            stored_seasons=status.get("seasons", 0),
+            first_stored_season=status.get("first_season"),
+            last_stored_season=status.get("last_season"),
             identity_merges=identity_result.get("merged_count", 0),
         )
     except Exception as exc:
