@@ -1,0 +1,74 @@
+{
+  "QB": {
+    "projection": 20,
+    "adp_value": 14,
+    "passing_schedule": 12,
+    "rushing_upside": 11,
+    "offensive_line": 10,
+    "receiver_quality": 10,
+    "offensive_pace": 7,
+    "coaching_stability": 6,
+    "injury_outlook": 5,
+    "roster_need": 5
+  },
+  "RB": {
+    "projected_touches": 18,
+    "goal_line_share": 14,
+    "receiving_role": 13,
+    "offensive_line": 11,
+    "run_schedule": 10,
+    "backfield_competition": 10,
+    "game_script": 8,
+    "durability": 6,
+    "adp_value": 6,
+    "roster_need": 4
+  },
+  "WR": {
+    "target_share": 15,
+    "route_participation": 13,
+    "quarterback_quality": 12,
+    "coverage_matchups": 12,
+    "pass_schedule": 10,
+    "red_zone_role": 9,
+    "yards_after_catch": 7,
+    "offensive_pace": 6,
+    "injury_outlook": 5,
+    "adp_value": 7,
+    "roster_need": 4
+  },
+  "TE": {
+    "route_participation": 15,
+    "targets_per_route": 14,
+    "red_zone_role": 13,
+    "quarterback_tendency": 10,
+    "coverage_matchups": 10,
+    "schedule": 9,
+    "positional_scarcity": 9,
+    "blocking_burden": 6,
+    "injury_outlook": 5,
+    "adp_value": 5,
+    "roster_need": 4
+  },
+  "K": {
+    "offense_quality": 22,
+    "scoring_opportunities": 20,
+    "accuracy": 16,
+    "dome_weather": 14,
+    "schedule": 10,
+    "coaching_aggressiveness": 8,
+    "adp_value": 5,
+    "roster_need": 5
+  },
+  "DEF": {
+    "pressure_rate": 16,
+    "sack_upside": 14,
+    "takeaway_rate": 14,
+    "points_allowed": 12,
+    "opponent_qb_schedule": 12,
+    "offensive_line_matchups": 12,
+    "overall_schedule": 9,
+    "return_td_upside": 6,
+    "adp_value": 3,
+    "roster_need": 2
+  }
+}
