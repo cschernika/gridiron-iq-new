@@ -11,6 +11,12 @@ import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
+from draft_evaluation_engine import (
+    baseline_metrics as position_baseline_metrics,
+    evaluate_player as evaluate_position_player,
+    load_position_weights,
+)
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1986,13 +1992,26 @@ def intelligent_recommendation(context, state, round_no, pick_no, strategy):
         history_signal = min(10, enriched["points_2025"] / 30.0)
         adp_signal = max(-10, min(14, enriched["value_vs_adp"] * 0.9))
 
+        position_metrics = position_baseline_metrics(
+            projection=enriched["projection_2026"],
+            previous_points=enriched["points_2025"],
+            adp_value=enriched["value_vs_adp"],
+            roster_need=need,
+            scarcity=scarcity_num,
+        )
+        position_evaluation = evaluate_position_player(
+            base["pos"],
+            position_metrics,
+        )
+
         score = (
-            58
+            43
+            + position_evaluation["score"] * 0.32
             + production_signal
             + history_signal
             + adp_signal
-            + need * 0.10
-            + scarcity_num * 0.05
+            + need * 0.06
+            + scarcity_num * 0.03
             + scoring_bonus(base, context["scoring"])
             + strategy_bonus(base, strategy, round_no)
         )
@@ -2010,6 +2029,12 @@ def intelligent_recommendation(context, state, round_no, pick_no, strategy):
             "roster_fit": fit,
             "scarcity": scarcity_label,
             "survival_probability": survival,
+            "position_evaluation": position_evaluation,
+            "position_score": position_evaluation["score"],
+            "draft_action": position_evaluation["action"],
+            "criteria_strengths": position_evaluation["strengths"],
+            "criteria_risks": position_evaluation["risks"],
+            "criteria_coverage": position_evaluation["coverage"],
         })
 
     scored.sort(
@@ -2039,7 +2064,10 @@ def intelligent_recommendation(context, state, round_no, pick_no, strategy):
         f"ADP: {best['platform_adp'] if best['platform_adp'] < 999 else 'N/A'}; "
         f"2025 PPR points: {best['points_2025']}; "
         f"2026 projection: {best['projection_2026']}; "
-        f"chance of surviving to your next pick: {best['survival_probability']}%."
+        f"chance of surviving to your next pick: {best['survival_probability']}%. "
+        f"Position model: {best['position_evaluation']['grade']} "
+        f"({best['position_evaluation']['score']}/100) — "
+        f"{best['position_evaluation']['action']}."
     )
 
     return {
@@ -2054,9 +2082,40 @@ def intelligent_recommendation(context, state, round_no, pick_no, strategy):
         "scarcity": best["scarcity"],
         "tier_risk": tier_risk,
         "survival_probability": best["survival_probability"],
+        "position_evaluation": best["position_evaluation"],
+        "position_score": best["position_score"],
+        "draft_action": best["draft_action"],
+        "criteria_strengths": best["criteria_strengths"],
+        "criteria_risks": best["criteria_risks"],
+        "criteria_coverage": best["criteria_coverage"],
         "rationale": rationale,
         "next_best": scored[1:4],
     }
+
+
+@app.get("/api/draft/position-criteria")
+def draft_position_criteria_api():
+    return jsonify(ok=True, weights=load_position_weights())
+
+
+@app.post("/api/draft/evaluate-player")
+def draft_evaluate_player_api():
+    payload = request.get_json(silent=True) or {}
+    position = str(payload.get("position") or "").upper()
+    metrics = payload.get("metrics") or {}
+
+    if position not in {"QB", "RB", "WR", "TE", "K", "DEF", "DST"}:
+        return jsonify(
+            ok=False,
+            error="Position must be QB, RB, WR, TE, K, DEF or DST.",
+        ), 400
+
+    return jsonify(
+        ok=True,
+        player=payload.get("player"),
+        evaluation=evaluate_position_player(position, metrics),
+    )
+
 
 @app.get("/api/draft/intelligence")
 def draft_intelligence_api():
