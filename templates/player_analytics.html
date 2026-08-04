@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block title %}Player Analytics | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+  .pa-page{padding:8px 0 40px}
+  .pa-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-end;margin-bottom:18px}
+  .pa-head h1{margin:4px 0 0;font-size:34px}
+  .pa-muted{color:#718096}
+  .pa-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:16px 0}
+  .pa-controls input,.pa-controls select{border:1px solid #d8e0eb;border-radius:10px;background:#fff;padding:10px 12px;font:inherit}
+  .pa-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:15px 0}
+  .pa-tab{border:1px solid #d8e0eb;background:#fff;border-radius:999px;padding:9px 15px;font-weight:800;cursor:pointer}
+  .pa-tab.active{background:#162237;color:#fff;border-color:#162237}
+  .pa-card{background:#fff;border:1px solid #dfe6ef;border-radius:18px;overflow:hidden;box-shadow:0 8px 28px rgba(20,32,51,.05)}
+  .pa-table-wrap{overflow:auto;max-height:72vh}
+  .pa-table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
+  .pa-table th{position:sticky;top:0;z-index:3;background:#c92f31;color:#fff;padding:15px 14px;text-align:right;white-space:nowrap;font-size:13px;letter-spacing:.02em;cursor:pointer}
+  .pa-table th:first-child,.pa-table th:nth-child(2),.pa-table th:nth-child(3),.pa-table td:first-child,.pa-table td:nth-child(2),.pa-table td:nth-child(3){text-align:left}
+  .pa-table td{padding:14px;border-bottom:1px solid #e4e9f0;text-align:right;white-space:nowrap;background:#fff}
+  .pa-table tr:hover td{background:#f7f9fc}
+  .pa-player{font-weight:800;color:#152238;text-decoration:none}
+  .pa-highlight{background:#fff8bf!important}
+  .pa-footer{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-top:1px solid #e4e9f0}
+  .pa-footer button{border:1px solid #d6deea;background:#fff;border-radius:9px;padding:8px 14px;font-weight:700;cursor:pointer}
+  .pa-footer button:disabled{opacity:.45;cursor:not-allowed}
+  .pa-notice{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+  .pa-note{background:#fff;border:1px solid #dfe6ef;border-radius:14px;padding:16px}
+  .pa-note h3{margin:0 0 8px}
+  .pa-note p{margin:0;color:#64748b;line-height:1.5}
+  .pa-loading{padding:40px;text-align:center;color:#64748b}
+  .pa-summary{font-weight:700;color:#53627a}
+  @media(max-width:900px){.pa-head{display:block}.pa-notice{grid-template-columns:1fr}}
+</style>
+
+<section class="pa-page">
+  <div class="pa-head">
+    <div>
+      <div class="kicker">PLAYER DATA LAB</div>
+      <h1>Player Analytics</h1>
+      <p class="pa-muted">Sortable season and career metrics calculated from the statistics stored in Gridiron IQ.</p>
+    </div>
+    <a class="btn secondary" href="/player-research">Open Player Research</a>
+  </div>
+
+  <div class="pa-controls">
+    <input id="pa-search" type="search" placeholder="Search player or team">
+    <select id="pa-season"></select>
+    <select id="pa-scope">
+      <option value="season">Single season</option>
+      <option value="career">Career totals</option>
+    </select>
+    <select id="pa-page-size">
+      <option value="50">50 players</option>
+      <option value="100" selected>100 players</option>
+      <option value="250">250 players</option>
+    </select>
+    <span id="pa-summary" class="pa-summary"></span>
+  </div>
+
+  <div class="pa-tabs">
+    <button class="pa-tab active" data-position="">All</button>
+    <button class="pa-tab" data-position="QB">QB</button>
+    <button class="pa-tab" data-position="RB">RB</button>
+    <button class="pa-tab" data-position="WR">WR</button>
+    <button class="pa-tab" data-position="TE">TE</button>
+    <button class="pa-tab" data-position="K">K</button>
+    <button class="pa-tab" data-position="DEF">DST</button>
+  </div>
+
+  <div class="pa-card">
+    <div class="pa-table-wrap">
+      <table class="pa-table">
+        <thead id="pa-head-row"></thead>
+        <tbody id="pa-body">
+          <tr><td class="pa-loading">Loading player analytics…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pa-footer">
+      <button id="pa-prev">← Previous</button>
+      <span id="pa-page-label">Page 1</span>
+      <button id="pa-next">Next →</button>
+    </div>
+  </div>
+
+  <div class="pa-notice">
+    <div class="pa-note">
+      <h3>Available now</h3>
+      <p>Season and career totals, fantasy points, fantasy points per game, passing efficiency, rushing efficiency, receiving efficiency, touchdown rates, touches, opportunities and combined production.</p>
+    </div>
+    <div class="pa-note">
+      <h3>Future data feeds</h3>
+      <p>Route participation, targets per route, air-yards share, yards before and after contact, missed tackles, man/zone splits, defensive-back assignments, explosive-play rates and weekly boom consistency require additional licensed or charting data.</p>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const state = {
+    position: "",
+    season: "2025",
+    scope: "season",
+    sort: "fantasy_points_ppr",
+    direction: "desc",
+    page: 1,
+    pageSize: 100,
+    query: ""
+  };
+
+  const columnsByPosition = {
+    ALL: [
+      ["Player","name"],["Pos","position"],["Team","team"],["Season","season"],
+      ["G","games"],["PPR","fantasy_points_ppr"],["PPR/G","fppg"],
+      ["Touches","touches"],["Opp","opportunities"],["Total Yds","total_yards"],["Total TD","total_tds"]
+    ],
+    QB: [
+      ["Player","name"],["Team","team"],["Season","season"],["G","games"],
+      ["Cmp","completions"],["Att","attempts"],["Cmp %","completion_pct"],
+      ["Pass Yds","passing_yards"],["Y/A","yards_per_attempt"],
+      ["Pass TD","passing_tds"],["TD %","pass_td_rate"],["INT","interceptions"],
+      ["INT %","int_rate"],["Rush Yds","rushing_yards"],["Rush TD","rushing_tds"],
+      ["PPR","fantasy_points_ppr"],["PPR/G","fppg"]
+    ],
+    RB: [
+      ["Player","name"],["Team","team"],["Season","season"],["G","games"],
+      ["ATT","carries"],["YDS","rushing_yards"],["RuYDS/G","rush_yards_per_game"],
+      ["YPC","yards_per_carry"],["RuTD","rushing_tds"],["RuTD %","rush_td_rate"],
+      ["TGT","targets"],["REC","receptions"],["REC YDS","receiving_yards"],
+      ["REC TD","receiving_tds"],["Touches","touches"],["PPR","fantasy_points_ppr"],["PPR/G","fppg"]
+    ],
+    WR: [
+      ["Player","name"],["Team","team"],["Season","season"],["G","games"],
+      ["TGT","targets"],["REC","receptions"],["Catch %","catch_rate"],
+      ["YDS","receiving_yards"],["Y/TGT","yards_per_target"],
+      ["Y/REC","yards_per_reception"],["RecYDS/G","rec_yards_per_game"],
+      ["TD","receiving_tds"],["TD %","rec_td_rate"],
+      ["Rush Yds","rushing_yards"],["PPR","fantasy_points_ppr"],["PPR/G","fppg"]
+    ],
+    TE: [
+      ["Player","name"],["Team","team"],["Season","season"],["G","games"],
+      ["TGT","targets"],["REC","receptions"],["Catch %","catch_rate"],
+      ["YDS","receiving_yards"],["Y/TGT","yards_per_target"],
+      ["Y/REC","yards_per_reception"],["RecYDS/G","rec_yards_per_game"],
+      ["TD","receiving_tds"],["TD %","rec_td_rate"],
+      ["PPR","fantasy_points_ppr"],["PPR/G","fppg"]
+    ],
+    K: [
+      ["Player","name"],["Team","team"],["Season","season"],["G","games"],
+      ["Fantasy Pts","fantasy_points"],["PPR","fantasy_points_ppr"],["Pts/G","fppg"]
+    ],
+    DEF: [
+      ["Team Defense","name"],["Team","team"],["Season","season"],["G","games"],
+      ["Fantasy Pts","fantasy_points"],["PPR","fantasy_points_ppr"],["Pts/G","fppg"]
+    ]
+  };
+
+  const $ = id => document.getElementById(id);
+  const number = (value, decimals=0) => {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n) || n === 0) return "—";
+    return n.toLocaleString(undefined, {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals
+    });
+  };
+  const escapeHtml = value => String(value ?? "")
+    .replaceAll("&","&amp;").replaceAll("<","&lt;")
+    .replaceAll(">","&gt;").replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+
+  const decimalFields = new Set([
+    "fantasy_points","fantasy_points_ppr","fppg","completion_pct",
+    "yards_per_attempt","pass_td_rate","int_rate","yards_per_carry",
+    "rush_yards_per_game","rush_td_rate","catch_rate","yards_per_target",
+    "yards_per_reception","rec_yards_per_game","rec_td_rate"
+  ]);
+  const percentFields = new Set([
+    "completion_pct","pass_td_rate","int_rate","rush_td_rate",
+    "catch_rate","rec_td_rate"
+  ]);
+
+  function columns() {
+    return columnsByPosition[state.position || "ALL"];
+  }
+
+  function drawHeader() {
+    $("pa-head-row").innerHTML = `<tr>${columns().map(([label,key]) => {
+      const arrow = state.sort === key ? (state.direction === "desc" ? " ↓" : " ↑") : "";
+      return `<th data-key="${key}">${escapeHtml(label)}${arrow}</th>`;
+    }).join("")}</tr>`;
+
+    document.querySelectorAll("#pa-head-row th").forEach(th => {
+      th.onclick = () => {
+        const key = th.dataset.key;
+        if (state.sort === key) {
+          state.direction = state.direction === "desc" ? "asc" : "desc";
+        } else {
+          state.sort = key;
+          state.direction = key === "name" || key === "team" ? "asc" : "desc";
+        }
+        state.page = 1;
+        load();
+      };
+    });
+  }
+
+  function renderRows(players) {
+    if (!players.length) {
+      $("pa-body").innerHTML = `<tr><td class="pa-loading" colspan="${columns().length}">No matching statistics were found.</td></tr>`;
+      return;
+    }
+
+    $("pa-body").innerHTML = players.map(player => {
+      const cells = columns().map(([label,key]) => {
+        if (key === "name") {
+          return `<td><a class="pa-player" href="/player-research?player=${encodeURIComponent(player.name)}">${escapeHtml(player.name)}</a></td>`;
+        }
+        if (["team","position","season"].includes(key)) {
+          return `<td>${escapeHtml(player[key] ?? "—")}</td>`;
+        }
+        const suffix = percentFields.has(key) && Number(player[key] || 0) ? "%" : "";
+        const decimals = decimalFields.has(key) ? 1 : 0;
+        const highlight = key === state.sort ? " pa-highlight" : "";
+        return `<td class="${highlight}">${number(player[key], decimals)}${suffix}</td>`;
+      }).join("");
+      return `<tr>${cells}</tr>`;
+    }).join("");
+  }
+
+  async function load() {
+    drawHeader();
+    $("pa-body").innerHTML = `<tr><td class="pa-loading" colspan="${columns().length}">Loading player analytics…</td></tr>`;
+
+    const params = new URLSearchParams({
+      position: state.position,
+      season: state.season,
+      scope: state.scope,
+      sort: state.sort,
+      direction: state.direction,
+      page: state.page,
+      page_size: state.pageSize,
+      q: state.query
+    });
+
+    try {
+      const response = await fetch(`/api/player-analytics/table?${params}`);
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || "Analytics request failed.");
+
+      if (!$("pa-season").options.length) {
+        $("pa-season").innerHTML = data.available_seasons
+          .map(year => `<option value="${year}">${year} season</option>`)
+          .join("");
+        $("pa-season").value = String(data.selected_season);
+        state.season = String(data.selected_season);
+      }
+
+      renderRows(data.players || []);
+      $("pa-summary").textContent = `${data.total.toLocaleString()} players`;
+      $("pa-page-label").textContent = `Page ${data.page} of ${data.total_pages}`;
+      $("pa-prev").disabled = data.page <= 1;
+      $("pa-next").disabled = data.page >= data.total_pages;
+      state.page = data.page;
+    } catch (error) {
+      $("pa-body").innerHTML = `<tr><td class="pa-loading" colspan="${columns().length}">${escapeHtml(error.message)}</td></tr>`;
+    }
+  }
+
+  let timer;
+  $("pa-search").addEventListener("input", event => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      state.query = event.target.value.trim();
+      state.page = 1;
+      load();
+    }, 250);
+  });
+  $("pa-season").onchange = event => {
+    state.season = event.target.value;
+    state.page = 1;
+    load();
+  };
+  $("pa-scope").onchange = event => {
+    state.scope = event.target.value;
+    state.page = 1;
+    load();
+  };
+  $("pa-page-size").onchange = event => {
+    state.pageSize = Number(event.target.value);
+    state.page = 1;
+    load();
+  };
+  $("pa-prev").onclick = () => {
+    if (state.page > 1) {
+      state.page -= 1;
+      load();
+    }
+  };
+  $("pa-next").onclick = () => {
+    state.page += 1;
+    load();
+  };
+  document.querySelectorAll(".pa-tab").forEach(button => {
+    button.onclick = () => {
+      document.querySelectorAll(".pa-tab").forEach(tab => tab.classList.remove("active"));
+      button.classList.add("active");
+      state.position = button.dataset.position;
+      state.page = 1;
+      state.sort = state.position === "QB" ? "passing_yards"
+        : ["WR","TE"].includes(state.position) ? "receiving_yards"
+        : state.position === "RB" ? "rushing_yards"
+        : "fantasy_points_ppr";
+      state.direction = "desc";
+      load();
+    };
+  });
+
+  load();
+})();
+</script>
+{% endblock %}
