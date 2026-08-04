@@ -3195,6 +3195,293 @@ def import_season_api(season: int):
         return jsonify(ok=False, season=season, error=str(exc)), 500
 
 
+@bp.get("/api/player-analytics/table")
+def player_analytics_table_api():
+    """
+    Return sortable player-season analytics derived from the SQLite statistics.
+
+    This endpoint uses only fields stored in Gridiron IQ. It does not invent
+    proprietary tracking metrics such as route participation, missed tackles
+    forced, yards before contact, or defensive coverage grades.
+    """
+    init_database()
+
+    position = _position(request.args.get("position"))
+    season_raw = str(request.args.get("season") or "2025").strip()
+    query = str(request.args.get("q") or "").strip()
+    scope = str(request.args.get("scope") or "season").lower()
+    direction = (
+        "ASC"
+        if str(request.args.get("direction") or "desc").lower() == "asc"
+        else "DESC"
+    )
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except Exception:
+        page = 1
+
+    try:
+        page_size = min(
+            250,
+            max(25, int(request.args.get("page_size", 100))),
+        )
+    except Exception:
+        page_size = 100
+
+    with connect() as connection:
+        available_seasons = [
+            int(row["season"])
+            for row in connection.execute(
+                """
+                SELECT DISTINCT season
+                FROM season_stats
+                ORDER BY season DESC
+                """
+            ).fetchall()
+        ]
+
+    try:
+        selected_season = int(season_raw)
+    except Exception:
+        selected_season = (
+            available_seasons[0]
+            if available_seasons
+            else 2025
+        )
+
+    where = ["p.active=1"]
+    parameters: list[Any] = []
+
+    if position:
+        where.append("p.position=?")
+        parameters.append(position)
+
+    if query:
+        token = f"%{query}%"
+        where.append(
+            "(p.name LIKE ? OR p.team LIKE ? OR p.position LIKE ?)"
+        )
+        parameters.extend([token, token, token])
+
+    where_sql = " AND ".join(where)
+
+    if scope == "career":
+        season_filter = ""
+        season_parameters: list[Any] = []
+        grouping = "GROUP BY p.player_key"
+        season_expression = "'Career'"
+        team_expression = "'All teams'"
+    else:
+        season_filter = "AND s.season=?"
+        season_parameters = [selected_season]
+        grouping = "GROUP BY p.player_key, s.season"
+        season_expression = "s.season"
+        team_expression = "COALESCE(s.team, p.team, 'FA')"
+
+    base_query = f"""
+        FROM players p
+        JOIN season_stats s
+          ON s.player_key=p.player_key
+        WHERE {where_sql}
+          {season_filter}
+        {grouping}
+    """
+
+    metric_expressions = {
+        "name": "p.name",
+        "team": team_expression,
+        "position": "p.position",
+        "season": season_expression,
+        "games": "SUM(s.games)",
+        "fantasy_points": "SUM(s.fantasy_points)",
+        "fantasy_points_ppr": "SUM(s.fantasy_points_ppr)",
+        "fppg": (
+            "CASE WHEN SUM(s.games)>0 "
+            "THEN SUM(s.fantasy_points_ppr)/SUM(s.games) ELSE 0 END"
+        ),
+        "opportunities": (
+            "SUM(s.carries)+SUM(s.targets)+SUM(s.attempts)"
+        ),
+        "touches": "SUM(s.carries)+SUM(s.receptions)",
+        "completions": "SUM(s.completions)",
+        "attempts": "SUM(s.attempts)",
+        "completion_pct": (
+            "CASE WHEN SUM(s.attempts)>0 "
+            "THEN 100.0*SUM(s.completions)/SUM(s.attempts) ELSE 0 END"
+        ),
+        "passing_yards": "SUM(s.passing_yards)",
+        "passing_tds": "SUM(s.passing_tds)",
+        "interceptions": "SUM(s.interceptions)",
+        "yards_per_attempt": (
+            "CASE WHEN SUM(s.attempts)>0 "
+            "THEN SUM(s.passing_yards)/SUM(s.attempts) ELSE 0 END"
+        ),
+        "pass_td_rate": (
+            "CASE WHEN SUM(s.attempts)>0 "
+            "THEN 100.0*SUM(s.passing_tds)/SUM(s.attempts) ELSE 0 END"
+        ),
+        "int_rate": (
+            "CASE WHEN SUM(s.attempts)>0 "
+            "THEN 100.0*SUM(s.interceptions)/SUM(s.attempts) ELSE 0 END"
+        ),
+        "carries": "SUM(s.carries)",
+        "rushing_yards": "SUM(s.rushing_yards)",
+        "rushing_tds": "SUM(s.rushing_tds)",
+        "yards_per_carry": (
+            "CASE WHEN SUM(s.carries)>0 "
+            "THEN SUM(s.rushing_yards)/SUM(s.carries) ELSE 0 END"
+        ),
+        "rush_yards_per_game": (
+            "CASE WHEN SUM(s.games)>0 "
+            "THEN SUM(s.rushing_yards)/SUM(s.games) ELSE 0 END"
+        ),
+        "rush_td_rate": (
+            "CASE WHEN SUM(s.carries)>0 "
+            "THEN 100.0*SUM(s.rushing_tds)/SUM(s.carries) ELSE 0 END"
+        ),
+        "targets": "SUM(s.targets)",
+        "receptions": "SUM(s.receptions)",
+        "receiving_yards": "SUM(s.receiving_yards)",
+        "receiving_tds": "SUM(s.receiving_tds)",
+        "catch_rate": (
+            "CASE WHEN SUM(s.targets)>0 "
+            "THEN 100.0*SUM(s.receptions)/SUM(s.targets) ELSE 0 END"
+        ),
+        "yards_per_target": (
+            "CASE WHEN SUM(s.targets)>0 "
+            "THEN SUM(s.receiving_yards)/SUM(s.targets) ELSE 0 END"
+        ),
+        "yards_per_reception": (
+            "CASE WHEN SUM(s.receptions)>0 "
+            "THEN SUM(s.receiving_yards)/SUM(s.receptions) ELSE 0 END"
+        ),
+        "rec_yards_per_game": (
+            "CASE WHEN SUM(s.games)>0 "
+            "THEN SUM(s.receiving_yards)/SUM(s.games) ELSE 0 END"
+        ),
+        "rec_td_rate": (
+            "CASE WHEN SUM(s.targets)>0 "
+            "THEN 100.0*SUM(s.receiving_tds)/SUM(s.targets) ELSE 0 END"
+        ),
+        "total_yards": (
+            "SUM(s.passing_yards)+SUM(s.rushing_yards)+"
+            "SUM(s.receiving_yards)"
+        ),
+        "total_tds": (
+            "SUM(s.passing_tds)+SUM(s.rushing_tds)+"
+            "SUM(s.receiving_tds)"
+        ),
+    }
+
+    sort_key = str(request.args.get("sort") or "fantasy_points_ppr")
+    sort_expression = metric_expressions.get(
+        sort_key,
+        metric_expressions["fantasy_points_ppr"],
+    )
+
+    selected_fields = ",\n".join(
+        f"{expression} AS {name}"
+        for name, expression in metric_expressions.items()
+    )
+
+    count_parameters = [*parameters, *season_parameters]
+
+    with connect() as connection:
+        total = connection.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM (
+                SELECT p.player_key
+                {base_query}
+            ) analytics_rows
+            """,
+            count_parameters,
+        ).fetchone()[0]
+
+        total_pages = max(1, math.ceil(total / page_size))
+        page = min(page, total_pages)
+        offset = (page - 1) * page_size
+
+        rows = connection.execute(
+            f"""
+            SELECT
+                p.player_key,
+                {selected_fields}
+            {base_query}
+            ORDER BY {sort_expression} {direction},
+                     p.name COLLATE NOCASE ASC
+            LIMIT ? OFFSET ?
+            """,
+            [*count_parameters, page_size, offset],
+        ).fetchall()
+
+    formatted_rows = []
+    for raw in rows:
+        row = dict(raw)
+
+        integer_fields = {
+            "games",
+            "opportunities",
+            "touches",
+            "completions",
+            "attempts",
+            "passing_yards",
+            "passing_tds",
+            "interceptions",
+            "carries",
+            "rushing_yards",
+            "rushing_tds",
+            "targets",
+            "receptions",
+            "receiving_yards",
+            "receiving_tds",
+            "total_yards",
+            "total_tds",
+        }
+
+        for field in integer_fields:
+            row[field] = round(_number(row.get(field)))
+
+        for field, value in list(row.items()):
+            if field not in integer_fields and isinstance(
+                value,
+                (int, float),
+            ):
+                row[field] = round(float(value), 2)
+
+        formatted_rows.append(row)
+
+    return jsonify(
+        ok=True,
+        scope=scope,
+        selected_season=selected_season,
+        available_seasons=available_seasons,
+        selected_position=position or "ALL",
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=total_pages,
+        players=formatted_rows,
+        available_metrics=list(metric_expressions.keys()),
+        unavailable_metrics=[
+            "route participation",
+            "targets per route run",
+            "air-yards share",
+            "yards before contact",
+            "yards after contact",
+            "missed tackles forced",
+            "goal-line carry share",
+            "man versus zone splits",
+            "defensive-back assignments",
+            "coverage grades",
+            "explosive-play percentages",
+            "weekly consistency and boom rates",
+        ],
+        source="Gridiron IQ SQLite season_stats",
+    )
+
+
 @bp.get("/api/player-research-db/table")
 def table_api():
     init_database()

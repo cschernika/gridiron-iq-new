@@ -3661,6 +3661,11 @@ def player_research_data_status_api():
     return jsonify(ok=True, **_player_research_data_status(platform))
 
 
+@app.get("/player-analytics")
+def player_analytics():
+    return page("player_analytics.html")
+
+
 @app.get("/player-research")
 def player_research():
     selected_position = request.args.get("position", "").strip().upper()
