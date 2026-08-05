@@ -1,0 +1,39 @@
+GRIDIRON IQ — 2025 PLAYER UPDATE FIX
+
+Problem fixed
+-------------
+Your updated snapshot builder calls:
+
+    _pr_rows(2025, force=force_refresh)
+
+The older _pr_rows function accepts only:
+
+    _pr_rows(season)
+
+That mismatch causes:
+
+    TypeError: _pr_rows() got an unexpected keyword argument 'force'
+
+Installation
+------------
+1. Open app.py.
+2. Search for:
+
+       def _pr_rows(season):
+
+3. Delete that entire function.
+4. Paste the replacement function from:
+       player_research_2025_loader_fix.py
+5. Commit and push app.py to GitHub.
+6. Redeploy the latest commit on Render.
+7. Open Player Research and click the 2025 update button again.
+
+Also verify these imports exist near the top of app.py:
+
+    import csv
+    import io
+    import requests
+
+The replacement supports both normal cached loading and forced refreshes.
+It also falls back to the existing cached CSV if nflverse is temporarily
+unavailable.
