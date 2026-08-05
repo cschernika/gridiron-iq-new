@@ -1,0 +1,116 @@
+{
+  "draft_score": {
+    "player": {
+      "player_id": "wr-001",
+      "name": "Example Receiver",
+      "position": "WR",
+      "season_projected_points": 255,
+      "replacement_points": 155,
+      "adp": 28,
+      "target_share": 0.27,
+      "air_yards_share": 0.35,
+      "route_participation": 0.91,
+      "first_read_target_share": 0.31,
+      "red_zone_target_share": 0.24,
+      "yards_per_route_run": 2.45,
+      "target_separation": 2.9,
+      "open_score": 78,
+      "catch_rate_over_expected": 5.5,
+      "yards_after_catch_over_expected": 1.4,
+      "route_win_rate": 0.54,
+      "fantasy_points_per_route": 0.48,
+      "racr": 0.86,
+      "wopr": 0.72,
+      "explosive_reception_rate": 0.2,
+      "health_score": 92,
+      "injury_risk": 0.16,
+      "role_certainty_score": 86,
+      "projection_confidence": 78,
+      "season_projection_percentile": 82
+    },
+    "league": {
+      "teams": 12,
+      "starters": {
+        "QB": 1,
+        "RB": 2,
+        "WR": 3,
+        "TE": 1,
+        "K": 1,
+        "DST": 1
+      },
+      "scoring": {
+        "reception": 1.0
+      }
+    },
+    "roster": {
+      "QB": [],
+      "RB": [
+        "rb-01"
+      ],
+      "WR": [
+        "wr-11"
+      ],
+      "TE": []
+    },
+    "draft_context": {
+      "current_overall_pick": 22,
+      "replacement_points": 155,
+      "remaining_startable_players_at_position": 20,
+      "next_tier_drop_percent": 0.3,
+      "probability_available_next_pick": 0.22,
+      "data_quality_score": 82
+    }
+  },
+  "weekly_score": {
+    "player": {
+      "player_id": "wr-001",
+      "name": "Example Receiver",
+      "position": "WR",
+      "projected_receptions": 6.2,
+      "projected_rec_yards": 82,
+      "projected_rec_tds": 0.55,
+      "target_share": 0.27,
+      "air_yards_share": 0.35,
+      "route_participation": 0.91,
+      "first_read_target_share": 0.31,
+      "red_zone_target_share": 0.24,
+      "yards_per_route_run": 2.45,
+      "yprr_vs_man": 2.7,
+      "yprr_vs_zone": 2.2,
+      "yprr_vs_single_high": 2.6,
+      "yprr_vs_two_high": 2.0,
+      "yprr_vs_three_high": 1.9,
+      "role_certainty_score": 86,
+      "projection_confidence": 78
+    },
+    "defense": {
+      "man_coverage_rate": 0.36,
+      "zone_coverage_rate": 0.64,
+      "single_high_rate": 0.48,
+      "two_high_rate": 0.42,
+      "three_high_rate": 0.06,
+      "primary_cb_target_rate_allowed": 0.21,
+      "primary_cb_catch_rate_allowed": 0.66,
+      "primary_cb_yards_per_target_allowed": 8.1,
+      "primary_cb_separation_allowed": 2.8,
+      "shadow_rate": 0.65,
+      "pressure_rate": 0.33,
+      "fantasy_points_allowed_to_position_percentile": 66
+    },
+    "league": {
+      "scoring": {
+        "reception": 1.0
+      }
+    },
+    "context": {
+      "alignment_match_probability": 0.85,
+      "pass_protection_score": 62,
+      "expected_play_volume_percentile": 58,
+      "wind_mph": 8,
+      "temperature_f": 67,
+      "assignment_certainty_score": 72,
+      "data_quality_score": 80,
+      "position_high_projection": 28
+    }
+  }
+}

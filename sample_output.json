@@ -1,0 +1,83 @@
+{
+  "draft_result": {
+    "player_id": "wr-001",
+    "player_name": "Example Receiver",
+    "position": "WR",
+    "draft_score": 78.76,
+    "grade": "B+",
+    "confidence": 83.33,
+    "recommendation": "Draft now; unlikely to return",
+    "probability_available_next_pick": 0.22,
+    "components": {
+      "value_over_replacement": 100.0,
+      "season_projection": 82.0,
+      "talent": 65.1,
+      "opportunity": 71.38,
+      "efficiency": 65.69,
+      "environment": 45.72,
+      "durability": 90.74,
+      "upside": 53.21,
+      "floor": 67.06,
+      "scarcity": 97.5,
+      "roster_need": 98.0,
+      "adp_value": 63.5
+    },
+    "reasons": [
+      "Strong value over replacement: 100.0 projected points.",
+      "Projects for an elite or near-elite workload.",
+      "Position is becoming scarce relative to league starting requirements.",
+      "Low probability of surviving to your next selection."
+    ]
+  },
+  "weekly_result": {
+    "player_id": "wr-001",
+    "player_name": "Example Receiver",
+    "position": "WR",
+    "weekly_score": 71.85,
+    "grade": "B+",
+    "confidence": 77.21,
+    "projection": {
+      "projected_points": 19.38,
+      "floor": 13.14,
+      "ceiling": 27.25,
+      "baseline_points": 17.7,
+      "matchup_multiplier": 1.095
+    },
+    "matchup": {
+      "matchup_score": 73.77,
+      "matchup_grade": "B+",
+      "confidence": 68.89,
+      "components": {
+        "coverage_fit": 100.0,
+        "cornerback": 56.07,
+        "delivery": 67.85,
+        "position_allowance": 66.0,
+        "game_environment": 62.8
+      },
+      "reasons": [
+        "Advantage: player production versus expected coverage shells (100/100)",
+        "Advantage: quarterback protection and pressure environment (68/100)",
+        "Advantage: defense fantasy production allowed to position (66/100)",
+        "Advantage: expected game pace and volume (63/100)"
+      ]
+    },
+    "components": {
+      "projected_points": 69.21,
+      "matchup": 73.77,
+      "opportunity": 71.38,
+      "floor": 67.47,
+      "upside": 53.18,
+      "health": 93.3,
+      "role_certainty": 86.0
+    },
+    "recommendation": "Start",
+    "reasons": [
+      "Advantage: player production versus expected coverage shells (100/100)",
+      "Advantage: quarterback protection and pressure environment (68/100)",
+      "Advantage: defense fantasy production allowed to position (66/100)",
+      "Advantage: expected game pace and volume (63/100)",
+      "Usage profile supports a dependable weekly workload.",
+      "Model range: 13.1 to 27.2 fantasy points."
+    ]
+  }
+}
