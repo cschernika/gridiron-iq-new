@@ -1,39 +1,68 @@
-GRIDIRON IQ — 2025 PLAYER UPDATE FIX
+GRIDIRON IQ — GITHUB 403 RATE-LIMIT FIX
+========================================
 
-Problem fixed
+WHY IT FAILED
 -------------
-Your updated snapshot builder calls:
+Your importer is calling:
 
-    _pr_rows(2025, force=force_refresh)
+https://api.github.com/repos/nflverse/nflverse-data/releases/tags/stats_player
 
-The older _pr_rows function accepts only:
+Unauthenticated GitHub API requests have a limited request allowance. Render
+can also share outbound IP addresses with other services, so the limit can be
+used up even when you did not personally make many requests.
 
-    _pr_rows(season)
+THIS PATCH
+----------
+The replacement never calls api.github.com. It requests the nflverse release
+CSV assets directly and retains your cached 2025 CSV as a fallback.
 
-That mismatch causes:
-
-    TypeError: _pr_rows() got an unexpected keyword argument 'force'
-
-Installation
+INSTALLATION
 ------------
 1. Open app.py.
-2. Search for:
 
-       def _pr_rows(season):
+2. Search for every occurrence of:
+       api.github.com/repos/nflverse/nflverse-data/releases/tags/stats_player
 
-3. Delete that entire function.
-4. Paste the replacement function from:
-       player_research_2025_loader_fix.py
-5. Commit and push app.py to GitHub.
-6. Redeploy the latest commit on Render.
-7. Open Player Research and click the 2025 update button again.
+3. Remove the old GitHub release-discovery function or make sure the 2025
+   import route no longer calls it.
 
-Also verify these imports exist near the top of app.py:
+4. Find your current:
+       def _pr_rows(...):
 
-    import csv
-    import io
-    import requests
+5. Replace the entire _pr_rows function with the code in:
+       player_research_direct_download_fix.py
 
-The replacement supports both normal cached loading and forced refreshes.
-It also falls back to the existing cached CSV if nflverse is temporarily
-unavailable.
+6. Also copy these helper items from that file above _pr_rows:
+       NFLVERSE_PLAYER_RELEASE
+       _pr_direct_urls
+       _looks_like_csv
+       _normalize_player_rows
+
+7. Verify these imports exist:
+       import csv
+       import io
+       import requests
+
+8. Verify DATA_DIR and app already exist before _pr_rows runs.
+
+9. Commit app.py to GitHub and redeploy the latest commit on Render.
+
+10. Click the Player Research 2025 update button once.
+
+IMPORTANT
+---------
+Do not leave the old GitHub API lookup in the update route. Replacing only the
+CSV loader will not help if another function still calls api.github.com first.
+
+Search app.py for all of these terms:
+    api.github.com
+    releases/tags/stats_player
+    assets_url
+    browser_download_url
+
+The 2025 import path should use _pr_rows(2025, force=True) directly.
+
+OPTIONAL TEMPORARY ALTERNATIVE
+------------------------------
+A GITHUB_TOKEN environment variable can raise API limits, but the direct
+download solution is better because this import does not need the GitHub API.
