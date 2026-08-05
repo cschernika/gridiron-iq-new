@@ -4,14 +4,17 @@
 {% block body %}
 <style>
 .os{--ink:#142033;--muted:#68778e;--line:#dfe5ef;--soft:#f6f8fc;--purple:#5d3df5;--blue:#2563eb;color:var(--ink)}
-.os-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}.os-kicker{font-size:11px;font-weight:900;letter-spacing:.1em;color:var(--purple)}.os h1{font-size:36px;line-height:1.05;margin:5px 0 8px}.os-sub{max-width:780px;color:var(--muted);margin:0;line-height:1.55}.os-head-actions{display:flex;gap:8px;flex-wrap:wrap}.os-link{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:#fff;color:#3f36c8;font-size:11px;font-weight:900;text-decoration:none;white-space:nowrap}
+.os-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}.os-kicker{font-size:11px;font-weight:900;letter-spacing:.1em;color:var(--purple)}.os h1{font-size:36px;line-height:1.05;margin:5px 0 8px}.os-sub{max-width:780px;color:var(--muted);margin:0;line-height:1.55}.os-head-actions{display:flex;gap:8px;flex-wrap:wrap}.os-link{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:#fff;color:#3f36c8;font:inherit;font-size:11px;font-weight:900;text-decoration:none;white-space:nowrap;cursor:pointer}
 .os-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}.os-controls{display:grid;grid-template-columns:140px 155px minmax(210px,1fr) 190px 120px;gap:10px;align-items:end}.os-field label{display:block;font-size:9px;color:var(--muted);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:5px}.os-field input,.os-field select{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px;background:#fff;color:var(--ink);font-size:12px}.os-field input:focus,.os-field select:focus{outline:2px solid #d9d1ff;border-color:var(--purple)}
 .os-tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}.os-tab{border:1px solid var(--line);border-radius:999px;padding:8px 14px;background:#fff;color:#4b5870;font-size:11px;font-weight:900;cursor:pointer}.os-tab.active{background:var(--purple);border-color:var(--purple);color:#fff}.os-tab:hover{border-color:#a99bf8}
 .os-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.os-summary article{border:1px solid var(--line);border-radius:13px;background:#fff;padding:13px}.os-summary span{display:block;color:var(--muted);font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}.os-summary strong{display:block;font-size:21px;margin-top:5px}.os-summary small{display:block;color:var(--muted);font-size:9px;margin-top:3px}.os-live{color:#15803d!important}.os-calculated{color:#1d4ed8!important}
-.os-info{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:10px}.os-info p{margin:0;color:var(--muted);font-size:10px;line-height:1.45}.os-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:9px;color:var(--muted);white-space:nowrap}.os-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;background:#2563eb}.os-dot.premium{background:#7c3aed}
+.os-info{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:10px}.os-info p{margin:0;color:var(--muted);font-size:10px;line-height:1.45}.os-info-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}.os-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:9px;color:var(--muted);white-space:nowrap}.os-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;background:#2563eb}.os-dot.ngs{background:#0f9f8f}.os-dot.model{background:#2563eb}.os-dot.premium{background:#7c3aed}.os-charted-toggle{font-size:9px;color:var(--muted);font-weight:800;white-space:nowrap}.os-charted-toggle input{accent-color:var(--purple);vertical-align:middle}
 .os-table-card{padding:0;overflow:hidden}.os-table-scroll{overflow:auto;max-height:680px}.os-table{width:100%;min-width:1180px;border-collapse:separate;border-spacing:0}.os-table th,.os-table td{padding:10px 9px;border-bottom:1px solid #e8ecf3;text-align:right;font-size:10px;white-space:nowrap}.os-table th{position:sticky;top:0;z-index:4;background:#f7f8fc;color:#607089;font-size:8px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;user-select:none}.os-table th:hover{background:#eeeaff;color:#4937d8}.os-table th .sort{display:inline-block;width:10px;margin-left:3px;color:#8a79ec}.os-table td:first-child,.os-table th:first-child{text-align:center;position:sticky;left:0;z-index:3;background:#fff}.os-table th:first-child{z-index:6;background:#f7f8fc}.os-table td:nth-child(2),.os-table th:nth-child(2){text-align:left;position:sticky;left:55px;z-index:3;background:#fff;box-shadow:4px 0 8px rgba(31,41,55,.04)}.os-table th:nth-child(2){z-index:6;background:#f7f8fc}.os-table tr:hover td{background:#faf9ff}.os-table tr:hover td:first-child,.os-table tr:hover td:nth-child(2){background:#faf9ff}.os-player{color:#3025b8;font-weight:900;text-decoration:none}.os-player:hover{text-decoration:underline}.os-pos{display:inline-block;border-radius:6px;padding:3px 5px;background:#ede9fe;color:#5138d4;font-size:8px;font-weight:900;margin-left:5px}.os-team{color:var(--muted)}.os-rank{font-weight:900}.os-advanced{background:#fbfaff}.os-na{color:#a5afbe}.os-empty{padding:42px!important;text-align:center!important;color:var(--muted);font-size:12px!important}.os-loading{padding:45px;text-align:center;color:var(--muted);font-weight:800}.os-foot{display:flex;justify-content:space-between;gap:15px;padding:12px 15px;background:#fafbfe;color:var(--muted);font-size:9px;border-top:1px solid var(--line)}
+.os-ngs{background:#f4fbfa}.os-modeled{background:#f5f8ff}.os-charted{background:#fbf8ff}.os-nq,.os-feed{font-size:8px;font-weight:800}.os-nq{color:#61847f}.os-feed{color:#7955c7}
+.os-key-head{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:12px}.os-key-head h2{margin:3px 0;font-size:20px}.os-key-head p{margin:0;color:var(--muted);font-size:10px}.os-key-search{min-width:240px;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:11px}.os-key-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.os-key-group{border:1px solid #e7ebf2;border-radius:12px;overflow:hidden;align-self:start}.os-key-group h3{margin:0;padding:9px 11px;background:#f7f8fc;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#596980}.os-key-item{padding:10px 11px;border-top:1px solid #edf0f5}.os-key-item:first-of-type{border-top:0}.os-key-term{display:flex;align-items:center;justify-content:space-between;gap:8px}.os-key-term b{font-size:10px}.os-key-item p{margin:4px 0 0;color:var(--muted);font-size:9px;line-height:1.45}.os-badge{border-radius:999px;padding:2px 6px;font-size:7px;font-weight:900;text-transform:uppercase;white-space:nowrap}.os-badge.calc{background:#dbeafe;color:#1d4ed8}.os-badge.public{background:#e8edf5;color:#526078}.os-badge.ngs{background:#d8f4ef;color:#087b6d}.os-badge.model{background:#dbeafe;color:#1d4ed8}.os-badge.charted{background:#ede9fe;color:#6d38c9}
 @media(max-width:1100px){.os-controls{grid-template-columns:repeat(3,1fr)}.os-summary{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:700px){.os-head{display:block}.os-head-actions{margin-top:12px}.os-controls{grid-template-columns:1fr 1fr}.os-summary{grid-template-columns:1fr 1fr}.os-info,.os-foot{display:block}.os-legend{margin-top:7px}.os h1{font-size:30px}}
+@media(max-width:1000px){.os-key-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.os-head{display:block}.os-head-actions{margin-top:12px}.os-controls{grid-template-columns:1fr 1fr}.os-summary{grid-template-columns:1fr 1fr}.os-info,.os-foot,.os-key-head{display:block}.os-info-right,.os-legend{margin-top:7px;justify-content:flex-start}.os h1{font-size:30px}.os-key-grid{grid-template-columns:1fr}.os-key-search{width:100%;min-width:0;margin-top:10px;box-sizing:border-box}}
 </style>
 
 <div class="os">
@@ -22,6 +25,7 @@
       <p class="os-sub">Compare every fantasy-relevant offensive player by production, opportunity, usage and efficiency. Click any column heading to rank the table by that statistic.</p>
     </div>
     <div class="os-head-actions">
+      <button class="os-link" id="os-key-button" type="button">Stat Key & Definitions</button>
       <a class="os-link" href="/player-research">Player Research →</a>
       <a class="os-link" href="/draft-center">Draft Center →</a>
     </div>
@@ -72,10 +76,21 @@
     <article><span>Advanced Data</span><strong id="os-advanced-status">Calculated</strong><small id="os-advanced-detail" class="os-calculated">Public-data metrics active</small></article>
   </section>
 
+  <section class="os-card" id="os-key-card" hidden>
+    <div class="os-key-head">
+      <div><div class="os-kicker">STAT KEY</div><h2>Terms, formulas and data types</h2><p>Search any abbreviation or metric used in the position tables.</p></div>
+      <input class="os-key-search" id="os-key-search" type="search" placeholder="Search TPRR, EPA, target share…">
+    </div>
+    <div class="os-key-grid" id="os-key-grid"></div>
+  </section>
+
   <section class="os-card os-table-card">
     <div class="os-info">
       <p id="os-description">Loading offensive statistics…</p>
-      <div class="os-legend"><span><i class="os-dot"></i>Calculated</span><span><i class="os-dot premium"></i>Charted/licensed field</span></div>
+      <div class="os-info-right">
+        <div class="os-legend"><span><i class="os-dot"></i>Calculated/public</span><span><i class="os-dot ngs"></i>NFL NGS qualifier</span><span><i class="os-dot model"></i>Expected-points model</span><span><i class="os-dot premium"></i>Charted feed</span></div>
+        <label class="os-charted-toggle"><input id="os-show-charted" type="checkbox"> Show charted-feed columns</label>
+      </div>
     </div>
     <div id="os-loading" class="os-loading">Loading player rankings…</div>
     <div id="os-table-wrap" class="os-table-scroll" hidden>
@@ -86,7 +101,7 @@
     </div>
     <div class="os-foot">
       <span id="os-source">Source: —</span>
-      <span>“—” means that a charted or licensed metric has not been imported. Gridiron IQ does not manufacture missing values.</span>
+      <span>“NQ” means the player did not meet the NFL Next Gen Stats minimum. “—” means the source published no value. “Feed needed” marks charted-only data.</span>
     </div>
   </section>
 </div>
@@ -94,44 +109,58 @@
 <script>
 (()=>{
   const $=id=>document.getElementById(id);
+  const col=(key,label,fmt="one",source="calc",extra={})=>({key,label,fmt,source,...extra});
   const base=[
-    {key:"position_rank",label:"Rank",fmt:"rank"},
-    {key:"name",label:"Player",fmt:"player"},
-    {key:"team",label:"Team",fmt:"text"},
-    {key:"games",label:"G",fmt:"int"},
-    {key:"fantasy_points",label:"FPTS",fmt:"one"},
-    {key:"fantasy_points_per_game",label:"FPG",fmt:"one"}
+    col("position_rank","Rank","rank","calc"),col("name","Player","player","public"),
+    col("team","Team","text","public"),col("games","G","int","public"),
+    col("fantasy_points","FPTS","one","calc"),col("fantasy_points_per_game","FPG","one","calc")
   ];
   const shared={
-    target_share:{key:"target_share",label:"TGT Share",fmt:"pct",help:"Player targets divided by team targets"},
-    opportunity_share:{key:"opportunity_share",label:"Opp Share",fmt:"pct",help:"Carries plus targets divided by team opportunities"},
-    snap_share:{key:"snap_share",label:"Snap Share",fmt:"pct",advanced:true},
-    route_share:{key:"route_share",label:"Route Share",fmt:"pct",advanced:true},
-    routes_run:{key:"routes_run",label:"Routes",fmt:"int",advanced:true},
-    tprr:{key:"targets_per_route_run",label:"TPRR",fmt:"pct",advanced:true},
-    yprr:{key:"yards_per_route_run",label:"YPRR",fmt:"two",advanced:true},
-    first_read:{key:"first_read_target_share",label:"1st Read Share",fmt:"pct",advanced:true},
-    separation:{key:"separation_score",label:"Separation",fmt:"three",advanced:true},
-    xfp:{key:"expected_fantasy_points",label:"xFP",fmt:"one",advanced:true},
-    fpoe:{key:"fantasy_points_over_expected",label:"FPOE",fmt:"one",advanced:true}
+    snaps:col("offense_snaps","Off Snaps","int","public"),
+    snapShare:col("snap_share","Snap Share","pct","public"),
+    targetShare:col("target_share","TGT Share","pct","calc"),
+    opportunityShare:col("opportunity_share","Opp Share","pct","calc"),
+    xfp:col("expected_fantasy_points","xFP","one","model"),
+    fpoe:col("fantasy_points_over_expected","FPOE","one","model"),
+    routes:col("routes_run","Routes","int","charted",{charted:true}),
+    routeShare:col("route_share","Route Share","pct","charted",{charted:true}),
+    tprr:col("targets_per_route_run","TPRR","pct","charted",{charted:true}),
+    yprr:col("yards_per_route_run","YPRR","two","charted",{charted:true}),
+    firstRead:col("first_read_target_share","1st Read Share","pct","charted",{charted:true}),
+    winRate:col("route_win_rate","Route Win%","pct","charted",{charted:true}),
+    mtf:col("missed_tackles_forced","MTF","int","charted",{charted:true})
   };
   const columns={
-    ALL:[...base,{key:"carries",label:"Carries",fmt:"int"},{key:"rush_share",label:"Rush Share",fmt:"pct"},{key:"targets",label:"TGT",fmt:"int"},shared.target_share,{key:"opportunities",label:"OPP",fmt:"int"},shared.opportunity_share,{key:"total_yards",label:"Total Yds",fmt:"int"},{key:"total_tds",label:"Total TD",fmt:"one"},shared.snap_share],
-    QB:[...base,{key:"completions",label:"CMP",fmt:"int"},{key:"attempts",label:"ATT",fmt:"int"},{key:"completion_rate",label:"CMP%",fmt:"pct"},{key:"passing_yards",label:"Pass Yds",fmt:"int"},{key:"yards_per_attempt",label:"Y/A",fmt:"one"},{key:"passing_tds",label:"Pass TD",fmt:"one"},{key:"interceptions",label:"INT",fmt:"one"},{key:"sacks_suffered",label:"Sacks",fmt:"int"},{key:"passing_air_yards",label:"Air Yds",fmt:"int"},{key:"passing_first_downs",label:"Pass 1D",fmt:"int"},{key:"passing_cpoe",label:"CPOE",fmt:"two"},{key:"passing_epa",label:"Pass EPA",fmt:"two"},{key:"carries",label:"Rush Att",fmt:"int"},{key:"rushing_yards",label:"Rush Yds",fmt:"int"},{key:"rushing_tds",label:"Rush TD",fmt:"one"},shared.xfp,shared.fpoe],
-    RB:[...base,shared.snap_share,{key:"carries",label:"Carries",fmt:"int"},{key:"rush_share",label:"Rush Share",fmt:"pct"},{key:"rushing_yards",label:"Rush Yds",fmt:"int"},{key:"yards_per_carry",label:"YPC",fmt:"one"},{key:"rushing_tds",label:"Rush TD",fmt:"one"},{key:"rushing_first_downs",label:"Rush 1D",fmt:"int"},{key:"rushing_10",label:"10+ Runs",fmt:"int"},{key:"rushing_20",label:"20+ Runs",fmt:"int"},{key:"rushing_epa",label:"Rush EPA",fmt:"two"},{key:"targets",label:"TGT",fmt:"int"},shared.target_share,shared.route_share,shared.tprr,{key:"receptions",label:"REC",fmt:"int"},{key:"receiving_yards",label:"Rec Yds",fmt:"int"},{key:"yards_after_catch",label:"YAC",fmt:"int"},{key:"opportunities",label:"OPP",fmt:"int"},shared.opportunity_share,{key:"red_zone_touches",label:"RZ Touch",fmt:"int",advanced:true},{key:"goal_line_carries",label:"GL Carry",fmt:"int",advanced:true},{key:"yards_after_contact",label:"YACON",fmt:"int",advanced:true},{key:"missed_tackles_forced",label:"MTF",fmt:"int",advanced:true},shared.xfp,shared.fpoe],
-    WR:[...base,shared.snap_share,shared.routes_run,shared.route_share,{key:"targets",label:"TGT",fmt:"int"},{key:"targets_per_game",label:"TGT/G",fmt:"one"},shared.target_share,shared.first_read,shared.tprr,{key:"receptions",label:"REC",fmt:"int"},{key:"catch_rate",label:"Catch%",fmt:"pct"},{key:"receiving_yards",label:"Rec Yds",fmt:"int"},{key:"yards_per_target",label:"YPT",fmt:"one"},{key:"yards_per_reception",label:"YPR",fmt:"one"},shared.yprr,{key:"receiving_tds",label:"Rec TD",fmt:"one"},{key:"receiving_air_yards",label:"Air Yds",fmt:"int"},{key:"adot",label:"aDOT",fmt:"one"},{key:"air_yards_share",label:"Air Yds Share",fmt:"pct"},{key:"yards_after_catch",label:"YAC",fmt:"int"},{key:"receiving_first_downs",label:"Rec 1D",fmt:"int"},{key:"receiving_epa",label:"Rec EPA",fmt:"two"},{key:"wopr",label:"WOPR",fmt:"two"},{key:"red_zone_targets",label:"RZ TGT",fmt:"int",advanced:true},{key:"end_zone_targets",label:"EZ TGT",fmt:"int",advanced:true},shared.separation,{key:"route_win_rate",label:"Win Rate",fmt:"pct",advanced:true},shared.xfp,shared.fpoe],
+    ALL:[...base,shared.snaps,shared.snapShare,col("carries","Carries","int","public"),col("rush_share","Rush Share","pct"),col("targets","TGT","int","public"),shared.targetShare,col("opportunities","OPP","int"),col("opportunities_per_game","OPP/G","one"),shared.opportunityShare,col("points_per_opportunity","PPO","two"),col("total_yards","Total Yds","int"),col("total_tds","Total TD","one"),shared.xfp,shared.fpoe],
+    QB:[...base,shared.snaps,shared.snapShare,col("completions","CMP","int","public"),col("attempts","ATT","int","public"),col("completion_rate","CMP%","pct"),col("passing_yards","Pass Yds","int","public"),col("pass_yards_per_game","Pass Y/G","one"),col("yards_per_attempt","Y/A","one"),col("passing_tds","Pass TD","one","public"),col("passing_touchdown_rate","TD%","pct"),col("interceptions","INT","one","public"),col("interception_rate","INT%","pct"),col("sacks_suffered","Sacks","int","public"),col("sack_rate","Sack%","pct"),col("passing_first_downs","Pass 1D","int","public"),col("passing_epa","Pass EPA","two","public"),col("passing_epa_per_dropback","EPA/DB","three"),col("passing_cpoe","CPOE","two","public"),col("qb_on_target_rate","On TGT%","pct","public"),col("qb_bad_throw_rate","Bad Throw%","pct","public"),col("qb_pressure_rate","Pressure%","pct","public"),col("qb_pocket_time","Pocket Time","two","public"),col("ngs_time_to_throw","TTT","two","ngs",{qualifier:true}),col("ngs_expected_completion_rate","xCMP%","pct","ngs",{qualifier:true}),col("ngs_cpoe","NGS CPOE","one","ngs",{qualifier:true}),col("ngs_aggressiveness","AGG%","pct","ngs",{qualifier:true}),col("ngs_passer_rating","Rating","one","ngs",{qualifier:true}),col("carries","Rush Att","int","public"),col("rushing_yards","Rush Yds","int","public"),col("rushing_tds","Rush TD","one","public"),shared.xfp,shared.fpoe],
+    RB:[...base,shared.snaps,shared.snapShare,col("carries","Carries","int","public"),col("rush_share","Rush Share","pct"),col("rushing_yards","Rush Yds","int","public"),col("rush_yards_per_game","Rush Y/G","one"),col("yards_per_carry","YPC","one"),col("rushing_tds","Rush TD","one","public"),col("rushing_first_downs","Rush 1D","int","public"),col("rushing_10","10+ Runs","int","public"),col("rushing_20","20+ Runs","int","public"),col("explosive_run_rate","10+ Run%","pct"),col("rushing_epa","Rush EPA","two","public"),col("rushing_epa_per_carry","EPA/Carry","three"),col("yards_before_contact","YBCON","int","public"),col("yards_after_contact","YACON","int","public"),col("yards_after_contact_per_carry","YACON/Att","one","public"),col("rushing_broken_tackles","Brk Tkl","int","public"),col("ngs_rush_yards_over_expected","RYOE","int","ngs",{qualifier:true}),col("ngs_ryoe_per_carry","RYOE/Att","two","ngs",{qualifier:true}),col("ngs_stacked_box_rate","8+ Box%","pct","ngs",{qualifier:true}),col("ngs_time_to_line","Time to LOS","two","ngs",{qualifier:true}),col("targets","TGT","int","public"),shared.targetShare,shared.routes,shared.routeShare,shared.tprr,col("receptions","REC","int","public"),col("receiving_yards","Rec Yds","int","public"),col("yards_after_catch","YAC","int","public"),col("opportunities","OPP","int"),col("opportunities_per_game","OPP/G","one"),shared.opportunityShare,col("red_zone_touches","RZ Touch","int","public"),col("red_zone_touch_share","RZ Touch%","pct"),col("goal_line_carries","GL Carry","int","public"),shared.mtf,shared.xfp,shared.fpoe],
+    WR:[...base,shared.snaps,shared.snapShare,shared.routes,shared.routeShare,col("targets","TGT","int","public"),col("targets_per_game","TGT/G","one"),shared.targetShare,shared.firstRead,shared.tprr,col("receptions","REC","int","public"),col("catch_rate","Catch%","pct"),col("receiving_yards","Rec Yds","int","public"),col("receiving_yards_per_game","Rec Y/G","one"),col("yards_per_target","YPT","one"),col("yards_per_reception","YPR","one"),shared.yprr,col("receiving_tds","Rec TD","one","public"),col("receiving_touchdown_rate","TD/TGT%","pct"),col("receiving_air_yards","Air Yds","int","public"),col("adot","aDOT","one"),col("air_yards_share","Air Yds Share","pct","public"),col("receiver_air_conversion_ratio","RACR","two"),col("yards_after_catch","YAC","int","public"),col("yards_after_catch_per_reception","YAC/Rec","one"),col("receiving_first_downs","Rec 1D","int","public"),col("receiving_first_down_rate","1D/TGT%","pct"),col("receiving_epa","Rec EPA","two","public"),col("receiving_epa_per_target","EPA/TGT","three"),col("wopr","WOPR","two","public"),col("red_zone_targets","RZ TGT","int","public"),col("red_zone_target_share","RZ TGT%","pct"),col("end_zone_targets","EZ TGT","int","public"),col("drops","Drops","int","public"),col("drop_rate","Drop%","pct","public"),col("receiving_broken_tackles","Brk Tkl","int","public"),col("target_passer_rating","TGT Rating","one","public"),col("ngs_separation","Separation","two","ngs",{qualifier:true}),col("ngs_cushion","Cushion","two","ngs",{qualifier:true}),col("ngs_yac_over_expected_per_reception","YACOE/Rec","two","ngs",{qualifier:true}),shared.winRate,shared.xfp,shared.fpoe],
     TE:[],
-    K:[...base,{key:"fg_made",label:"FGM",fmt:"int"},{key:"fg_att",label:"FGA",fmt:"int"},{key:"fg_pct",label:"FG%",fmt:"pct"},{key:"fg_long",label:"Long",fmt:"int"},{key:"fg_made_40_49",label:"40-49",fmt:"int"},{key:"fg_made_50_59",label:"50-59",fmt:"int"},{key:"fg_made_60_plus",label:"60+",fmt:"int"},{key:"pat_made",label:"XPM",fmt:"int"},{key:"pat_att",label:"XPA",fmt:"int"},{key:"pat_pct",label:"XP%",fmt:"pct"}]
+    K:[...base,col("fg_made","FGM","int","public"),col("fg_att","FGA","int","public"),col("fg_pct","FG%","pct","public"),col("fg_long","Long","int","public"),col("fg_made_40_49","40–49","int","public"),col("fg_made_50_59","50–59","int","public"),col("fg_made_60_plus","60+","int","public"),col("pat_made","XPM","int","public"),col("pat_att","XPA","int","public"),col("pat_pct","XP%","pct","public")]
   };
   columns.TE=columns.WR;
+
+  const glossary={
+    position_rank:["Position Rank","Rankings","Rank at the player’s listed position using the selected fantasy scoring."],name:["Player","Rankings","Player name and listed fantasy position."],team:["NFL Team","Rankings","Current team abbreviation in the selected season dataset."],games:["Games","Rankings","Regular-season games credited to the player."],fantasy_points:["Fantasy Points","Fantasy","Total points under the selected Full PPR, Half PPR or Standard setting."],fantasy_points_per_game:["Fantasy Points per Game","Fantasy","Selected fantasy points divided by games played."],offense_snaps:["Offensive Snaps","Usage","Total regular-season offensive plays on the field."],snap_share:["Snap Share","Usage","Player offensive snaps divided by the estimated team offensive snaps in games played."],carries:["Carries / Rush Attempts","Rushing","Official rushing attempts."],rush_share:["Team Rush Share","Usage","Player carries divided by all team player carries."],targets:["Targets","Receiving","Pass attempts directed to the player."],target_share:["Target Share","Usage","Player targets divided by all team player targets."],opportunities:["Opportunities","Usage","Carries plus targets."],opportunities_per_game:["Opportunities per Game","Usage","Carries plus targets divided by games."],opportunity_share:["Opportunity Share","Usage","Player carries plus targets divided by the team total of carries plus targets."],points_per_opportunity:["Points per Opportunity","Fantasy","Selected fantasy points divided by carries plus targets."],total_yards:["Total Offensive Yards","Production","Passing, rushing and receiving yards added together."],total_tds:["Total Touchdowns","Production","Passing, rushing and receiving touchdowns added together."],expected_fantasy_points:["Expected Fantasy Points","Expected Value","Situation-aware fantasy points expected from the player’s opportunities. Adjusted to the selected scoring format."],fantasy_points_over_expected:["Fantasy Points Over Expected","Expected Value","Actual selected fantasy points minus expected fantasy points. Positive values mean the player outscored opportunity-based expectation."],
+    completions:["Completions","Passing","Completed forward passes."],attempts:["Pass Attempts","Passing","Official passing attempts."],completion_rate:["Completion Percentage","Passing","Completions divided by pass attempts."],passing_yards:["Passing Yards","Passing","Official passing yards."],pass_yards_per_game:["Passing Yards per Game","Passing","Passing yards divided by games."],yards_per_attempt:["Yards per Attempt","Passing","Passing yards divided by pass attempts."],passing_tds:["Passing Touchdowns","Passing","Touchdown passes."],passing_touchdown_rate:["Passing Touchdown Rate","Passing","Passing touchdowns divided by pass attempts."],interceptions:["Interceptions","Passing","Passes intercepted by the defense."],interception_rate:["Interception Rate","Passing","Interceptions divided by pass attempts."],sacks_suffered:["Sacks Taken","Passing","Times the quarterback was sacked."],sack_rate:["Sack Rate","Passing","Sacks divided by pass attempts plus sacks."],passing_first_downs:["Passing First Downs","Passing","Completed passes that produced a first down."],passing_epa:["Passing EPA","Efficiency","Total Expected Points Added on passing plays."],passing_epa_per_dropback:["EPA per Dropback","Efficiency","Passing EPA divided by pass attempts plus sacks."],passing_cpoe:["Completion Percentage Over Expected","Efficiency","Actual completion percentage minus nflfastR expected completion percentage."],qb_on_target_rate:["On-Target Throw Rate","Passing","PFR-charted on-target throws divided by qualifying attempts."],qb_bad_throw_rate:["Bad Throw Rate","Passing","PFR-charted bad throws divided by qualifying attempts."],qb_pressure_rate:["Pressure Rate","Passing","PFR-charted pressures divided by quarterback dropbacks."],qb_pocket_time:["Pocket Time","Passing","Average seconds from snap until throw or pocket collapse."],ngs_time_to_throw:["Time to Throw","Next Gen Stats","NFL NGS average seconds from snap to pass release."],ngs_expected_completion_rate:["Expected Completion Percentage","Next Gen Stats","NFL NGS completion expectation based on throw difficulty."],ngs_cpoe:["NGS Completion Percentage Over Expected","Next Gen Stats","Actual completion percentage minus NFL NGS expected completion percentage."],ngs_aggressiveness:["Aggressiveness","Next Gen Stats","Percentage of throws into tight coverage, as measured by NFL NGS."],ngs_passer_rating:["NGS Passer Rating","Next Gen Stats","Traditional passer rating for the NGS qualifying sample."],
+    rushing_yards:["Rushing Yards","Rushing","Official rushing yards."],rush_yards_per_game:["Rushing Yards per Game","Rushing","Rushing yards divided by games."],yards_per_carry:["Yards per Carry","Rushing","Rushing yards divided by carries."],rushing_tds:["Rushing Touchdowns","Rushing","Touchdowns scored on rushing attempts."],rushing_first_downs:["Rushing First Downs","Rushing","Carries that produced a first down."],rushing_10:["Runs of 10+ Yards","Rushing","Carries gaining at least 10 yards."],rushing_20:["Runs of 20+ Yards","Rushing","Carries gaining at least 20 yards."],explosive_run_rate:["10+ Yard Run Rate","Efficiency","Runs of at least 10 yards divided by carries."],rushing_epa:["Rushing EPA","Efficiency","Total Expected Points Added on carries."],rushing_epa_per_carry:["Rushing EPA per Carry","Efficiency","Rushing EPA divided by carries."],yards_before_contact:["Yards Before Contact","Rushing","PFR rushing yards gained before first defensive contact."],yards_after_contact:["Yards After Contact","Rushing","PFR rushing yards gained after first defensive contact."],yards_after_contact_per_carry:["Yards After Contact per Carry","Rushing","PFR yards after contact divided by carries."],rushing_broken_tackles:["Rushing Broken Tackles","Rushing","PFR-charted broken tackles on rushing attempts."],ngs_rush_yards_over_expected:["Rush Yards Over Expected","Next Gen Stats","Actual rushing yards minus NFL NGS expected rushing yards."],ngs_ryoe_per_carry:["RYOE per Carry","Next Gen Stats","NFL NGS rush yards over expected divided by qualifying carries."],ngs_stacked_box_rate:["Eight-Plus Defenders Rate","Next Gen Stats","Percentage of carries faced with at least eight defenders in the box."],ngs_time_to_line:["Time to Line of Scrimmage","Next Gen Stats","Average seconds from snap to crossing the line of scrimmage."],red_zone_touches:["Red-Zone Touches","Red Zone","Carries plus receptions starting at or inside the opponent 20-yard line."],red_zone_touch_share:["Red-Zone Touch Share","Red Zone","Player red-zone touches divided by team red-zone touches."],goal_line_carries:["Goal-Line Carries","Red Zone","Carries starting at or inside the opponent 5-yard line."],
+    receptions:["Receptions","Receiving","Completed passes caught by the player."],receiving_yards:["Receiving Yards","Receiving","Official receiving yards."],receiving_yards_per_game:["Receiving Yards per Game","Receiving","Receiving yards divided by games."],catch_rate:["Catch Rate","Receiving","Receptions divided by targets."],yards_per_target:["Yards per Target","Efficiency","Receiving yards divided by targets."],yards_per_reception:["Yards per Reception","Efficiency","Receiving yards divided by receptions."],receiving_tds:["Receiving Touchdowns","Receiving","Touchdowns scored on receptions."],receiving_touchdown_rate:["Touchdowns per Target","Efficiency","Receiving touchdowns divided by targets."],receiving_air_yards:["Receiving Air Yards","Receiving","Intended yards traveled by passes targeting the player."],adot:["Average Depth of Target","Receiving","Receiving air yards divided by targets."],air_yards_share:["Air-Yards Share","Usage","Player receiving air yards divided by team receiving air yards."],receiver_air_conversion_ratio:["Receiver Air Conversion Ratio","Efficiency","Receiving yards divided by receiving air yards; commonly called RACR."],yards_after_catch:["Yards After Catch","Receiving","Receiving yards gained after the catch."],yards_after_catch_per_reception:["YAC per Reception","Receiving","Yards after catch divided by receptions."],receiving_first_downs:["Receiving First Downs","Receiving","Receptions that produced a first down."],receiving_first_down_rate:["First Downs per Target","Efficiency","Receiving first downs divided by targets."],receiving_epa:["Receiving EPA","Efficiency","Total Expected Points Added on targets."],receiving_epa_per_target:["Receiving EPA per Target","Efficiency","Receiving EPA divided by targets."],wopr:["Weighted Opportunity Rating","Usage","Combined target share and air-yards share using the standard WOPR weighting."],red_zone_targets:["Red-Zone Targets","Red Zone","Targets on plays starting at or inside the opponent 20-yard line."],red_zone_target_share:["Red-Zone Target Share","Red Zone","Player red-zone targets divided by team red-zone targets."],end_zone_targets:["End-Zone Targets","Red Zone","Targets whose air-yard depth reached or crossed the goal line."],drops:["Drops","Receiving","PFR-charted catchable passes that were dropped."],drop_rate:["Drop Rate","Receiving","PFR drops divided by targets."],receiving_broken_tackles:["Receiving Broken Tackles","Receiving","PFR-charted broken tackles after receptions."],target_passer_rating:["Passer Rating When Targeted","Receiving","Traditional passer rating on passes targeting the receiver."],ngs_separation:["Average Separation","Next Gen Stats","Average yards between receiver and nearest defender at catch or incompletion."],ngs_cushion:["Average Cushion","Next Gen Stats","Average pre-snap yards between receiver and nearest defender."],ngs_yac_over_expected_per_reception:["YAC Over Expected per Reception","Next Gen Stats","Actual yards after catch minus NFL NGS expected YAC, per reception."],
+    routes_run:["Routes Run","Charted Feed","Pass routes charted for the player. Requires a route-participation feed."],route_share:["Route Participation","Charted Feed","Routes run divided by team pass plays or available routes, depending on feed definition."],targets_per_route_run:["Targets per Route Run","Charted Feed","Targets divided by charted routes run."],yards_per_route_run:["Yards per Route Run","Charted Feed","Receiving yards divided by charted routes run."],first_read_target_share:["First-Read Target Share","Charted Feed","Share of designed first-read targets credited to the player."],route_win_rate:["Route Win Rate","Charted Feed","Percentage of charted routes graded as wins by the connected provider."],missed_tackles_forced:["Missed Tackles Forced","Charted Feed","Provider-charted missed tackles forced; definition can vary by provider."],
+    fg_made:["Field Goals Made","Kicking","Successful field goals."],fg_att:["Field-Goal Attempts","Kicking","Official field-goal attempts."],fg_pct:["Field-Goal Percentage","Kicking","Field goals made divided by attempts."],fg_long:["Longest Field Goal","Kicking","Longest successful field goal in yards."],fg_made_40_49:["Field Goals Made: 40–49","Kicking","Successful field goals from 40 through 49 yards."],fg_made_50_59:["Field Goals Made: 50–59","Kicking","Successful field goals from 50 through 59 yards."],fg_made_60_plus:["Field Goals Made: 60+","Kicking","Successful field goals from at least 60 yards."],pat_made:["Extra Points Made","Kicking","Successful point-after attempts."],pat_att:["Extra-Point Attempts","Kicking","Official point-after attempts."],pat_pct:["Extra-Point Percentage","Kicking","Extra points made divided by attempts."]
+  };
 
   let allRows=[],position="ALL",sortKey="fantasy_points",sortDirection="desc",metadata={};
   const esc=value=>String(value??"").replace(/[&<>'"]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
   const numeric=value=>value!==null&&value!==""&&value!==undefined&&!Number.isNaN(Number(value));
-  const display=(value,fmt,row)=>{
+  const display=(value,column,row)=>{
+    const fmt=column.fmt;
     if(fmt==="player") return `<a class="os-player" href="/player-research?player=${encodeURIComponent(row.name)}">${esc(row.name)}</a><span class="os-pos">${esc(row.position)}</span>`;
     if(fmt==="rank") return `<span class="os-rank">${esc(row.rank_label||value)}</span>`;
-    if(value===null||value===undefined||value==="") return `<span class="os-na">—</span>`;
+    if(value===null||value===undefined||value===""){
+      if(column.charted) return `<span class="os-feed" title="A compatible charted-data feed is required">Feed needed</span>`;
+      if(column.qualifier) return `<span class="os-nq" title="Did not meet the NFL Next Gen Stats minimum-attempt threshold">NQ</span>`;
+      return `<span class="os-na">—</span>`;
+    }
     if(fmt==="pct") return numeric(value)?`${Number(value).toFixed(1)}%`:"—";
     if(fmt==="int") return numeric(value)?Math.round(Number(value)).toLocaleString():esc(value);
     if(fmt==="one") return numeric(value)?Number(value).toFixed(1):esc(value);
@@ -140,7 +169,26 @@
     return esc(value);
   };
 
-  function activeColumns(){return columns[position]||columns.ALL;}
+  const sourceLabel={calc:"Calculated",public:"Public tracked",ngs:"NFL Next Gen Stats",model:"Expected-points model",charted:"Charted feed"};
+  const sourceClass=column=>column.source==="ngs"?"os-ngs":column.source==="model"?"os-modeled":column.source==="charted"?"os-charted":"";
+  function activeColumns(){
+    const showCharted=$("os-show-charted").checked||metadata.advanced_available;
+    return (columns[position]||columns.ALL).filter(column=>!column.charted||showCharted);
+  }
+
+  function renderGlossary(){
+    const query=$("os-key-search").value.trim().toLowerCase();
+    const unique=new Map();
+    Object.values(columns).flat().forEach(column=>{if(!unique.has(column.key))unique.set(column.key,column);});
+    const groups={};
+    [...unique.values()].forEach(column=>{
+      const entry=glossary[column.key]||[column.label,"Other","Click the table heading to sort by this statistic."];
+      const haystack=`${column.label} ${entry.join(" ")}`.toLowerCase();
+      if(query&&!haystack.includes(query))return;
+      (groups[entry[1]]??=[]).push({column,entry});
+    });
+    $("os-key-grid").innerHTML=Object.entries(groups).map(([group,items])=>`<section class="os-key-group"><h3>${esc(group)}</h3>${items.map(({column,entry})=>`<div class="os-key-item"><div class="os-key-term"><b>${esc(column.label)} · ${esc(entry[0])}</b><span class="os-badge ${esc(column.source)}">${esc(sourceLabel[column.source]||column.source)}</span></div><p>${esc(entry[2])}</p></div>`).join("")}</section>`).join("")||'<p class="os-na">No stat terms match that search.</p>';
+  }
 
   async function load(){
     $("os-loading").hidden=false;$("os-table-wrap").hidden=true;
@@ -154,10 +202,11 @@
       rebuildMetricFilter();render();
       $("os-loading").hidden=true;$("os-table-wrap").hidden=false;
       $("os-source").textContent=`Source: ${metadata.source||"Gridiron IQ"}${metadata.advanced_source?" + "+metadata.advanced_source:""}`;
-      $("os-advanced-status").textContent=metadata.advanced_available?"Connected":"Calculated";
-      $("os-advanced-detail").textContent=metadata.advanced_available?(metadata.advanced_source||"Charted fields available"):"Usage and efficiency calculations active";
+      $("os-advanced-status").textContent=metadata.advanced_available?"Connected":metadata.public_advanced_available?"Expanded":"Calculated";
+      $("os-advanced-detail").textContent=metadata.advanced_available?(metadata.advanced_source||"Charted fields available"):metadata.public_advanced_available?"Snap, red-zone, NGS and xFP data loaded":"Usage and efficiency calculations active";
       $("os-advanced-detail").className=metadata.advanced_available?"os-live":"os-calculated";
-      $("os-description").textContent=`${metadata.season} ${metadata.season===2026?"projected":"actual"} statistics · ${metadata.scoring} scoring · Click a heading to sort. Purple-tinted columns require an advanced charting feed.`;
+      const basis=metadata.usage_basis_year?` · Usage/advanced rates use ${metadata.usage_basis_year} baseline data`:"";
+      $("os-description").textContent=`${metadata.season} ${metadata.season===2026?"projected":"actual"} statistics · ${metadata.scoring} scoring${basis} · Click a heading to sort. NQ marks players below the NFL Next Gen Stats qualifying minimum.`;
     }catch(error){
       $("os-loading").hidden=false;$("os-loading").textContent=`Offensive statistics could not load: ${error.message}`;
     }
@@ -197,9 +246,10 @@
     const cols=activeColumns(),rows=filteredRows();
     $("os-head-row").innerHTML=cols.map(column=>{
       const arrow=sortKey===column.key?(sortDirection==="asc"?"▲":"▼"):"";
-      return `<th data-key="${column.key}" class="${column.advanced?"os-advanced":""}" title="${esc(column.help||(column.advanced?"Requires charted or licensed data":"Click to sort"))}">${esc(column.label)}<span class="sort">${arrow}</span></th>`;
+      const entry=glossary[column.key];
+      return `<th data-key="${column.key}" class="${sourceClass(column)}" title="${esc(entry?entry[2]:"Click to sort")}">${esc(column.label)}<span class="sort">${arrow}</span></th>`;
     }).join("");
-    $("os-body").innerHTML=rows.length?rows.map(row=>`<tr>${cols.map(column=>`<td class="${column.advanced?"os-advanced":""}">${display(row[column.key],column.fmt,row)}</td>`).join("")}</tr>`).join(""):'<tr><td class="os-empty" colspan="40">No players match the selected filters.</td></tr>';
+    $("os-body").innerHTML=rows.length?rows.map(row=>`<tr>${cols.map(column=>`<td class="${sourceClass(column)}">${display(row[column.key],column,row)}</td>`).join("")}</tr>`).join(""):`<tr><td class="os-empty" colspan="${cols.length}">No players match the selected filters.</td></tr>`;
     $("os-count").textContent=rows.length.toLocaleString();
     const leader=[...rows].sort((a,b)=>Number(b.fantasy_points||0)-Number(a.fantasy_points||0))[0];
     $("os-leader").textContent=leader?leader.name:"—";
@@ -224,6 +274,13 @@
   $("os-search").oninput=render;
   $("os-metric").onchange=()=>{$("os-minimum").disabled=!$("os-metric").value;if(!$("os-metric").value)$("os-minimum").value="";render();};
   $("os-minimum").oninput=render;
+  $("os-show-charted").onchange=()=>{rebuildMetricFilter();render();};
+  $("os-key-button").onclick=()=>{
+    const card=$("os-key-card");card.hidden=!card.hidden;
+    $("os-key-button").textContent=card.hidden?"Stat Key & Definitions":"Hide Stat Key";
+    if(!card.hidden){renderGlossary();card.scrollIntoView({behavior:"smooth",block:"start"});}
+  };
+  $("os-key-search").oninput=renderGlossary;
   $("os-season").onchange=load;
   $("os-scoring").onchange=load;
   $("os-season").value="{{ default_offensive_season }}";
