@@ -146,14 +146,17 @@
       $("review").href=`/mock-draft/review/${id}`;
     }
 
-    await renderBoard(d.current_pick);
+    renderBoard(d.current_pick,d.teams,d.mock);
   }
 
-  async function renderBoard(currentPick){
+  async function renderBoard(currentPick,teams=null,mockData=null){
     if(!id) return;
-    const d=await api(`/api/mock-draft/manual/${id}/board`);
-    const teams=d.teams||[];
-    const rounds=Number((d.mock||{}).rounds||12);
+    if(!teams){
+      const d=await api(`/api/mock-draft/manual/${id}/board`);
+      teams=d.teams||[];
+      mockData=d.mock||{};
+    }
+    const rounds=Number((mockData||{}).rounds||12);
 
     const bySlot={};
     teams.forEach(t=>{
@@ -215,6 +218,8 @@
 
     document.querySelectorAll(".ms-pick").forEach(b=>b.onclick=async()=>{
       b.disabled=true;
+      const priorClock=$("pick").textContent;
+      $("pick").textContent="AI teams are picking…";
       try{
         await api(`/api/mock-draft/manual/${id}/pick`,{
           method:"POST",
@@ -223,6 +228,7 @@
         await refresh();
       }catch(e){
         alert(e.message);
+        $("pick").textContent=priorClock;
         b.disabled=false;
       }
     });
