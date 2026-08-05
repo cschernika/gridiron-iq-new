@@ -1037,18 +1037,121 @@ def yahoo_callback():
 # ============================================================
 
 MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
+MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
+MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
+_MANUAL_MOCK_MEMORY = None
+_MOCK_CURRENT_PLAYERS_MEMORY = {}
+_MOCK_CURRENT_PLAYERS_MTIME = 0.0
+
+def _manual_mock_public(mock):
+    """Return only the mock fields the browser needs, excluding the large pool."""
+    return {key: value for key, value in mock.items() if key != "player_pool"}
+
+def _mock_current_player_directory():
+    """Load current teams once per day and reuse the saved Sleeper directory."""
+    cached = {}
+    try:
+        if MOCK_PLAYER_CACHE_FILE.exists():
+            cached = json.loads(MOCK_PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+            if not isinstance(cached, dict):
+                cached = {}
+            age = time.time() - MOCK_PLAYER_CACHE_FILE.stat().st_mtime
+            if cached and age < MOCK_PLAYER_CACHE_TTL:
+                return cached
+    except Exception:
+        cached = {}
+
+    try:
+        response = requests.get(
+            "https://api.sleeper.app/v1/players/nfl?active=true",
+            headers={"User-Agent": "Gridiron-IQ/2026"},
+            timeout=(3, 10),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, dict) and payload:
+            try:
+                MOCK_PLAYER_CACHE_FILE.write_text(
+                    json.dumps(payload, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+            return payload
+    except Exception as exc:
+        app.logger.warning("Mock Draft current-team refresh failed: %s", exc)
+
+    return cached
+
+def _mock_current_players_by_name(refresh=False):
+    global _MOCK_CURRENT_PLAYERS_MEMORY, _MOCK_CURRENT_PLAYERS_MTIME
+    try:
+        cache_mtime = MOCK_PLAYER_CACHE_FILE.stat().st_mtime
+        cache_age = time.time() - cache_mtime
+    except Exception:
+        cache_mtime = 0.0
+        cache_age = MOCK_PLAYER_CACHE_TTL + 1
+
+    if (
+        _MOCK_CURRENT_PLAYERS_MEMORY
+        and _MOCK_CURRENT_PLAYERS_MTIME == cache_mtime
+        and (not refresh or cache_age < MOCK_PLAYER_CACHE_TTL)
+    ):
+        return _MOCK_CURRENT_PLAYERS_MEMORY
+
+    if not refresh and MOCK_PLAYER_CACHE_FILE.exists():
+        try:
+            directory = json.loads(MOCK_PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            directory = {}
+    else:
+        directory = _mock_current_player_directory()
+
+    by_name = {}
+    for player_id, row in (directory or {}).items():
+        if not isinstance(row, dict):
+            continue
+        name = str(
+            row.get("full_name")
+            or " ".join(x for x in (row.get("first_name"), row.get("last_name")) if x)
+            or ""
+        ).strip()
+        if name:
+            by_name[_pr_norm(name)] = {"player_id": str(player_id), **row}
+    _MOCK_CURRENT_PLAYERS_MEMORY = by_name
+    try:
+        _MOCK_CURRENT_PLAYERS_MTIME = MOCK_PLAYER_CACHE_FILE.stat().st_mtime
+    except Exception:
+        _MOCK_CURRENT_PLAYERS_MTIME = cache_mtime
+    return _MOCK_CURRENT_PLAYERS_MEMORY
 
 def _manual_mock_store():
+    global _MANUAL_MOCK_MEMORY
+    if isinstance(_MANUAL_MOCK_MEMORY, dict):
+        return _MANUAL_MOCK_MEMORY
     try:
         if MANUAL_MOCK_FILE.exists():
             data = json.loads(MANUAL_MOCK_FILE.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
+            _MANUAL_MOCK_MEMORY = data if isinstance(data, dict) else {}
+            return _MANUAL_MOCK_MEMORY
     except Exception:
         pass
-    return {}
+    _MANUAL_MOCK_MEMORY = {}
+    return _MANUAL_MOCK_MEMORY
 
 def _save_manual_mock_store(store):
-    MANUAL_MOCK_FILE.write_text(json.dumps(store, indent=2), encoding="utf-8")
+    global _MANUAL_MOCK_MEMORY
+    # Keep the most recent mocks so this file cannot grow forever.
+    ordered = sorted(
+        store.values(),
+        key=lambda item: item.get("updated_at", ""),
+        reverse=True,
+    )[:10]
+    _MANUAL_MOCK_MEMORY = {str(item["id"]): item for item in ordered}
+    MANUAL_MOCK_FILE.write_text(
+        json.dumps(_MANUAL_MOCK_MEMORY, separators=(",", ":")),
+        encoding="utf-8",
+    )
 
 def _manual_mock_get(mock_id):
     return _manual_mock_store().get(str(mock_id))
@@ -1078,11 +1181,24 @@ def _build_dynamic_mock_pool(context):
     """
     master = _master_players_2026()
     master_players = master.get("players", {})
+    # Current Sleeper teams override any older team saved in the master file.
+    current_players = _mock_current_players_by_name(refresh=True)
 
     if master_players:
         players = []
         for norm, p in master_players.items():
-            pos = str(p.get("position") or "").upper()
+            name = str(p.get("name") or "").strip()
+            if not name:
+                continue
+            current = current_players.get(_pr_norm(name), {})
+            current_team = (
+                _normalize_team_code(current.get("team")) or "FA"
+                if current
+                else (_normalize_team_code(p.get("team")) or "FA")
+            )
+            pos = str(current.get("position") or p.get("position") or "").upper()
+            if pos == "DST":
+                pos = "DEF"
             if pos not in {"QB","RB","WR","TE","K","DEF"}:
                 continue
 
@@ -1109,9 +1225,9 @@ def _build_dynamic_mock_pool(context):
 
             players.append({
                 "rank": 999,
-                "name": p.get("name"),
+                "name": name,
                 "pos": pos,
-                "team": p.get("team") or "FA",
+                "team": current_team,
                 "tier": 9,
                 "adp": adp,
                 "projection": round(projection, 1),
@@ -1209,6 +1325,23 @@ def _manual_available(mock):
     pool = mock.get("player_pool") or MOCK_PLAYER_POOL
     return [dict(p) for p in pool if p["name"] not in drafted]
 
+def _manual_refresh_pool_teams(mock):
+    """Correct teams in new and previously saved mocks from the local daily cache."""
+    current = _mock_current_players_by_name(refresh=False)
+    if not current:
+        return mock
+
+    for player in mock.get("player_pool", []):
+        row = current.get(_pr_norm(player.get("name")), {})
+        if row:
+            player["team"] = _normalize_team_code(row.get("team")) or "FA"
+
+    for pick in mock.get("picks", []):
+        row = current.get(_pr_norm(pick.get("player")), {})
+        if row:
+            pick["team"] = _normalize_team_code(row.get("team")) or "FA"
+    return mock
+
 def _manual_order(mock):
     return mock_pick_order(int(mock["teams"]), int(mock["rounds"]))
 
@@ -1288,12 +1421,13 @@ def _manual_need_bonus(pos, roster_counts, round_no):
 
     return bonus
 
-def _manual_player_pick_score(mock, player):
-    roster = _manual_user_roster(mock)
-    counts = Counter(p["pos"] for p in roster)
-    row = _manual_current_order_row(mock)
-    overall = row["overall"] if row else len(mock.get("picks", [])) + 1
-    round_no = row["round"] if row else int(mock["rounds"])
+def _manual_player_pick_score(mock, player, counts=None, overall=None, round_no=None):
+    if counts is None:
+        counts = Counter(p["pos"] for p in _manual_user_roster(mock))
+    if overall is None or round_no is None:
+        row = _manual_current_order_row(mock)
+        overall = row["overall"] if row else len(mock.get("picks", [])) + 1
+        round_no = row["round"] if row else int(mock["rounds"])
 
     adp_value = float(player.get("adp", overall)) - overall
     projection = float(player.get("projection", 0) or 0)
@@ -1306,17 +1440,15 @@ def _manual_player_pick_score(mock, player):
     return round(max(35, min(99, score)))
 
 def _manual_2025_points_map(names):
-    # Uses the Player Research/nflverse helpers when available.
-    result = {name: 0.0 for name in names}
-    try:
-        if "_pr_rows" not in globals() or "_pr_aggregate" not in globals():
-            return result
-        rows = _pr_rows(2025)
-        for name in names:
-            stats = _pr_aggregate(rows, name) or {}
-            result[name] = round(float(stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0), 1)
-    except Exception:
-        pass
+    # Fast snapshot lookup; never reparse the full CSV during a draft.
+    players = _stats_2025_snapshot().get("players", {})
+    result = {}
+    for name in names:
+        stats = players.get(_pr_norm(name), {}) or {}
+        result[name] = round(
+            float(stats.get("fantasy_points_ppr") or stats.get("fantasy_points") or 0),
+            1,
+        )
     return result
 
 
@@ -1765,7 +1897,7 @@ def manual_mock_autodraft_rest():
 
     _manual_finalize_if_complete(mock)
     _manual_mock_save(mock)
-    return jsonify(ok=True, mock=mock, grade=mock.get("grade"))
+    return jsonify(ok=True, mock=_manual_mock_public(mock), grade=mock.get("grade"))
 
 @app.post("/api/mock-draft/manual/start")
 def manual_mock_start():
@@ -1796,15 +1928,14 @@ def manual_mock_start():
     _manual_finalize_if_complete(mock)
     _manual_mock_save(mock)
 
-    return jsonify(ok=True, mock=mock, player_pool_count=len(mock.get("player_pool", [])))
+    return jsonify(
+        ok=True,
+        mock=_manual_mock_public(mock),
+        player_pool_count=len(mock.get("player_pool", [])),
+    )
 
 
-@app.get("/api/mock-draft/manual/<mock_id>/board")
-def manual_mock_board(mock_id):
-    mock = _manual_mock_get(mock_id)
-    if not mock:
-        return jsonify(ok=False, error="Mock draft not found."), 404
-
+def _manual_board_teams(mock):
     teams = {}
     for slot in range(1, int(mock["teams"]) + 1):
         teams[str(slot)] = {
@@ -1817,18 +1948,38 @@ def manual_mock_board(mock_id):
     for pick in mock.get("picks", []):
         teams[str(pick["slot"])]["roster"].append(pick)
 
-    return jsonify(ok=True, mock=mock, teams=list(teams.values()))
+    return list(teams.values())
+
+@app.get("/api/mock-draft/manual/<mock_id>/board")
+def manual_mock_board(mock_id):
+    mock = _manual_mock_get(mock_id)
+    if not mock:
+        return jsonify(ok=False, error="Mock draft not found."), 404
+    _manual_refresh_pool_teams(mock)
+
+    return jsonify(ok=True, mock=_manual_mock_public(mock), teams=_manual_board_teams(mock))
 
 @app.get("/api/mock-draft/manual/<mock_id>")
 def manual_mock_state(mock_id):
     mock = _manual_mock_get(mock_id)
     if not mock:
         return jsonify(ok=False, error="Mock draft not found."), 404
+    _manual_refresh_pool_teams(mock)
 
     row = _manual_current_order_row(mock)
     available = _manual_available(mock)
     platform = "YAHOO" if "YAHOO" in str(mock.get("platform", "")).upper() else "ESPN"
-    platform_adp = _pr_adp_lookup(platform)
+    local_adp = _mock_local_adp_data(platform).get("players", {})
+    platform_adp = {
+        key: float(value.get("adp", 999) or 999)
+        for key, value in local_adp.items()
+        if isinstance(value, dict)
+    }
+
+    roster = _manual_user_roster(mock)
+    counts = Counter(p["pos"] for p in roster)
+    overall = row["overall"] if row else len(mock.get("picks", [])) + 1
+    round_no = row["round"] if row else int(mock["rounds"])
 
     # Apply the ADP that matches the selected league platform.
     scored = []
@@ -1836,7 +1987,13 @@ def manual_mock_state(mock_id):
         item = dict(p)
         item["adp"] = platform_adp.get(_pr_norm(item["name"]), item.get("adp", 999))
         item["adp_source"] = platform
-        item["pick_score"] = _manual_player_pick_score(mock, item)
+        item["pick_score"] = _manual_player_pick_score(
+            mock,
+            item,
+            counts=counts,
+            overall=overall,
+            round_no=round_no,
+        )
         scored.append(item)
     # Draft board is ranked by ADP (lowest/best ADP first).
     # Pick Score remains visible as Gridiron IQ's roster-aware recommendation.
@@ -1844,12 +2001,12 @@ def manual_mock_state(mock_id):
 
     return jsonify(
         ok=True,
-        mock=mock,
+        mock=_manual_mock_public(mock),
         current_pick=row,
-        roster=_manual_user_roster(mock),
+        roster=roster,
         available=scored,
-        grade=_manual_grade(mock),
-        pick_report=_manual_pick_report(mock),
+        grade=mock.get("grade") or _manual_grade(mock),
+        teams=_manual_board_teams(mock),
     )
 
 @app.post("/api/mock-draft/manual/<mock_id>/pick")
@@ -1857,6 +2014,7 @@ def manual_mock_pick(mock_id):
     mock = _manual_mock_get(mock_id)
     if not mock:
         return jsonify(ok=False, error="Mock draft not found."), 404
+    _manual_refresh_pool_teams(mock)
 
     if mock.get("status") == "complete":
         return jsonify(ok=False, error="This mock draft is already complete."), 400
@@ -1873,7 +2031,12 @@ def manual_mock_pick(mock_id):
         return jsonify(ok=False, error="That player is no longer available."), 400
 
     platform = "YAHOO" if "YAHOO" in str(mock.get("platform", "")).upper() else "ESPN"
-    platform_adp = _pr_adp_lookup(platform)
+    local_adp = _mock_local_adp_data(platform).get("players", {})
+    platform_adp = {
+        key: float(value.get("adp", 999) or 999)
+        for key, value in local_adp.items()
+        if isinstance(value, dict)
+    }
     player = dict(player)
     player["adp"] = platform_adp.get(_pr_norm(player["name"]), player.get("adp", 999))
 
@@ -1896,7 +2059,7 @@ def manual_mock_pick(mock_id):
     _manual_finalize_if_complete(mock)
     _manual_mock_save(mock)
 
-    return jsonify(ok=True, mock=mock, grade=mock.get("grade"))
+    return jsonify(ok=True, mock=_manual_mock_public(mock), grade=mock.get("grade"))
 
 @app.post("/api/mock-draft/manual/<mock_id>/undo")
 def manual_mock_undo(mock_id):
@@ -1918,7 +2081,7 @@ def manual_mock_undo(mock_id):
     mock["updated_at"] = datetime.now(timezone.utc).isoformat()
     _manual_mock_save(mock)
 
-    return jsonify(ok=True, mock=mock)
+    return jsonify(ok=True, mock=_manual_mock_public(mock))
 
 @app.get("/mock-draft/review/<mock_id>")
 def manual_mock_review(mock_id):
