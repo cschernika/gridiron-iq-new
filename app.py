@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json, os, uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from math import exp
 from pathlib import Path
@@ -3890,7 +3890,9 @@ def player_research_data_status_api():
 
 @app.get("/player-analytics")
 def player_analytics():
-    return page("player_analytics.html")
+    # Keep the existing dashboard/navigation link working while the new page
+    # also remains available at its descriptive /offensive-stats URL.
+    return redirect(url_for("offensive_stats_page"))
 
 
 @app.get("/player-research")
@@ -5172,6 +5174,338 @@ def _fast_2026_projection_from_2025(stats, position):
         }.get(position, 100.0)
 
     return projected
+
+
+# ============================================================
+# OFFENSIVE STATS CENTER
+# Sortable position rankings plus calculated usage/efficiency metrics.
+# ============================================================
+
+OFFENSIVE_ADVANCED_STATS_FILE = DATA_DIR / "offensive_advanced_stats.json"
+OFFENSIVE_POSITIONS = {"QB", "RB", "WR", "TE", "K"}
+
+
+def _off_num(value, default=0.0):
+    try:
+        if value in (None, "", "NA", "NaN", "nan", "null", "--"):
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _off_round(value, digits=1):
+    value = _off_num(value)
+    rounded = round(value, digits)
+    return int(rounded) if digits == 0 or rounded.is_integer() else rounded
+
+
+def _off_pct(value):
+    """Normalize either 0-1 shares or already-percent values to 0-100."""
+    if value in (None, "", "--"):
+        return None
+    number = _off_num(value)
+    if abs(number) <= 1.5:
+        number *= 100
+    return round(number, 1)
+
+
+def _off_div(numerator, denominator, multiplier=1.0, digits=1):
+    numerator = _off_num(numerator)
+    denominator = _off_num(denominator)
+    if denominator <= 0:
+        return None
+    return round((numerator / denominator) * multiplier, digits)
+
+
+def _offensive_advanced_players(season):
+    """Read an optional licensed/charted-data export without requiring it."""
+    if not OFFENSIVE_ADVANCED_STATS_FILE.exists():
+        return {}, ""
+    try:
+        payload = json.loads(OFFENSIVE_ADVANCED_STATS_FILE.read_text(encoding="utf-8"))
+        season_key = str(int(season))
+        if isinstance(payload.get("seasons"), dict):
+            season_payload = payload["seasons"].get(season_key, {})
+        elif int(payload.get("season") or 0) == int(season):
+            season_payload = payload
+        else:
+            season_payload = {}
+        players = season_payload.get("players", {}) if isinstance(season_payload, dict) else {}
+        if isinstance(players, list):
+            players = {
+                _pr_norm(item.get("name")): item
+                for item in players
+                if isinstance(item, dict) and item.get("name")
+            }
+        return (players if isinstance(players, dict) else {}), str(
+            season_payload.get("source") or payload.get("source") or "Advanced data import"
+        )
+    except Exception as exc:
+        app.logger.warning("Advanced offensive statistics file ignored: %s", exc)
+        return {}, ""
+
+
+def _offensive_season_source(season):
+    season = int(season)
+    master_payload = _master_players_2026()
+    master_players = master_payload.get("players", {}) if isinstance(master_payload, dict) else {}
+
+    if season == 2026:
+        prior_players = _stats_2025_snapshot().get("players", {}) or {}
+        all_keys = set(prior_players) | set(master_players)
+        rows = {}
+        for norm in all_keys:
+            prior = dict(prior_players.get(norm) or {})
+            master = dict(master_players.get(norm) or {})
+            position = str(master.get("position") or prior.get("position") or "").upper()
+            if position == "DST":
+                position = "DEF"
+            if position not in OFFENSIVE_POSITIONS:
+                continue
+
+            projected = _fast_2026_projection_from_2025(prior, position)
+            projection_block = master.get("projection") or {}
+            if isinstance(projection_block, dict):
+                for field in (
+                    "games", "completions", "attempts", "passing_yards", "passing_tds",
+                    "interceptions", "carries", "rushing_yards", "rushing_tds",
+                    "targets", "receptions", "receiving_yards", "receiving_tds",
+                ):
+                    if projection_block.get(field) not in (None, ""):
+                        projected[field] = projection_block[field]
+                projected_points = (
+                    projection_block.get("ppr_points")
+                    or projection_block.get("fantasy_points_ppr")
+                    or projection_block.get("fantasy_points")
+                )
+                if projected_points not in (None, ""):
+                    projected["fantasy_points_ppr"] = projected_points
+
+            rows[norm] = {
+                **projected,
+                "season": 2026,
+                "data_type": "projection",
+                "name": master.get("name") or prior.get("name") or norm,
+                "player_id": master.get("sleeper_id") or prior.get("player_id") or "",
+                "position": position,
+                "team": _normalize_team_code(master.get("team") or prior.get("team")) or "FA",
+            }
+        return rows, "2026 Gridiron IQ projections"
+
+    if season == 2025:
+        snapshot = _stats_2025_snapshot()
+        return dict(snapshot.get("players", {}) or {}), str(snapshot.get("source") or "2025 player statistics")
+
+    career = _career_stats_snapshot()
+    rows = {}
+    for norm, seasons in (career.get("players", {}) or {}).items():
+        if not isinstance(seasons, dict):
+            continue
+        record = seasons.get(str(season))
+        if isinstance(record, dict):
+            rows[norm] = dict(record)
+    return rows, str(career.get("source") or "Career-history statistics")
+
+
+def _offensive_stats_rows(season=2025, scoring="PPR"):
+    season = int(season)
+    scoring = str(scoring or "PPR").upper()
+    if scoring not in {"PPR", "HALF", "STANDARD"}:
+        scoring = "PPR"
+
+    source_players, source_label = _offensive_season_source(season)
+    advanced_players, advanced_source = _offensive_advanced_players(season)
+    master_players = _master_players_2026().get("players", {}) or {}
+    prepared = []
+
+    for raw_norm, raw in source_players.items():
+        if not isinstance(raw, dict):
+            continue
+        norm = _pr_norm(raw.get("name") or raw_norm)
+        master = master_players.get(norm, {}) if isinstance(master_players, dict) else {}
+        position = str(raw.get("position") or master.get("position") or "").upper()
+        if position == "DST":
+            position = "DEF"
+        if position not in OFFENSIVE_POSITIONS:
+            continue
+
+        name = str(raw.get("name") or master.get("name") or "").strip()
+        if not name:
+            continue
+        advanced = advanced_players.get(norm, {}) if isinstance(advanced_players, dict) else {}
+        if not isinstance(advanced, dict):
+            advanced = {}
+
+        receptions = _off_num(raw.get("receptions"))
+        standard_points = _off_num(raw.get("fantasy_points"))
+        ppr_points = _off_num(raw.get("fantasy_points_ppr"))
+        if not standard_points and ppr_points:
+            standard_points = max(0, ppr_points - receptions)
+        if not ppr_points and standard_points:
+            ppr_points = standard_points + receptions
+        selected_points = (
+            ppr_points if scoring == "PPR"
+            else standard_points + receptions * 0.5 if scoring == "HALF"
+            else standard_points
+        )
+
+        team = _normalize_team_code(raw.get("team")) or "FA"
+        if season == 2026:
+            team = _normalize_team_code(master.get("team") or team) or "FA"
+
+        row = {
+            "player_key": norm,
+            "player_id": str(raw.get("player_id") or master.get("sleeper_id") or ""),
+            "name": name,
+            "position": position,
+            "team": team,
+            "season": season,
+            "data_type": raw.get("data_type") or "actual",
+            "games": _off_round(raw.get("games"), 0),
+            "completions": _off_round(raw.get("completions"), 0),
+            "attempts": _off_round(raw.get("attempts"), 0),
+            "passing_yards": _off_round(raw.get("passing_yards"), 0),
+            "passing_tds": _off_round(raw.get("passing_tds"), 1),
+            "interceptions": _off_round(raw.get("interceptions"), 1),
+            "carries": _off_round(raw.get("carries") or raw.get("rushing_attempts"), 0),
+            "rushing_yards": _off_round(raw.get("rushing_yards"), 0),
+            "rushing_tds": _off_round(raw.get("rushing_tds"), 1),
+            "targets": _off_round(raw.get("targets"), 0),
+            "receptions": _off_round(receptions, 0),
+            "receiving_yards": _off_round(raw.get("receiving_yards"), 0),
+            "receiving_tds": _off_round(raw.get("receiving_tds"), 1),
+            "fantasy_points": round(selected_points, 1),
+            "fantasy_points_ppr": round(ppr_points, 1),
+            "routes_run": _off_round(advanced.get("routes_run"), 0) if advanced.get("routes_run") not in (None, "") else None,
+            "route_share": _off_pct(advanced.get("route_share")),
+            "snap_share": _off_pct(advanced.get("snap_share")),
+            "air_yards": _off_round(advanced.get("air_yards"), 0) if advanced.get("air_yards") not in (None, "") else None,
+            "air_yards_share": _off_pct(advanced.get("air_yards_share")),
+            "adot": _off_round(advanced.get("adot"), 1) if advanced.get("adot") not in (None, "") else None,
+            "red_zone_targets": _off_round(advanced.get("red_zone_targets"), 0) if advanced.get("red_zone_targets") not in (None, "") else None,
+            "end_zone_targets": _off_round(advanced.get("end_zone_targets"), 0) if advanced.get("end_zone_targets") not in (None, "") else None,
+            "red_zone_touches": _off_round(advanced.get("red_zone_touches"), 0) if advanced.get("red_zone_touches") not in (None, "") else None,
+            "goal_line_carries": _off_round(advanced.get("goal_line_carries"), 0) if advanced.get("goal_line_carries") not in (None, "") else None,
+            "yards_after_contact": _off_round(advanced.get("yards_after_contact"), 0) if advanced.get("yards_after_contact") not in (None, "") else None,
+            "missed_tackles_forced": _off_round(advanced.get("missed_tackles_forced"), 0) if advanced.get("missed_tackles_forced") not in (None, "") else None,
+            "first_read_target_share": _off_pct(advanced.get("first_read_target_share")),
+            "separation_score": _off_round(advanced.get("separation_score"), 3) if advanced.get("separation_score") not in (None, "") else None,
+            "route_win_rate": _off_pct(advanced.get("route_win_rate")),
+            "expected_fantasy_points": _off_round(advanced.get("expected_fantasy_points"), 1) if advanced.get("expected_fantasy_points") not in (None, "") else None,
+        }
+        prepared.append(row)
+
+    team_totals = defaultdict(lambda: defaultdict(float))
+    for row in prepared:
+        team = row["team"]
+        if not team or team == "FA":
+            continue
+        for key in ("attempts", "carries", "targets", "receiving_yards", "rushing_yards"):
+            team_totals[team][key] += _off_num(row.get(key))
+        if row.get("air_yards") is not None:
+            team_totals[team]["air_yards"] += _off_num(row.get("air_yards"))
+
+    for row in prepared:
+        team = team_totals.get(row["team"], {})
+        games = row["games"]
+        opportunities = _off_num(row["carries"]) + _off_num(row["targets"])
+        row.update({
+            "fantasy_points_per_game": _off_div(row["fantasy_points"], games),
+            "completion_rate": _off_div(row["completions"], row["attempts"], 100),
+            "yards_per_attempt": _off_div(row["passing_yards"], row["attempts"]),
+            "yards_per_carry": _off_div(row["rushing_yards"], row["carries"]),
+            "catch_rate": _off_div(row["receptions"], row["targets"], 100),
+            "yards_per_target": _off_div(row["receiving_yards"], row["targets"]),
+            "yards_per_reception": _off_div(row["receiving_yards"], row["receptions"]),
+            "targets_per_game": _off_div(row["targets"], games),
+            "touches": _off_round(_off_num(row["carries"]) + _off_num(row["receptions"]), 0),
+            "opportunities": _off_round(opportunities, 0),
+            "points_per_opportunity": _off_div(row["fantasy_points"], opportunities, digits=2),
+            "target_share": _off_div(row["targets"], team.get("targets"), 100),
+            "rush_share": _off_div(row["carries"], team.get("carries"), 100),
+            "opportunity_share": _off_div(opportunities, _off_num(team.get("targets")) + _off_num(team.get("carries")), 100),
+            "receiving_yard_share": _off_div(row["receiving_yards"], team.get("receiving_yards"), 100),
+            "rushing_yard_share": _off_div(row["rushing_yards"], team.get("rushing_yards"), 100),
+            "total_yards": _off_round(_off_num(row["passing_yards"]) + _off_num(row["rushing_yards"]) + _off_num(row["receiving_yards"]), 0),
+            "total_tds": _off_round(_off_num(row["passing_tds"]) + _off_num(row["rushing_tds"]) + _off_num(row["receiving_tds"]), 1),
+        })
+        if row.get("routes_run"):
+            row["targets_per_route_run"] = _off_div(row["targets"], row["routes_run"], 100)
+            row["yards_per_route_run"] = _off_div(row["receiving_yards"], row["routes_run"], digits=2)
+        else:
+            row["targets_per_route_run"] = None
+            row["yards_per_route_run"] = None
+        if row.get("air_yards") is not None:
+            row["adot"] = row.get("adot") if row.get("adot") is not None else _off_div(row["air_yards"], row["targets"])
+            row["air_yards_share"] = row.get("air_yards_share") if row.get("air_yards_share") is not None else _off_div(row["air_yards"], team.get("air_yards"), 100)
+        expected = row.get("expected_fantasy_points")
+        row["fantasy_points_over_expected"] = round(row["fantasy_points"] - expected, 1) if expected is not None else None
+
+    prepared.sort(key=lambda item: (-_off_num(item.get("fantasy_points")), item["name"]))
+    overall_rank = 0
+    position_ranks = defaultdict(int)
+    for row in prepared:
+        overall_rank += 1
+        position_ranks[row["position"]] += 1
+        row["overall_rank"] = overall_rank
+        row["position_rank"] = position_ranks[row["position"]]
+        row["rank_label"] = f"{row['position']}{row['position_rank']}"
+
+    return prepared, {
+        "season": season,
+        "scoring": scoring,
+        "source": source_label,
+        "advanced_source": advanced_source,
+        "advanced_available": bool(advanced_players),
+    }
+
+
+def _offensive_stats_seasons():
+    career = _career_stats_snapshot()
+    seasons = {2025, 2026}
+    for value in career.get("loaded_seasons", []):
+        try:
+            seasons.add(int(value))
+        except (TypeError, ValueError):
+            pass
+    return sorted(seasons, reverse=True)
+
+
+@app.get("/offensive-stats")
+def offensive_stats_page():
+    return page(
+        "offensive_stats.html",
+        offensive_seasons=_offensive_stats_seasons(),
+        default_offensive_season=2025,
+    )
+
+
+@app.get("/api/offensive-stats/table")
+def offensive_stats_table_api():
+    try:
+        season = int(request.args.get("season") or 2025)
+    except (TypeError, ValueError):
+        season = 2025
+    if season not in _offensive_stats_seasons():
+        return jsonify(ok=False, error="That season has not been loaded."), 400
+
+    scoring = str(request.args.get("scoring") or "PPR").upper()
+    position = str(request.args.get("position") or "ALL").upper()
+    if position not in OFFENSIVE_POSITIONS | {"ALL"}:
+        position = "ALL"
+
+    rows, metadata = _offensive_stats_rows(season=season, scoring=scoring)
+    if position != "ALL":
+        rows = [row for row in rows if row["position"] == position]
+
+    return jsonify(
+        ok=True,
+        count=len(rows),
+        selected_position=position,
+        rows=rows,
+        metadata=metadata,
+    )
 
 
 def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
