@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}Offensive Player Stats | Gridiron IQ{% endblock %}
+
+{% block body %}
+<style>
+.os{--ink:#142033;--muted:#68778e;--line:#dfe5ef;--soft:#f6f8fc;--purple:#5d3df5;--blue:#2563eb;color:var(--ink)}
+.os-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}.os-kicker{font-size:11px;font-weight:900;letter-spacing:.1em;color:var(--purple)}.os h1{font-size:36px;line-height:1.05;margin:5px 0 8px}.os-sub{max-width:780px;color:var(--muted);margin:0;line-height:1.55}.os-head-actions{display:flex;gap:8px;flex-wrap:wrap}.os-link{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:#fff;color:#3f36c8;font-size:11px;font-weight:900;text-decoration:none;white-space:nowrap}
+.os-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}.os-controls{display:grid;grid-template-columns:140px 155px minmax(210px,1fr) 190px 120px;gap:10px;align-items:end}.os-field label{display:block;font-size:9px;color:var(--muted);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:5px}.os-field input,.os-field select{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px;background:#fff;color:var(--ink);font-size:12px}.os-field input:focus,.os-field select:focus{outline:2px solid #d9d1ff;border-color:var(--purple)}
+.os-tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}.os-tab{border:1px solid var(--line);border-radius:999px;padding:8px 14px;background:#fff;color:#4b5870;font-size:11px;font-weight:900;cursor:pointer}.os-tab.active{background:var(--purple);border-color:var(--purple);color:#fff}.os-tab:hover{border-color:#a99bf8}
+.os-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.os-summary article{border:1px solid var(--line);border-radius:13px;background:#fff;padding:13px}.os-summary span{display:block;color:var(--muted);font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}.os-summary strong{display:block;font-size:21px;margin-top:5px}.os-summary small{display:block;color:var(--muted);font-size:9px;margin-top:3px}.os-live{color:#15803d!important}.os-calculated{color:#1d4ed8!important}
+.os-info{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:10px}.os-info p{margin:0;color:var(--muted);font-size:10px;line-height:1.45}.os-legend{display:flex;gap:10px;flex-wrap:wrap;font-size:9px;color:var(--muted);white-space:nowrap}.os-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;background:#2563eb}.os-dot.premium{background:#7c3aed}
+.os-table-card{padding:0;overflow:hidden}.os-table-scroll{overflow:auto;max-height:680px}.os-table{width:100%;min-width:1180px;border-collapse:separate;border-spacing:0}.os-table th,.os-table td{padding:10px 9px;border-bottom:1px solid #e8ecf3;text-align:right;font-size:10px;white-space:nowrap}.os-table th{position:sticky;top:0;z-index:4;background:#f7f8fc;color:#607089;font-size:8px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;user-select:none}.os-table th:hover{background:#eeeaff;color:#4937d8}.os-table th .sort{display:inline-block;width:10px;margin-left:3px;color:#8a79ec}.os-table td:first-child,.os-table th:first-child{text-align:center;position:sticky;left:0;z-index:3;background:#fff}.os-table th:first-child{z-index:6;background:#f7f8fc}.os-table td:nth-child(2),.os-table th:nth-child(2){text-align:left;position:sticky;left:55px;z-index:3;background:#fff;box-shadow:4px 0 8px rgba(31,41,55,.04)}.os-table th:nth-child(2){z-index:6;background:#f7f8fc}.os-table tr:hover td{background:#faf9ff}.os-table tr:hover td:first-child,.os-table tr:hover td:nth-child(2){background:#faf9ff}.os-player{color:#3025b8;font-weight:900;text-decoration:none}.os-player:hover{text-decoration:underline}.os-pos{display:inline-block;border-radius:6px;padding:3px 5px;background:#ede9fe;color:#5138d4;font-size:8px;font-weight:900;margin-left:5px}.os-team{color:var(--muted)}.os-rank{font-weight:900}.os-advanced{background:#fbfaff}.os-na{color:#a5afbe}.os-empty{padding:42px!important;text-align:center!important;color:var(--muted);font-size:12px!important}.os-loading{padding:45px;text-align:center;color:var(--muted);font-weight:800}.os-foot{display:flex;justify-content:space-between;gap:15px;padding:12px 15px;background:#fafbfe;color:var(--muted);font-size:9px;border-top:1px solid var(--line)}
+@media(max-width:1100px){.os-controls{grid-template-columns:repeat(3,1fr)}.os-summary{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:700px){.os-head{display:block}.os-head-actions{margin-top:12px}.os-controls{grid-template-columns:1fr 1fr}.os-summary{grid-template-columns:1fr 1fr}.os-info,.os-foot{display:block}.os-legend{margin-top:7px}.os h1{font-size:30px}}
+</style>
+
+<div class="os">
+  <header class="os-head">
+    <div>
+      <div class="os-kicker">GRIDIRON IQ DATA CENTER</div>
+      <h1>Offensive Player Statistics</h1>
+      <p class="os-sub">Compare every fantasy-relevant offensive player by production, opportunity, usage and efficiency. Click any column heading to rank the table by that statistic.</p>
+    </div>
+    <div class="os-head-actions">
+      <a class="os-link" href="/player-research">Player Research →</a>
+      <a class="os-link" href="/draft-center">Draft Center →</a>
+    </div>
+  </header>
+
+  <section class="os-card">
+    <div class="os-controls">
+      <div class="os-field">
+        <label for="os-season">Season</label>
+        <select id="os-season">
+          {% for season in offensive_seasons %}
+          <option value="{{ season }}" {% if season == default_offensive_season %}selected{% endif %}>{{ season }}{% if season == 2026 %} Projection{% else %} Actual{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="os-field">
+        <label for="os-scoring">Fantasy Scoring</label>
+        <select id="os-scoring"><option value="PPR">Full PPR</option><option value="HALF">Half PPR</option><option value="STANDARD">Standard</option></select>
+      </div>
+      <div class="os-field">
+        <label for="os-search">Player or NFL Team</label>
+        <input id="os-search" type="search" placeholder="Search Ja'Marr Chase, CIN, WR…">
+      </div>
+      <div class="os-field">
+        <label for="os-metric">Filter by Statistic</label>
+        <select id="os-metric"><option value="">No statistic filter</option></select>
+      </div>
+      <div class="os-field">
+        <label for="os-minimum">Minimum</label>
+        <input id="os-minimum" type="number" step="0.1" placeholder="Any" disabled>
+      </div>
+    </div>
+  </section>
+
+  <nav class="os-tabs" id="os-tabs" aria-label="Position filters">
+    <button class="os-tab active" data-position="ALL">All</button>
+    <button class="os-tab" data-position="QB">QB</button>
+    <button class="os-tab" data-position="RB">RB</button>
+    <button class="os-tab" data-position="WR">WR</button>
+    <button class="os-tab" data-position="TE">TE</button>
+    <button class="os-tab" data-position="K">K</button>
+  </nav>
+
+  <section class="os-summary">
+    <article><span>Players Shown</span><strong id="os-count">—</strong><small>After search and filters</small></article>
+    <article><span>Fantasy Leader</span><strong id="os-leader">—</strong><small id="os-leader-detail">Selected scoring</small></article>
+    <article><span>Highest Target Share</span><strong id="os-target-leader">—</strong><small id="os-target-detail">Team target percentage</small></article>
+    <article><span>Advanced Data</span><strong id="os-advanced-status">Calculated</strong><small id="os-advanced-detail" class="os-calculated">Public-data metrics active</small></article>
+  </section>
+
+  <section class="os-card os-table-card">
+    <div class="os-info">
+      <p id="os-description">Loading offensive statistics…</p>
+      <div class="os-legend"><span><i class="os-dot"></i>Calculated</span><span><i class="os-dot premium"></i>Charted/licensed field</span></div>
+    </div>
+    <div id="os-loading" class="os-loading">Loading player rankings…</div>
+    <div id="os-table-wrap" class="os-table-scroll" hidden>
+      <table class="os-table">
+        <thead><tr id="os-head-row"></tr></thead>
+        <tbody id="os-body"></tbody>
+      </table>
+    </div>
+    <div class="os-foot">
+      <span id="os-source">Source: —</span>
+      <span>“—” means that a charted or licensed metric has not been imported. Gridiron IQ does not manufacture missing values.</span>
+    </div>
+  </section>
+</div>
+
+<script>
+(()=>{
+  const $=id=>document.getElementById(id);
+  const base=[
+    {key:"position_rank",label:"Rank",fmt:"rank"},
+    {key:"name",label:"Player",fmt:"player"},
+    {key:"team",label:"Team",fmt:"text"},
+    {key:"games",label:"G",fmt:"int"},
+    {key:"fantasy_points",label:"FPTS",fmt:"one"},
+    {key:"fantasy_points_per_game",label:"FPG",fmt:"one"}
+  ];
+  const shared={
+    target_share:{key:"target_share",label:"TGT Share",fmt:"pct",help:"Player targets divided by team targets"},
+    opportunity_share:{key:"opportunity_share",label:"Opp Share",fmt:"pct",help:"Carries plus targets divided by team opportunities"},
+    snap_share:{key:"snap_share",label:"Snap Share",fmt:"pct",advanced:true},
+    route_share:{key:"route_share",label:"Route Share",fmt:"pct",advanced:true},
+    routes_run:{key:"routes_run",label:"Routes",fmt:"int",advanced:true},
+    tprr:{key:"targets_per_route_run",label:"TPRR",fmt:"pct",advanced:true},
+    yprr:{key:"yards_per_route_run",label:"YPRR",fmt:"two",advanced:true},
+    first_read:{key:"first_read_target_share",label:"1st Read Share",fmt:"pct",advanced:true},
+    separation:{key:"separation_score",label:"Separation",fmt:"three",advanced:true},
+    xfp:{key:"expected_fantasy_points",label:"xFP",fmt:"one",advanced:true},
+    fpoe:{key:"fantasy_points_over_expected",label:"FPOE",fmt:"one",advanced:true}
+  };
+  const columns={
+    ALL:[...base,shared.snap_share,{key:"opportunities",label:"OPP",fmt:"int"},shared.opportunity_share,{key:"total_yards",label:"Total Yds",fmt:"int"},{key:"total_tds",label:"Total TD",fmt:"one"}],
+    QB:[...base,{key:"completions",label:"CMP",fmt:"int"},{key:"attempts",label:"ATT",fmt:"int"},{key:"completion_rate",label:"CMP%",fmt:"pct"},{key:"passing_yards",label:"Pass Yds",fmt:"int"},{key:"yards_per_attempt",label:"Y/A",fmt:"one"},{key:"passing_tds",label:"Pass TD",fmt:"one"},{key:"interceptions",label:"INT",fmt:"one"},{key:"carries",label:"Rush Att",fmt:"int"},{key:"rushing_yards",label:"Rush Yds",fmt:"int"},{key:"rushing_tds",label:"Rush TD",fmt:"one"},shared.xfp,shared.fpoe],
+    RB:[...base,shared.snap_share,{key:"carries",label:"Carries",fmt:"int"},{key:"rush_share",label:"Rush Share",fmt:"pct"},{key:"rushing_yards",label:"Rush Yds",fmt:"int"},{key:"yards_per_carry",label:"YPC",fmt:"one"},{key:"rushing_tds",label:"Rush TD",fmt:"one"},{key:"targets",label:"TGT",fmt:"int"},shared.target_share,shared.route_share,shared.tprr,{key:"receptions",label:"REC",fmt:"int"},{key:"receiving_yards",label:"Rec Yds",fmt:"int"},{key:"opportunities",label:"OPP",fmt:"int"},shared.opportunity_share,{key:"red_zone_touches",label:"RZ Touch",fmt:"int",advanced:true},{key:"goal_line_carries",label:"GL Carry",fmt:"int",advanced:true},{key:"yards_after_contact",label:"YACON",fmt:"int",advanced:true},{key:"missed_tackles_forced",label:"MTF",fmt:"int",advanced:true},shared.xfp,shared.fpoe],
+    WR:[...base,shared.snap_share,shared.routes_run,shared.route_share,{key:"targets",label:"TGT",fmt:"int"},{key:"targets_per_game",label:"TGT/G",fmt:"one"},shared.target_share,shared.first_read,shared.tprr,{key:"receptions",label:"REC",fmt:"int"},{key:"catch_rate",label:"Catch%",fmt:"pct"},{key:"receiving_yards",label:"Rec Yds",fmt:"int"},{key:"yards_per_target",label:"YPT",fmt:"one"},shared.yprr,{key:"receiving_tds",label:"Rec TD",fmt:"one"},{key:"adot",label:"aDOT",fmt:"one",advanced:true},{key:"air_yards_share",label:"Air Yds Share",fmt:"pct",advanced:true},{key:"red_zone_targets",label:"RZ TGT",fmt:"int",advanced:true},{key:"end_zone_targets",label:"EZ TGT",fmt:"int",advanced:true},shared.separation,{key:"route_win_rate",label:"Win Rate",fmt:"pct",advanced:true},shared.xfp,shared.fpoe],
+    TE:[],
+    K:[...base]
+  };
+  columns.TE=columns.WR;
+
+  let allRows=[],position="ALL",sortKey="fantasy_points",sortDirection="desc",metadata={};
+  const esc=value=>String(value??"").replace(/[&<>'"]/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
+  const numeric=value=>value!==null&&value!==""&&value!==undefined&&!Number.isNaN(Number(value));
+  const display=(value,fmt,row)=>{
+    if(fmt==="player") return `<a class="os-player" href="/player-research?player=${encodeURIComponent(row.name)}">${esc(row.name)}</a><span class="os-pos">${esc(row.position)}</span>`;
+    if(fmt==="rank") return `<span class="os-rank">${esc(row.rank_label||value)}</span>`;
+    if(value===null||value===undefined||value==="") return `<span class="os-na">—</span>`;
+    if(fmt==="pct") return numeric(value)?`${Number(value).toFixed(1)}%`:"—";
+    if(fmt==="int") return numeric(value)?Math.round(Number(value)).toLocaleString():esc(value);
+    if(fmt==="one") return numeric(value)?Number(value).toFixed(1):esc(value);
+    if(fmt==="two") return numeric(value)?Number(value).toFixed(2):esc(value);
+    if(fmt==="three") return numeric(value)?Number(value).toFixed(3):esc(value);
+    return esc(value);
+  };
+
+  function activeColumns(){return columns[position]||columns.ALL;}
+
+  async function load(){
+    $("os-loading").hidden=false;$("os-table-wrap").hidden=true;
+    $("os-loading").textContent="Loading player rankings…";
+    try{
+      const params=new URLSearchParams({season:$("os-season").value,scoring:$("os-scoring").value,position:"ALL"});
+      const response=await fetch(`/api/offensive-stats/table?${params}`);
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok||!data.ok) throw new Error(data.error||`Request failed (${response.status})`);
+      allRows=data.rows||[];metadata=data.metadata||{};
+      rebuildMetricFilter();render();
+      $("os-loading").hidden=true;$("os-table-wrap").hidden=false;
+      $("os-source").textContent=`Source: ${metadata.source||"Gridiron IQ"}${metadata.advanced_source?" + "+metadata.advanced_source:""}`;
+      $("os-advanced-status").textContent=metadata.advanced_available?"Connected":"Calculated";
+      $("os-advanced-detail").textContent=metadata.advanced_available?(metadata.advanced_source||"Charted fields available"):"Usage and efficiency calculations active";
+      $("os-advanced-detail").className=metadata.advanced_available?"os-live":"os-calculated";
+      $("os-description").textContent=`${metadata.season} ${metadata.season===2026?"projected":"actual"} statistics · ${metadata.scoring} scoring · Click a heading to sort. Purple-tinted columns require an advanced charting feed.`;
+    }catch(error){
+      $("os-loading").hidden=false;$("os-loading").textContent=`Offensive statistics could not load: ${error.message}`;
+    }
+  }
+
+  function rebuildMetricFilter(){
+    const select=$("os-metric"),prior=select.value;
+    select.innerHTML='<option value="">No statistic filter</option>'+activeColumns()
+      .filter(column=>!["name","team","position_rank"].includes(column.key))
+      .map(column=>`<option value="${esc(column.key)}">${esc(column.label)}</option>`).join("");
+    if([...select.options].some(option=>option.value===prior)) select.value=prior;
+    else{$("os-minimum").value="";$("os-minimum").disabled=true;}
+  }
+
+  function filteredRows(){
+    const query=$("os-search").value.trim().toLowerCase();
+    const metric=$("os-metric").value;
+    const minimum=$("os-minimum").value===""?null:Number($("os-minimum").value);
+    const rows=allRows.filter(row=>{
+      if(position!=="ALL"&&row.position!==position) return false;
+      if(query&&!`${row.name} ${row.team} ${row.position}`.toLowerCase().includes(query)) return false;
+      if(metric&&minimum!==null&&(!numeric(row[metric])||Number(row[metric])<minimum)) return false;
+      return true;
+    });
+    return rows.sort((a,b)=>{
+      const av=a[sortKey],bv=b[sortKey];
+      let result;
+      if(numeric(av)&&numeric(bv)) result=Number(av)-Number(bv);
+      else if(av==null&&bv!=null) result=-1;
+      else if(av!=null&&bv==null) result=1;
+      else result=String(av??"").localeCompare(String(bv??""));
+      return sortDirection==="asc"?result:-result;
+    });
+  }
+
+  function render(){
+    const cols=activeColumns(),rows=filteredRows();
+    $("os-head-row").innerHTML=cols.map(column=>{
+      const arrow=sortKey===column.key?(sortDirection==="asc"?"▲":"▼"):"";
+      return `<th data-key="${column.key}" class="${column.advanced?"os-advanced":""}" title="${esc(column.help||(column.advanced?"Requires charted or licensed data":"Click to sort"))}">${esc(column.label)}<span class="sort">${arrow}</span></th>`;
+    }).join("");
+    $("os-body").innerHTML=rows.length?rows.map(row=>`<tr>${cols.map(column=>`<td class="${column.advanced?"os-advanced":""}">${display(row[column.key],column.fmt,row)}</td>`).join("")}</tr>`).join(""):'<tr><td class="os-empty" colspan="40">No players match the selected filters.</td></tr>';
+    $("os-count").textContent=rows.length.toLocaleString();
+    const leader=[...rows].sort((a,b)=>Number(b.fantasy_points||0)-Number(a.fantasy_points||0))[0];
+    $("os-leader").textContent=leader?leader.name:"—";
+    $("os-leader-detail").textContent=leader?`${leader.rank_label} · ${Number(leader.fantasy_points||0).toFixed(1)} points`:"Selected scoring";
+    const targetLeader=[...rows].filter(row=>numeric(row.target_share)&&Number(row.targets)>0).sort((a,b)=>Number(b.target_share)-Number(a.target_share))[0];
+    $("os-target-leader").textContent=targetLeader?targetLeader.name:"—";
+    $("os-target-detail").textContent=targetLeader?`${Number(targetLeader.target_share).toFixed(1)}% · ${targetLeader.team}`:"Team target percentage";
+  }
+
+  $("os-head-row").onclick=event=>{
+    const header=event.target.closest("th[data-key]");if(!header)return;
+    if(sortKey===header.dataset.key) sortDirection=sortDirection==="desc"?"asc":"desc";
+    else{sortKey=header.dataset.key;sortDirection=["name","team"].includes(sortKey)?"asc":"desc";}
+    render();
+  };
+  $("os-tabs").onclick=event=>{
+    const button=event.target.closest("button[data-position]");if(!button)return;
+    position=button.dataset.position;
+    document.querySelectorAll(".os-tab").forEach(item=>item.classList.toggle("active",item===button));
+    sortKey="fantasy_points";sortDirection="desc";rebuildMetricFilter();render();
+  };
+  $("os-search").oninput=render;
+  $("os-metric").onchange=()=>{$("os-minimum").disabled=!$("os-metric").value;if(!$("os-metric").value)$("os-minimum").value="";render();};
+  $("os-minimum").oninput=render;
+  $("os-season").onchange=load;
+  $("os-scoring").onchange=load;
+  load();
+})();
+</script>
+{% endblock %}
