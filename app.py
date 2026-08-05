@@ -2820,7 +2820,28 @@ STATS_2025_FIELDS = (
     "receiving_epa", "target_share", "air_yards_share", "wopr",
     "fg_made", "fg_att", "fg_pct", "fg_long", "fg_made_40_49",
     "fg_made_50_59", "fg_made_60_", "pat_made", "pat_att", "pat_pct",
-    "fantasy_points", "fantasy_points_ppr"
+    "fantasy_points", "fantasy_points_ppr", "offense_snaps", "snap_share",
+    "red_zone_targets", "end_zone_targets", "red_zone_carries",
+    "red_zone_receptions", "red_zone_touches", "goal_line_carries",
+    "yards_before_contact", "yards_before_contact_per_carry",
+    "yards_after_contact", "yards_after_contact_per_carry",
+    "rushing_broken_tackles", "carries_per_broken_tackle",
+    "receiving_broken_tackles", "receptions_per_broken_tackle", "drops",
+    "drop_rate", "target_interceptions", "target_passer_rating",
+    "qb_throwaways", "qb_drops", "qb_drop_rate", "qb_bad_throws",
+    "qb_bad_throw_rate", "qb_pocket_time", "qb_blitzes", "qb_hurries",
+    "qb_hits", "qb_pressures", "qb_pressure_rate", "qb_on_target_throws",
+    "qb_on_target_rate", "qb_scrambles", "qb_scramble_ypa",
+    "ngs_time_to_throw", "ngs_completed_air_yards", "ngs_intended_air_yards",
+    "ngs_aggressiveness", "ngs_expected_completion_rate", "ngs_cpoe",
+    "ngs_passer_rating", "ngs_cushion", "ngs_separation", "ngs_adot",
+    "ngs_air_yards_share", "ngs_yac_per_reception",
+    "ngs_expected_yac_per_reception", "ngs_yac_over_expected_per_reception",
+    "ngs_rush_efficiency", "ngs_stacked_box_rate", "ngs_time_to_line",
+    "ngs_expected_rush_yards", "ngs_rush_yards_over_expected",
+    "ngs_ryoe_per_carry", "ngs_ryoe_success_rate",
+    "expected_fantasy_points_ppr", "expected_receptions",
+    "expected_total_yards", "expected_total_tds"
 )
 
 def _stats_2025_snapshot():
@@ -5190,17 +5211,73 @@ def _fast_2026_projection_from_2025(stats, position):
 
     projected = {
         "games": 17,
+        "completions": round(number("completions") * factor),
+        "attempts": round(number("attempts") * factor),
         "passing_yards": round(number("passing_yards") * factor),
         "passing_tds": round(number("passing_tds") * factor, 1),
         "interceptions": round(number("interceptions") * factor, 1),
+        "sacks_suffered": round(number("sacks_suffered") * factor),
+        "passing_air_yards": round(number("passing_air_yards") * factor),
+        "passing_first_downs": round(number("passing_first_downs") * factor),
+        "passing_epa": round(number("passing_epa") * factor, 2),
+        "passing_cpoe": round(number("passing_cpoe"), 2),
         "carries": round(number("carries") * factor),
         "rushing_yards": round(number("rushing_yards") * factor),
         "rushing_tds": round(number("rushing_tds") * factor, 1),
+        "rushing_first_downs": round(number("rushing_first_downs") * factor),
+        "rushing_epa": round(number("rushing_epa") * factor, 2),
+        "rushing_10": round(number("rushing_10") * factor),
+        "rushing_20": round(number("rushing_20") * factor),
         "targets": round(number("targets") * factor),
         "receptions": round(number("receptions") * factor),
         "receiving_yards": round(number("receiving_yards") * factor),
         "receiving_tds": round(number("receiving_tds") * factor, 1),
+        "receiving_air_yards": round(number("receiving_air_yards") * factor),
+        "receiving_yards_after_catch": round(number("receiving_yards_after_catch") * factor),
+        "receiving_first_downs": round(number("receiving_first_downs") * factor),
+        "receiving_epa": round(number("receiving_epa") * factor, 2),
     }
+
+    # Public usage/efficiency fields are carried forward as a transparent 2025
+    # baseline so a 2026 projection view does not turn into a wall of blanks.
+    # Volume fields receive the same modest position multiplier as projections;
+    # rate fields retain the prior-season value.
+    for field in (
+        "offense_snaps", "red_zone_targets", "end_zone_targets",
+        "red_zone_carries", "red_zone_receptions", "red_zone_touches",
+        "goal_line_carries", "yards_before_contact", "yards_after_contact",
+        "rushing_broken_tackles", "receiving_broken_tackles", "drops",
+        "qb_throwaways", "qb_drops", "qb_bad_throws", "qb_blitzes",
+        "qb_hurries", "qb_hits", "qb_pressures", "qb_on_target_throws",
+        "qb_scrambles", "ngs_expected_rush_yards", "ngs_rush_yards_over_expected",
+        "expected_total_yards", "expected_total_tds", "expected_receptions",
+    ):
+        if stats.get(field) not in (None, ""):
+            projected[field] = round(number(field) * factor, 2)
+
+    for field in (
+        "snap_share", "target_share", "air_yards_share", "wopr", "drop_rate",
+        "yards_before_contact_per_carry", "yards_after_contact_per_carry",
+        "carries_per_broken_tackle", "receptions_per_broken_tackle",
+        "target_interceptions", "target_passer_rating", "qb_drop_rate",
+        "qb_bad_throw_rate", "qb_pocket_time", "qb_pressure_rate",
+        "qb_on_target_rate", "qb_scramble_ypa", "ngs_time_to_throw",
+        "ngs_completed_air_yards", "ngs_intended_air_yards", "ngs_aggressiveness",
+        "ngs_expected_completion_rate", "ngs_cpoe", "ngs_passer_rating",
+        "ngs_cushion", "ngs_separation", "ngs_adot", "ngs_air_yards_share",
+        "ngs_yac_per_reception", "ngs_expected_yac_per_reception",
+        "ngs_yac_over_expected_per_reception", "ngs_rush_efficiency",
+        "ngs_stacked_box_rate", "ngs_time_to_line", "ngs_ryoe_per_carry",
+        "ngs_ryoe_success_rate",
+    ):
+        if stats.get(field) not in (None, ""):
+            projected[field] = stats[field]
+
+    if stats.get("expected_fantasy_points_ppr") not in (None, ""):
+        projected["expected_fantasy_points_ppr"] = round(
+            number("expected_fantasy_points_ppr") * factor, 1
+        )
+    projected["usage_basis_year"] = 2025
 
     prior_ppr = number("fantasy_points_ppr")
     if prior_ppr > 0:
@@ -5240,6 +5317,13 @@ def _off_round(value, digits=1):
     value = _off_num(value)
     rounded = round(value, digits)
     return int(rounded) if digits == 0 or rounded.is_integer() else rounded
+
+
+def _off_optional_round(value, digits=1):
+    """Round a real value while preserving unavailable public-data fields."""
+    if value in (None, "", "--"):
+        return None
+    return _off_round(value, digits)
 
 
 def _off_pct(value):
@@ -5419,6 +5503,18 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
             else standard_points
         )
 
+        expected_receptions = _off_optional_round(raw.get("expected_receptions"), 2)
+        expected_ppr = _off_optional_round(raw.get("expected_fantasy_points_ppr"), 1)
+        expected_points = expected_ppr
+        if expected_ppr is not None and expected_receptions is not None:
+            if scoring == "HALF":
+                expected_points = round(max(0, expected_ppr - expected_receptions * 0.5), 1)
+            elif scoring == "STANDARD":
+                expected_points = round(max(0, expected_ppr - expected_receptions), 1)
+        imported_expected = advanced.get("expected_fantasy_points")
+        if imported_expected not in (None, ""):
+            expected_points = _off_round(imported_expected, 1)
+
         team = _normalize_team_code(raw.get("team")) or "FA"
         if season == 2026:
             team = _normalize_team_code(master.get("team") or team) or "FA"
@@ -5431,6 +5527,7 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
             "team": team,
             "season": season,
             "data_type": raw.get("data_type") or "actual",
+            "usage_basis_year": raw.get("usage_basis_year"),
             "games": _off_round(raw.get("games"), 0),
             "completions": _off_round(raw.get("completions"), 0),
             "attempts": _off_round(raw.get("attempts"), 0),
@@ -5470,22 +5567,75 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
             "pat_made": _off_round(raw.get("pat_made"), 0),
             "pat_att": _off_round(raw.get("pat_att"), 0),
             "pat_pct": _off_pct(raw.get("pat_pct")),
+            "offense_snaps": _off_optional_round(raw.get("offense_snaps"), 0),
             "routes_run": _off_round(advanced.get("routes_run"), 0) if advanced.get("routes_run") not in (None, "") else None,
             "route_share": _off_pct(advanced.get("route_share")),
-            "snap_share": _off_pct(advanced.get("snap_share")),
+            "snap_share": _off_pct(advanced.get("snap_share", raw.get("snap_share"))),
             "air_yards": _off_round(advanced.get("air_yards", raw.get("receiving_air_yards")), 0) if advanced.get("air_yards", raw.get("receiving_air_yards")) not in (None, "") else None,
             "air_yards_share": _off_pct(advanced.get("air_yards_share", raw.get("air_yards_share"))),
             "adot": _off_round(advanced.get("adot"), 1) if advanced.get("adot") not in (None, "") else None,
-            "red_zone_targets": _off_round(advanced.get("red_zone_targets"), 0) if advanced.get("red_zone_targets") not in (None, "") else None,
-            "end_zone_targets": _off_round(advanced.get("end_zone_targets"), 0) if advanced.get("end_zone_targets") not in (None, "") else None,
-            "red_zone_touches": _off_round(advanced.get("red_zone_touches"), 0) if advanced.get("red_zone_touches") not in (None, "") else None,
-            "goal_line_carries": _off_round(advanced.get("goal_line_carries"), 0) if advanced.get("goal_line_carries") not in (None, "") else None,
-            "yards_after_contact": _off_round(advanced.get("yards_after_contact"), 0) if advanced.get("yards_after_contact") not in (None, "") else None,
-            "missed_tackles_forced": _off_round(advanced.get("missed_tackles_forced"), 0) if advanced.get("missed_tackles_forced") not in (None, "") else None,
+            "red_zone_targets": _off_optional_round(advanced.get("red_zone_targets", raw.get("red_zone_targets")), 0),
+            "end_zone_targets": _off_optional_round(advanced.get("end_zone_targets", raw.get("end_zone_targets")), 0),
+            "red_zone_carries": _off_optional_round(advanced.get("red_zone_carries", raw.get("red_zone_carries")), 0),
+            "red_zone_receptions": _off_optional_round(advanced.get("red_zone_receptions", raw.get("red_zone_receptions")), 0),
+            "red_zone_touches": _off_optional_round(advanced.get("red_zone_touches", raw.get("red_zone_touches")), 0),
+            "goal_line_carries": _off_optional_round(advanced.get("goal_line_carries", raw.get("goal_line_carries")), 0),
+            "yards_before_contact": _off_optional_round(raw.get("yards_before_contact"), 0),
+            "yards_before_contact_per_carry": _off_optional_round(raw.get("yards_before_contact_per_carry"), 1),
+            "yards_after_contact": _off_optional_round(advanced.get("yards_after_contact", raw.get("yards_after_contact")), 0),
+            "yards_after_contact_per_carry": _off_optional_round(raw.get("yards_after_contact_per_carry"), 1),
+            "rushing_broken_tackles": _off_optional_round(raw.get("rushing_broken_tackles"), 0),
+            "carries_per_broken_tackle": _off_optional_round(raw.get("carries_per_broken_tackle"), 1),
+            "receiving_broken_tackles": _off_optional_round(raw.get("receiving_broken_tackles"), 0),
+            "receptions_per_broken_tackle": _off_optional_round(raw.get("receptions_per_broken_tackle"), 1),
+            "drops": _off_optional_round(raw.get("drops"), 0),
+            "drop_rate": _off_optional_round(raw.get("drop_rate"), 1),
+            "target_interceptions": _off_optional_round(raw.get("target_interceptions"), 0),
+            "target_passer_rating": _off_optional_round(raw.get("target_passer_rating"), 1),
+            "missed_tackles_forced": _off_optional_round(advanced.get("missed_tackles_forced"), 0),
             "first_read_target_share": _off_pct(advanced.get("first_read_target_share")),
-            "separation_score": _off_round(advanced.get("separation_score"), 3) if advanced.get("separation_score") not in (None, "") else None,
+            "separation_score": _off_optional_round(advanced.get("separation_score"), 3),
             "route_win_rate": _off_pct(advanced.get("route_win_rate")),
-            "expected_fantasy_points": _off_round(advanced.get("expected_fantasy_points"), 1) if advanced.get("expected_fantasy_points") not in (None, "") else None,
+            "expected_fantasy_points": expected_points,
+            "expected_receptions": expected_receptions,
+            "expected_total_yards": _off_optional_round(raw.get("expected_total_yards"), 1),
+            "expected_total_tds": _off_optional_round(raw.get("expected_total_tds"), 2),
+            "qb_throwaways": _off_optional_round(raw.get("qb_throwaways"), 0),
+            "qb_drops": _off_optional_round(raw.get("qb_drops"), 0),
+            "qb_drop_rate": _off_optional_round(raw.get("qb_drop_rate"), 1),
+            "qb_bad_throws": _off_optional_round(raw.get("qb_bad_throws"), 0),
+            "qb_bad_throw_rate": _off_optional_round(raw.get("qb_bad_throw_rate"), 1),
+            "qb_pocket_time": _off_optional_round(raw.get("qb_pocket_time"), 2),
+            "qb_blitzes": _off_optional_round(raw.get("qb_blitzes"), 0),
+            "qb_hurries": _off_optional_round(raw.get("qb_hurries"), 0),
+            "qb_hits": _off_optional_round(raw.get("qb_hits"), 0),
+            "qb_pressures": _off_optional_round(raw.get("qb_pressures"), 0),
+            "qb_pressure_rate": _off_optional_round(raw.get("qb_pressure_rate"), 1),
+            "qb_on_target_throws": _off_optional_round(raw.get("qb_on_target_throws"), 0),
+            "qb_on_target_rate": _off_optional_round(raw.get("qb_on_target_rate"), 1),
+            "qb_scrambles": _off_optional_round(raw.get("qb_scrambles"), 0),
+            "qb_scramble_ypa": _off_optional_round(raw.get("qb_scramble_ypa"), 1),
+            "ngs_time_to_throw": _off_optional_round(raw.get("ngs_time_to_throw"), 2),
+            "ngs_completed_air_yards": _off_optional_round(raw.get("ngs_completed_air_yards"), 1),
+            "ngs_intended_air_yards": _off_optional_round(raw.get("ngs_intended_air_yards"), 1),
+            "ngs_aggressiveness": _off_optional_round(raw.get("ngs_aggressiveness"), 1),
+            "ngs_expected_completion_rate": _off_optional_round(raw.get("ngs_expected_completion_rate"), 1),
+            "ngs_cpoe": _off_optional_round(raw.get("ngs_cpoe"), 1),
+            "ngs_passer_rating": _off_optional_round(raw.get("ngs_passer_rating"), 1),
+            "ngs_cushion": _off_optional_round(raw.get("ngs_cushion"), 2),
+            "ngs_separation": _off_optional_round(raw.get("ngs_separation"), 2),
+            "ngs_adot": _off_optional_round(raw.get("ngs_adot"), 1),
+            "ngs_air_yards_share": _off_optional_round(raw.get("ngs_air_yards_share"), 1),
+            "ngs_yac_per_reception": _off_optional_round(raw.get("ngs_yac_per_reception"), 1),
+            "ngs_expected_yac_per_reception": _off_optional_round(raw.get("ngs_expected_yac_per_reception"), 1),
+            "ngs_yac_over_expected_per_reception": _off_optional_round(raw.get("ngs_yac_over_expected_per_reception"), 2),
+            "ngs_rush_efficiency": _off_optional_round(raw.get("ngs_rush_efficiency"), 2),
+            "ngs_stacked_box_rate": _off_optional_round(raw.get("ngs_stacked_box_rate"), 1),
+            "ngs_time_to_line": _off_optional_round(raw.get("ngs_time_to_line"), 2),
+            "ngs_expected_rush_yards": _off_optional_round(raw.get("ngs_expected_rush_yards"), 0),
+            "ngs_rush_yards_over_expected": _off_optional_round(raw.get("ngs_rush_yards_over_expected"), 0),
+            "ngs_ryoe_per_carry": _off_optional_round(raw.get("ngs_ryoe_per_carry"), 2),
+            "ngs_ryoe_success_rate": _off_pct(raw.get("ngs_ryoe_success_rate")),
         }
         prepared.append(row)
 
@@ -5494,7 +5644,10 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
         team = row["team"]
         if not team or team == "FA":
             continue
-        for key in ("attempts", "carries", "targets", "receiving_yards", "rushing_yards"):
+        for key in (
+            "attempts", "carries", "targets", "receiving_yards", "rushing_yards",
+            "red_zone_targets", "red_zone_carries", "red_zone_touches",
+        ):
             team_totals[team][key] += _off_num(row.get(key))
         if row.get("air_yards") is not None:
             team_totals[team]["air_yards"] += _off_num(row.get("air_yards"))
@@ -5505,21 +5658,39 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
         opportunities = _off_num(row["carries"]) + _off_num(row["targets"])
         row.update({
             "fantasy_points_per_game": _off_div(row["fantasy_points"], games),
+            "pass_yards_per_game": _off_div(row["passing_yards"], games),
+            "rush_yards_per_game": _off_div(row["rushing_yards"], games),
+            "receiving_yards_per_game": _off_div(row["receiving_yards"], games),
             "completion_rate": _off_div(row["completions"], row["attempts"], 100),
             "yards_per_attempt": _off_div(row["passing_yards"], row["attempts"]),
+            "passing_touchdown_rate": _off_div(row["passing_tds"], row["attempts"], 100),
+            "interception_rate": _off_div(row["interceptions"], row["attempts"], 100),
+            "sack_rate": _off_div(row["sacks_suffered"], _off_num(row["attempts"]) + _off_num(row["sacks_suffered"]), 100),
+            "passing_epa_per_dropback": _off_div(row["passing_epa"], _off_num(row["attempts"]) + _off_num(row["sacks_suffered"]), digits=3),
             "yards_per_carry": _off_div(row["rushing_yards"], row["carries"]),
+            "rushing_epa_per_carry": _off_div(row["rushing_epa"], row["carries"], digits=3),
+            "explosive_run_rate": _off_div(row["rushing_10"], row["carries"], 100),
             "catch_rate": _off_div(row["receptions"], row["targets"], 100),
             "yards_per_target": _off_div(row["receiving_yards"], row["targets"]),
             "yards_per_reception": _off_div(row["receiving_yards"], row["receptions"]),
+            "receiving_touchdown_rate": _off_div(row["receiving_tds"], row["targets"], 100),
+            "receiving_first_down_rate": _off_div(row["receiving_first_downs"], row["targets"], 100),
+            "receiving_epa_per_target": _off_div(row["receiving_epa"], row["targets"], digits=3),
+            "yards_after_catch_per_reception": _off_div(row["yards_after_catch"], row["receptions"]),
             "targets_per_game": _off_div(row["targets"], games),
             "touches": _off_round(_off_num(row["carries"]) + _off_num(row["receptions"]), 0),
+            "touches_per_game": _off_div(_off_num(row["carries"]) + _off_num(row["receptions"]), games),
             "opportunities": _off_round(opportunities, 0),
+            "opportunities_per_game": _off_div(opportunities, games),
             "points_per_opportunity": _off_div(row["fantasy_points"], opportunities, digits=2),
             "target_share": _off_div(row["targets"], team.get("targets"), 100),
             "rush_share": _off_div(row["carries"], team.get("carries"), 100),
             "opportunity_share": _off_div(opportunities, _off_num(team.get("targets")) + _off_num(team.get("carries")), 100),
             "receiving_yard_share": _off_div(row["receiving_yards"], team.get("receiving_yards"), 100),
             "rushing_yard_share": _off_div(row["rushing_yards"], team.get("rushing_yards"), 100),
+            "red_zone_target_share": _off_div(row.get("red_zone_targets"), team.get("red_zone_targets"), 100),
+            "red_zone_carry_share": _off_div(row.get("red_zone_carries"), team.get("red_zone_carries"), 100),
+            "red_zone_touch_share": _off_div(row.get("red_zone_touches"), team.get("red_zone_touches"), 100),
             "total_yards": _off_round(_off_num(row["passing_yards"]) + _off_num(row["rushing_yards"]) + _off_num(row["receiving_yards"]), 0),
             "total_tds": _off_round(_off_num(row["passing_tds"]) + _off_num(row["rushing_tds"]) + _off_num(row["receiving_tds"]), 1),
         })
@@ -5532,6 +5703,9 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
         if row.get("air_yards") is not None:
             row["adot"] = row.get("adot") if row.get("adot") is not None else _off_div(row["air_yards"], row["targets"])
             row["air_yards_share"] = row.get("air_yards_share") if row.get("air_yards_share") is not None else _off_div(row["air_yards"], team.get("air_yards"), 100)
+            row["receiver_air_conversion_ratio"] = _off_div(row["receiving_yards"], row["air_yards"], digits=2)
+        else:
+            row["receiver_air_conversion_ratio"] = None
         expected = row.get("expected_fantasy_points")
         row["fantasy_points_over_expected"] = round(row["fantasy_points"] - expected, 1) if expected is not None else None
 
@@ -5551,6 +5725,9 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
         "source": source_label,
         "advanced_source": advanced_source,
         "advanced_available": bool(advanced_players),
+        "public_advanced_available": any(row.get("snap_share") is not None for row in prepared),
+        "next_gen_note": "NFL Next Gen Stats fields include only players meeting the NFL minimum-attempt threshold.",
+        "usage_basis_year": 2025 if season == 2026 else None,
     }
 
 
