@@ -2656,16 +2656,44 @@ def _pr_aggregate(rows, player_name):
 
     return {
         "games": games,
+        "completions": total("completions"),
+        "attempts": total("attempts"),
         "passing_yards": total("passing_yards"),
         "passing_tds": total("passing_tds"),
-        "interceptions": total("interceptions"),
+        "interceptions": total("interceptions") or total("passing_interceptions"),
+        "sacks_suffered": total("sacks_suffered"),
+        "passing_air_yards": total("passing_air_yards"),
+        "passing_first_downs": total("passing_first_downs"),
+        "passing_epa": total("passing_epa"),
+        "passing_cpoe": total("passing_cpoe"),
         "rushing_yards": total("rushing_yards"),
         "rushing_tds": total("rushing_tds"),
         "carries": total("carries") or total("rushing_attempts"),
+        "rushing_first_downs": total("rushing_first_downs"),
+        "rushing_epa": total("rushing_epa"),
+        "rushing_10": total("rushing_10"),
+        "rushing_20": total("rushing_20"),
         "receptions": total("receptions"),
         "targets": total("targets"),
         "receiving_yards": total("receiving_yards"),
         "receiving_tds": total("receiving_tds"),
+        "receiving_air_yards": total("receiving_air_yards"),
+        "receiving_yards_after_catch": total("receiving_yards_after_catch"),
+        "receiving_first_downs": total("receiving_first_downs"),
+        "receiving_epa": total("receiving_epa"),
+        "target_share": max((_pr_num(row.get("target_share")) for row in matches), default=0),
+        "air_yards_share": max((_pr_num(row.get("air_yards_share")) for row in matches), default=0),
+        "wopr": max((_pr_num(row.get("wopr")) for row in matches), default=0),
+        "fg_made": total("fg_made"),
+        "fg_att": total("fg_att"),
+        "fg_pct": max((_pr_num(row.get("fg_pct")) for row in matches), default=0),
+        "fg_long": max((_pr_num(row.get("fg_long")) for row in matches), default=0),
+        "fg_made_40_49": total("fg_made_40_49"),
+        "fg_made_50_59": total("fg_made_50_59"),
+        "fg_made_60_": total("fg_made_60_"),
+        "pat_made": total("pat_made"),
+        "pat_att": total("pat_att"),
+        "pat_pct": max((_pr_num(row.get("pat_pct")) for row in matches), default=0),
         "fantasy_points": total("fantasy_points"),
         "fantasy_points_ppr": total("fantasy_points_ppr"),
     }
@@ -2780,11 +2808,18 @@ def _pr_history(player_name):
 
 
 STATS_2025_SNAPSHOT_FILE = DATA_DIR / "nfl_player_stats_2025.json"
+BUNDLED_STATS_2025_FILE = BASE_DIR / "data" / "nfl_player_stats_2025.json"
 
 STATS_2025_FIELDS = (
     "games", "completions", "attempts", "passing_yards", "passing_tds",
-    "interceptions", "carries", "rushing_yards", "rushing_tds",
+    "interceptions", "sacks_suffered", "passing_air_yards", "passing_first_downs",
+    "passing_epa", "passing_cpoe", "carries", "rushing_yards", "rushing_tds",
+    "rushing_first_downs", "rushing_epa", "rushing_10", "rushing_20",
     "targets", "receptions", "receiving_yards", "receiving_tds",
+    "receiving_air_yards", "receiving_yards_after_catch", "receiving_first_downs",
+    "receiving_epa", "target_share", "air_yards_share", "wopr",
+    "fg_made", "fg_att", "fg_pct", "fg_long", "fg_made_40_49",
+    "fg_made_50_59", "fg_made_60_", "pat_made", "pat_att", "pat_pct",
     "fantasy_points", "fantasy_points_ppr"
 )
 
@@ -2800,11 +2835,17 @@ def _stats_2025_snapshot():
         "status": "missing",
     }
 
-    if not STATS_2025_SNAPSHOT_FILE.exists():
+    snapshot_path = (
+        STATS_2025_SNAPSHOT_FILE
+        if STATS_2025_SNAPSHOT_FILE.exists()
+        else BUNDLED_STATS_2025_FILE
+    )
+
+    if not snapshot_path.exists():
         return empty
 
     try:
-        raw = STATS_2025_SNAPSHOT_FILE.read_text(encoding="utf-8")
+        raw = snapshot_path.read_text(encoding="utf-8")
         if not raw.strip():
             return empty
         payload = json.loads(raw)
@@ -2821,12 +2862,13 @@ def _stats_2025_snapshot():
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         app.logger.warning("Invalid 2025 stats snapshot ignored: %s", exc)
         try:
-            damaged = STATS_2025_SNAPSHOT_FILE.with_suffix(
-                STATS_2025_SNAPSHOT_FILE.suffix + ".invalid"
+            damaged = snapshot_path.with_suffix(
+                snapshot_path.suffix + ".invalid"
             )
-            if damaged.exists():
+            if snapshot_path == STATS_2025_SNAPSHOT_FILE and damaged.exists():
                 damaged.unlink()
-            STATS_2025_SNAPSHOT_FILE.replace(damaged)
+            if snapshot_path == STATS_2025_SNAPSHOT_FILE:
+                snapshot_path.replace(damaged)
         except Exception:
             pass
         return empty
@@ -5253,15 +5295,40 @@ def _offensive_season_source(season):
 
     if season == 2026:
         prior_players = _stats_2025_snapshot().get("players", {}) or {}
-        all_keys = set(prior_players) | set(master_players)
+        current_players = _mock_current_players_by_name(refresh=True)
+        fallback_players = {_pr_norm(player["name"]): player for player in MOCK_PLAYER_POOL}
+        all_keys = set(prior_players) | set(master_players) | set(current_players) | set(fallback_players)
         rows = {}
         for norm in all_keys:
             prior = dict(prior_players.get(norm) or {})
             master = dict(master_players.get(norm) or {})
-            position = str(master.get("position") or prior.get("position") or "").upper()
+            current = dict(current_players.get(norm) or {})
+            fallback = dict(fallback_players.get(norm) or {})
+            position = str(
+                current.get("position")
+                or master.get("position")
+                or prior.get("position")
+                or fallback.get("pos")
+                or ""
+            ).upper()
             if position == "DST":
                 position = "DEF"
             if position not in OFFENSIVE_POSITIONS:
+                continue
+
+            current_team = _normalize_team_code(current.get("team"))
+            if current and not current_team:
+                current_team = "FA"
+            team = (
+                current_team
+                or _normalize_team_code(master.get("team"))
+                or _normalize_team_code(prior.get("team"))
+                or _normalize_team_code(fallback.get("team"))
+                or "FA"
+            )
+            # Exclude inactive historical records that are absent from every
+            # current/projection signal.
+            if current_players and not current and not master and not fallback:
                 continue
 
             projected = _fast_2026_projection_from_2025(prior, position)
@@ -5281,15 +5348,17 @@ def _offensive_season_source(season):
                 )
                 if projected_points not in (None, ""):
                     projected["fantasy_points_ppr"] = projected_points
+            if fallback.get("projection") and not projection_block:
+                projected["fantasy_points_ppr"] = fallback["projection"]
 
             rows[norm] = {
                 **projected,
                 "season": 2026,
                 "data_type": "projection",
-                "name": master.get("name") or prior.get("name") or norm,
-                "player_id": master.get("sleeper_id") or prior.get("player_id") or "",
+                "name": current.get("full_name") or master.get("name") or prior.get("name") or fallback.get("name") or norm,
+                "player_id": current.get("player_id") or master.get("sleeper_id") or prior.get("player_id") or "",
                 "position": position,
-                "team": _normalize_team_code(master.get("team") or prior.get("team")) or "FA",
+                "team": team,
             }
         return rows, "2026 Gridiron IQ projections"
 
@@ -5377,11 +5446,35 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
             "receiving_tds": _off_round(raw.get("receiving_tds"), 1),
             "fantasy_points": round(selected_points, 1),
             "fantasy_points_ppr": round(ppr_points, 1),
+            "passing_air_yards": _off_round(raw.get("passing_air_yards"), 0),
+            "passing_first_downs": _off_round(raw.get("passing_first_downs"), 0),
+            "passing_epa": _off_round(raw.get("passing_epa"), 2),
+            "passing_cpoe": _off_round(raw.get("passing_cpoe"), 2),
+            "sacks_suffered": _off_round(raw.get("sacks_suffered"), 0),
+            "rushing_first_downs": _off_round(raw.get("rushing_first_downs"), 0),
+            "rushing_epa": _off_round(raw.get("rushing_epa"), 2),
+            "rushing_10": _off_round(raw.get("rushing_10"), 0),
+            "rushing_20": _off_round(raw.get("rushing_20"), 0),
+            "receiving_air_yards": _off_round(raw.get("receiving_air_yards"), 0),
+            "yards_after_catch": _off_round(raw.get("receiving_yards_after_catch"), 0),
+            "receiving_first_downs": _off_round(raw.get("receiving_first_downs"), 0),
+            "receiving_epa": _off_round(raw.get("receiving_epa"), 2),
+            "wopr": _off_round(raw.get("wopr"), 2),
+            "fg_made": _off_round(raw.get("fg_made"), 0),
+            "fg_att": _off_round(raw.get("fg_att"), 0),
+            "fg_pct": _off_pct(raw.get("fg_pct")),
+            "fg_long": _off_round(raw.get("fg_long"), 0),
+            "fg_made_40_49": _off_round(raw.get("fg_made_40_49"), 0),
+            "fg_made_50_59": _off_round(raw.get("fg_made_50_59"), 0),
+            "fg_made_60_plus": _off_round(raw.get("fg_made_60_"), 0),
+            "pat_made": _off_round(raw.get("pat_made"), 0),
+            "pat_att": _off_round(raw.get("pat_att"), 0),
+            "pat_pct": _off_pct(raw.get("pat_pct")),
             "routes_run": _off_round(advanced.get("routes_run"), 0) if advanced.get("routes_run") not in (None, "") else None,
             "route_share": _off_pct(advanced.get("route_share")),
             "snap_share": _off_pct(advanced.get("snap_share")),
-            "air_yards": _off_round(advanced.get("air_yards"), 0) if advanced.get("air_yards") not in (None, "") else None,
-            "air_yards_share": _off_pct(advanced.get("air_yards_share")),
+            "air_yards": _off_round(advanced.get("air_yards", raw.get("receiving_air_yards")), 0) if advanced.get("air_yards", raw.get("receiving_air_yards")) not in (None, "") else None,
+            "air_yards_share": _off_pct(advanced.get("air_yards_share", raw.get("air_yards_share"))),
             "adot": _off_round(advanced.get("adot"), 1) if advanced.get("adot") not in (None, "") else None,
             "red_zone_targets": _off_round(advanced.get("red_zone_targets"), 0) if advanced.get("red_zone_targets") not in (None, "") else None,
             "end_zone_targets": _off_round(advanced.get("end_zone_targets"), 0) if advanced.get("end_zone_targets") not in (None, "") else None,
