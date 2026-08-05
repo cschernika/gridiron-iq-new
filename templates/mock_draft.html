@@ -30,6 +30,8 @@
 .ms-board-pick .pp{font-size:8px;color:var(--m);margin-top:2px}
 .ms-board-empty{padding:8px;min-height:58px;border-bottom:1px solid #edf0f5;color:#b0bac7;font-size:9px}
 .ms-board-legend{font-size:10px;color:var(--m)}
+.ms-status{display:none;margin-top:12px;padding:11px 12px;border-radius:10px;font-size:11px;font-weight:800}
+.ms-status.show{display:block}.ms-status.busy{color:#264a88;background:#edf4ff;border:1px solid #cfe0ff}.ms-status.error{color:#991b1b;background:#fff1f2;border:1px solid #fecdd3}
 
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
 </style>
@@ -45,6 +47,7 @@
 <label>Rounds<select id="rounds"><option>10</option><option selected>12</option><option>15</option></select></label>
 </div>
 <button id="start" class="ms-btn primary ms-full">Start AI Mock Draft</button>
+<div id="start-status" class="ms-status" role="status" aria-live="polite"></div>
 </div>
 <div class="ms-card"><div class="ms-k">AI OPPONENTS</div><h2>11 Different Draft Personalities</h2><p>Opponent teams use a mix of balanced, RB-heavy, WR-heavy, Zero-RB, Hero-RB, early-QB, late-QB and best-player approaches. Picks also account for platform ADP, roster construction, 2025 production and 2026 projection.</p><p>The AI intentionally adds controlled randomness so repeated mocks do not produce the exact same board.</p></div>
 </div>
@@ -89,24 +92,39 @@
   async function api(url,opt={}){
     const r=await fetch(url,{headers:{"Content-Type":"application/json"},...opt});
     const d=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(d.error||"Request failed");
+    if(!r.ok) throw new Error(d.detail||d.error||`Request failed (${r.status})`);
     return d;
   }
 
   $("start").onclick=async()=>{
-    const d=await api("/api/mock-draft/manual/start",{
-      method:"POST",
-      body:JSON.stringify({
-        league_key:$("league").value,
-        draft_slot:+$("slot").value,
-        rounds:+$("rounds").value
-      })
-    });
-    id=d.mock.id;
-    $("setup").style.display="none";
-    $("live").style.display="grid";
-    $("draft-board-card").style.display="block";
-    await refresh();
+    const button=$("start");
+    const status=$("start-status");
+    button.disabled=true;
+    button.textContent="Starting Draft…";
+    status.className="ms-status show busy";
+    status.textContent="Gridiron IQ is preparing the player pool and AI opponents…";
+
+    try{
+      const d=await api("/api/mock-draft/manual/start",{
+        method:"POST",
+        body:JSON.stringify({
+          league_key:$("league").value,
+          draft_slot:+$("slot").value,
+          rounds:+$("rounds").value
+        })
+      });
+      if(!d.mock||!d.mock.id) throw new Error("The server did not create a mock draft.");
+      id=d.mock.id;
+      $("setup").style.display="none";
+      $("live").style.display="grid";
+      $("draft-board-card").style.display="block";
+      await refresh();
+    }catch(e){
+      status.className="ms-status show error";
+      status.textContent=`Mock Draft could not start: ${e.message}`;
+      button.disabled=false;
+      button.textContent="Try Starting Mock Draft Again";
+    }
   };
 
   async function refresh(){
