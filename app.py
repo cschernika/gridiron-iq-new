@@ -5649,6 +5649,9 @@ def player_research_profile(player_id):
 from player_research_db import register as register_player_research_database
 register_player_research_database(app)
 
+from fantasy_analytics_routes import register as register_fantasy_analytics
+register_fantasy_analytics(app)
+
 
 @app.errorhandler(404)
 def not_found(_): return page("error.html",code=404,message="Page not found."),404

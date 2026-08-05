@@ -1160,98 +1160,32 @@ def import_current_players() -> int:
     return len(rows)
 
 
-def _github_stats_player_assets() -> list[dict[str, Any]]:
-    """
-    Discover the current official nflverse Player Summary Stats assets.
-
-    The release contains many formats and summary levels. We prefer regular
-    season CSV assets and use compressed CSV when necessary.
-    """
-    cache_path = DATA_DIR / "nflverse_stats_player_assets.json"
-
-    try:
-        if cache_path.exists() and time.time() - cache_path.stat().st_mtime < 86400:
-            cached = json.loads(cache_path.read_text(encoding="utf-8"))
-            if isinstance(cached, list) and cached:
-                return cached
-    except Exception:
-        pass
-
-    response = requests.get(
-        "https://api.github.com/repos/nflverse/nflverse-data/releases/tags/stats_player",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "Gridiron-IQ/2026",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-        timeout=(10, 45),
-    )
-    response.raise_for_status()
-    payload = response.json()
-    assets = payload.get("assets") or []
-
-    normalized = [
-        {
-            "name": str(asset.get("name") or ""),
-            "url": str(asset.get("browser_download_url") or ""),
-            "size": int(asset.get("size") or 0),
-        }
-        for asset in assets
-        if asset.get("name") and asset.get("browser_download_url")
-    ]
-
-    if not normalized:
-        raise RuntimeError("The nflverse stats_player release returned no assets.")
-
-    cache_path.write_text(
-        json.dumps(normalized, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return normalized
-
-
 def _season_asset_candidates(season: int) -> list[dict[str, Any]]:
-    assets = _github_stats_player_assets()
-    season_text = str(int(season))
+    """Return direct nflverse release assets without calling api.github.com.
 
-    preferred_names = [
+    Render services can share outbound IP addresses, so unauthenticated GitHub
+    API discovery can be rate-limited even when this app made few requests.
+    These stable release-download URLs avoid the API entirely.
+    """
+    season_text = str(int(season))
+    release_base = (
+        "https://github.com/nflverse/nflverse-data/releases/download/"
+        "stats_player"
+    )
+    names = [
         f"stats_player_reg_{season_text}.csv",
         f"stats_player_reg_{season_text}.csv.gz",
         f"stats_player_week_{season_text}.csv",
         f"stats_player_week_{season_text}.csv.gz",
     ]
-
-    by_name = {asset["name"]: asset for asset in assets}
-    candidates = [
-        by_name[name]
-        for name in preferred_names
-        if name in by_name
+    return [
+        {
+            "name": name,
+            "url": f"{release_base}/{name}",
+            "size": 0,
+        }
+        for name in names
     ]
-
-    # Handle future nflverse naming adjustments without accepting postseason
-    # or unrelated formats.
-    if not candidates:
-        candidates = sorted(
-            [
-                asset
-                for asset in assets
-                if season_text in asset["name"]
-                and "player" in asset["name"].lower()
-                and (
-                    asset["name"].lower().endswith(".csv")
-                    or asset["name"].lower().endswith(".csv.gz")
-                )
-                and "post" not in asset["name"].lower()
-            ],
-            key=lambda asset: (
-                "reg" not in asset["name"].lower(),
-                "week" in asset["name"].lower(),
-                asset["name"],
-            ),
-        )
-
-    return candidates
-
 
 def _valid_stats_headers(fieldnames: list[str] | None) -> bool:
     fields = {str(field or "").strip() for field in (fieldnames or [])}
