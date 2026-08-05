@@ -1,10 +1,33 @@
 {% extends "base.html" %}
+
 {% block title %}Dashboard Home | Gridiron IQ{% endblock %}
+
 {% block body %}
+{% set settings = league_settings if league_settings is defined and league_settings else none %}
+{% set my_team = user_team if user_team is defined and user_team else none %}
+{% set stats = analytics if analytics is defined and analytics else none %}
+
+{# Accept either a top-level power_rankings list or analytics.power_rankings. #}
+{% if power_rankings is defined and power_rankings %}
+  {% set rankings = power_rankings %}
+{% elif stats and stats.power_rankings is defined and stats.power_rankings %}
+  {% set rankings = stats.power_rankings %}
+{% else %}
+  {% set rankings = [] %}
+{% endif %}
+
 <section class="topbar">
-  <div><div class="kicker">2026 FANTASY SEASON</div><h1>Dashboard Home</h1></div>
+  <div>
+    <div class="kicker">2026 FANTASY SEASON</div>
+    <h1>Dashboard Home</h1>
+  </div>
+
   <div class="top-actions">
-    {% if connected %}<span class="status">✓ League connected</span>{% else %}<span class="status">League not connected</span>{% endif %}
+    {% if connected %}
+      <span class="status">✓ League connected</span>
+    {% else %}
+      <span class="status">League not connected</span>
+    {% endif %}
     <a class="btn secondary" href="/league-sync">↻ Sync League</a>
     <a class="btn primary" href="/draft-center">Go to Draft Center</a>
   </div>
@@ -14,66 +37,199 @@
   <div class="league-left">
     <div class="helmet">🏈</div>
     <div>
-      <div class="league-title"><h2>{{ league.league_name if connected else "Gramp's Gridiron" }}</h2>{% if connected %}<span>ESPN</span>{% endif %}</div>
-      <p>{{ league.teams if connected else 12 }} Teams • {{ league_settings.scoring_label if league_settings and league_settings.scoring_label else (league_settings.scoring if league_settings and league_settings.scoring else "Full PPR") }}</p>
+      <div class="league-title">
+        <h2>{{ league.league_name if connected and league else "Gramp's Gridiron" }}</h2>
+        {% if connected %}<span>ESPN</span>{% endif %}
+      </div>
+
+      <p>
+        {{ league.teams if connected and league and league.teams else 12 }} Teams •
+        {{ settings.scoring_label if settings and settings.scoring_label else (settings.scoring if settings and settings.scoring else "Full PPR") }}
+      </p>
+
       <div class="details">
         <div>▣ Draft: Tue, Sep 8, 2026 • 7:30 PM</div>
         <div>♧ Snake Draft</div>
-        <div>▣ {{ league_settings.reg_season_count if league_settings and league_settings.reg_season_count else 14 }}-Week Regular Season &nbsp;|&nbsp; {{ league_settings.playoff_team_count if league_settings and league_settings.playoff_team_count else 6 }} Playoff Teams</div>
+        <div>
+          ▣ {{ settings.reg_season_count if settings and settings.reg_season_count else 14 }}-Week Regular Season
+          &nbsp;|&nbsp;
+          {{ settings.playoff_team_count if settings and settings.playoff_team_count else 6 }} Playoff Teams
+        </div>
       </div>
     </div>
   </div>
+
   <div class="divider"></div>
+
   <div class="your-team">
     <span>Your Team</span>
-    <div class="team-row"><div class="jersey">10</div><div><h3>{{ user_team.team_name if user_team else "Chad's Team" }}</h3><p>{% if user_team %}{{ user_team.wins }}-{{ user_team.losses }}-{{ user_team.ties or 0 }}{% else %}0-0-0{% endif %}</p><p>{% if user_team and user_team.points_for %}{{ user_team.points_for }} Points{% else %}-- Points{% endif %}</p></div></div>
+    <div class="team-row">
+      <div class="jersey">10</div>
+      <div>
+        <h3>{{ my_team.team_name if my_team else "Chad's Team" }}</h3>
+        <p>
+          {% if my_team %}
+            {{ my_team.wins|default(0, true) }}-{{ my_team.losses|default(0, true) }}-{{ my_team.ties|default(0, true) }}
+          {% else %}
+            0-0-0
+          {% endif %}
+        </p>
+        <p>
+          {% if my_team and my_team.points_for is defined and my_team.points_for is not none %}
+            {{ my_team.points_for }} Points
+          {% else %}
+            -- Points
+          {% endif %}
+        </p>
+      </div>
+    </div>
   </div>
 </section>
 
 <section class="metrics">
-  <article><div class="metric-icon purple">🏆</div><div><span>Team Strength</span><strong>{{ analytics.team_strength if analytics else 86 }}</strong><small>Rank #{{ analytics.team_rank if analytics else 3 }} in your league</small></div></article>
-  <article><div class="metric-icon green">↗</div><div><span>Playoff Probability</span><strong>{{ analytics.playoff_probability if analytics else 74 }}%</strong><small class="green-text">Current Projection</small></div></article>
-  <article><div class="metric-icon orange">☆</div><div><span>Championship Odds</span><strong>{{ analytics.championship_probability if analytics else 18 }}%</strong><small class="orange-text">Based on current roster</small></div></article>
-  <article><div class="metric-icon blue">〽</div><div><span>Projected Lineup Gain</span><strong>+{{ analytics.lineup_gain if analytics else 7.1 }}</strong><small class="blue-text">Points from optimal choices</small></div></article>
+  <article>
+    <div class="metric-icon purple">🏆</div>
+    <div>
+      <span>Team Strength</span>
+      <strong>{{ stats.team_strength if stats and stats.team_strength is defined else 86 }}</strong>
+      <small>Rank #{{ stats.team_rank if stats and stats.team_rank is defined else 3 }} in your league</small>
+    </div>
+  </article>
+
+  <article>
+    <div class="metric-icon green">↗</div>
+    <div>
+      <span>Playoff Probability</span>
+      <strong>{{ stats.playoff_probability if stats and stats.playoff_probability is defined else 74 }}%</strong>
+      <small class="green-text">Current Projection</small>
+    </div>
+  </article>
+
+  <article>
+    <div class="metric-icon orange">☆</div>
+    <div>
+      <span>Championship Odds</span>
+      <strong>{{ stats.championship_probability if stats and stats.championship_probability is defined else 18 }}%</strong>
+      <small class="orange-text">Based on current roster</small>
+    </div>
+  </article>
+
+  <article>
+    <div class="metric-icon blue">〽</div>
+    <div>
+      <span>Projected Lineup Gain</span>
+      <strong>+{{ stats.lineup_gain if stats and stats.lineup_gain is defined else 7.1 }}</strong>
+      <small class="blue-text">Points from optimal choices</small>
+    </div>
+  </article>
 </section>
 
 <section class="dash-grid">
   <article class="panel">
-    <div class="panel-head"><div><div class="panel-kicker">LEAGUE SNAPSHOT</div><h2>Power Rankings</h2></div><a href="/league-intelligence">View analyzer →</a></div>
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker">LEAGUE SNAPSHOT</div>
+        <h2>Power Rankings</h2>
+      </div>
+      <a href="/league-intelligence">View analyzer →</a>
+    </div>
+
     <div style="overflow-x:auto;">
       <table>
         <thead>
-          <tr><th>RANK</th><th>TEAM</th><th>RATING</th><th>PLAYOFF %</th></tr>
+          <tr>
+            <th>RANK</th>
+            <th>TEAM</th>
+            <th>RATING</th>
+            <th>PLAYOFF %</th>
+          </tr>
         </thead>
         <tbody>
-        {% if analytics and analytics.power_rankings %}
-          {% for t in analytics.power_rankings %}
-          <tr class="{% if user_team and t.team == user_team.team_name %}user-rank{% endif %}">
-            <td>#{{ t.rank }}</td>
-            <td><span class="mini-logo">{{ t.team[:1] }}</span>{{ t.team }}{% if user_team and t.team == user_team.team_name %} (You){% endif %}</td>
-            <td>{{ t.rating }}</td>
-            <td>{{ t.playoffs }}%</td>
-          </tr>
-          {% endfor %}
-        {% else %}
-          <tr><td>#1</td><td><span class="mini-logo">S</span>Sunday Crushers</td><td>91</td><td>82%</td></tr>
-          <tr><td>#2</td><td><span class="mini-logo">F</span>Fourth & Long</td><td>88</td><td>77%</td></tr>
-          <tr class="user-rank"><td>#3</td><td><span class="mini-logo">C</span>Chad's Team (You)</td><td>86</td><td>74%</td></tr>
-          <tr><td>#4</td><td><span class="mini-logo">G</span>Gridiron Gurus</td><td>84</td><td>69%</td></tr>
-          <tr><td>#5</td><td><span class="mini-logo">R</span>Red Zone Renegades</td><td>82</td><td>63%</td></tr>
-        {% endif %}
+          {% if rankings %}
+            {# Do not slice this list: every synced league team is displayed. #}
+            {% for team in rankings %}
+              {% set team_name = team.team if team.team is defined else (team.team_name if team.team_name is defined else "Unknown Team") %}
+              {% set is_user = my_team and team_name == my_team.team_name %}
+              <tr class="{% if is_user %}user-rank{% endif %}">
+                <td>#{{ team.rank if team.rank is defined else loop.index }}</td>
+                <td>
+                  <span class="mini-logo">{{ team_name[:1]|upper }}</span>
+                  {{ team_name }}{% if is_user %} (You){% endif %}
+                </td>
+                <td>{{ team.rating if team.rating is defined and team.rating is not none else "--" }}</td>
+                <td>
+                  {% if team.playoffs is defined and team.playoffs is not none %}
+                    {{ team.playoffs }}%
+                  {% elif team.playoff_probability is defined and team.playoff_probability is not none %}
+                    {{ team.playoff_probability }}%
+                  {% else %}
+                    --
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% elif connected %}
+            <tr>
+              <td colspan="4">Power rankings will appear after the league sync finishes.</td>
+            </tr>
+          {% else %}
+            <tr><td>#1</td><td><span class="mini-logo">S</span>Sunday Crushers</td><td>91</td><td>82%</td></tr>
+            <tr><td>#2</td><td><span class="mini-logo">F</span>Fourth &amp; Long</td><td>88</td><td>77%</td></tr>
+            <tr class="user-rank"><td>#3</td><td><span class="mini-logo">C</span>Chad's Team (You)</td><td>86</td><td>74%</td></tr>
+            <tr><td>#4</td><td><span class="mini-logo">G</span>Gridiron Gurus</td><td>84</td><td>69%</td></tr>
+            <tr><td>#5</td><td><span class="mini-logo">R</span>Red Zone Renegades</td><td>82</td><td>63%</td></tr>
+          {% endif %}
         </tbody>
       </table>
     </div>
+
     <a class="footer-link" href="/league-intelligence">View full league analyzer →</a>
   </article>
 
   <article class="panel">
-    <div class="panel-head"><div><div class="panel-kicker">THIS WEEK</div><h2>AI Priorities</h2></div></div>
-    <div class="priority"><div class="picon green">◎</div><div><b>Optimize your lineup</b><span>Potential gain: +{{ analytics.lineup_gain if analytics else 7.1 }} points</span></div><a href="/lineup-optimizer">›</a></div>
-    <div class="priority"><div class="picon blue">⇄</div><div><b>Review trade opportunities</b><span>{{ analytics.trade_opportunities if analytics else 4 }} possible matches</span></div><a href="/trade-analyzer">›</a></div>
-    <div class="priority"><div class="picon purple">♦</div><div><b>Check waiver wire</b><span>8 players with high upside</span></div><a href="/waiver-assistant">›</a></div>
-    <div class="priority"><div class="picon orange">⬡</div><div><b>Analyze matchups</b><span>5 favorable matchups</span></div><a href="/matchup-analyzer">›</a></div>
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker">THIS WEEK</div>
+        <h2>AI Priorities</h2>
+      </div>
+    </div>
+
+    <div class="priority">
+      <div class="picon green">◎</div>
+      <div>
+        <b>Optimize your lineup</b>
+        <span>Potential gain: +{{ stats.lineup_gain if stats and stats.lineup_gain is defined else 7.1 }} points</span>
+      </div>
+      <a href="/lineup-optimizer">›</a>
+    </div>
+
+    <div class="priority">
+      <div class="picon blue">⇄</div>
+      <div>
+        <b>Review trade opportunities</b>
+        <span>{{ stats.trade_opportunities if stats and stats.trade_opportunities is defined else 4 }} possible matches</span>
+      </div>
+      <a href="/trade-analyzer">›</a>
+    </div>
+
+    <div class="priority">
+      <div class="picon purple">♦</div>
+      <div>
+        <b>Check waiver wire</b>
+        <span>8 players with high upside</span>
+      </div>
+      <a href="/waiver-assistant">›</a>
+    </div>
+
+    <div class="priority">
+      <div class="picon orange">⬡</div>
+      <div>
+        <b>Analyze matchups</b>
+        <span>5 favorable matchups</span>
+      </div>
+      <a href="/matchup-analyzer">›</a>
+    </div>
+
     <a class="footer-link" href="/player-analytics">Open player analytics →</a>
     <a class="footer-link" href="/reports">View all recommendations →</a>
   </article>
