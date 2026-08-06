@@ -1,0 +1,53 @@
+name: Daily Player Research refresh
+
+on:
+  schedule:
+    - cron: "37 6 * * *"
+      timezone: "America/New_York"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-player-research
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out Gridiron IQ
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Refresh current players, teams and injuries
+        run: python refresh_daily_player_research.py
+
+      - name: Validate Player Research files
+        run: |
+          python -m py_compile app.py refresh_daily_player_research.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          cache = json.loads(Path("data/sleeper_players_cache.json").read_text(encoding="utf-8"))
+          master = json.loads(Path("data/nfl_players_2026.json").read_text(encoding="utf-8"))
+          status = json.loads(Path("data/player_research_daily_status.json").read_text(encoding="utf-8"))
+          assert len(cache) >= 500
+          assert master.get("season") == 2026 and master.get("count", 0) >= 500
+          assert status.get("ok") and status.get("player_count", 0) >= 500
+          PY
+
+      - name: Commit the daily Player Research update
+        run: |
+          git add data/sleeper_players_cache.json data/nfl_players_2026.json data/player_research_daily_status.json
+          git config user.name "Gridiron IQ Player Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "chore: refresh daily Player Research data" || exit 0
+          git push
