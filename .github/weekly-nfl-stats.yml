@@ -1,0 +1,64 @@
+name: Weekly NFL statistics refresh
+
+on:
+  schedule:
+    # Tuesday at 10:17 UTC (6:17 AM Eastern during daylight time).
+    - cron: "17 10 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-nfl-statistics
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out Gridiron IQ
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download and rebuild weekly statistics
+        run: python refresh_weekly_data.py --season 2026 --matchup-season 2026
+
+      - name: Validate refreshed files
+        run: |
+          python -m py_compile app.py refresh_weekly_data.py build_defensive_snapshot.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          offense = Path("data/nfl_player_stats_2026.json")
+          if offense.exists():
+              payload = json.loads(offense.read_text(encoding="utf-8"))
+              assert payload.get("season") == 2026
+              assert payload.get("player_count", 0) > 100
+
+          defense = Path("data/nfl_defensive_stats_current.json")
+          if defense.exists():
+              payload = json.loads(defense.read_text(encoding="utf-8"))
+              assert payload.get("season") == 2026
+              assert len(payload.get("teams", {})) >= 28
+          PY
+
+      - name: Commit changed snapshots
+        run: |
+          for snapshot in data/nfl_player_stats_2026.json data/nfl_defensive_stats_current.json; do
+            if [ -f "$snapshot" ]; then git add "$snapshot"; fi
+          done
+          if git diff --cached --quiet; then
+            echo "No new weekly statistics were published."
+            exit 0
+          fi
+          git config user.name "Gridiron IQ Data Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "chore: refresh weekly NFL statistics"
+          git push
