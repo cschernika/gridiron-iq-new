@@ -2,1198 +2,171 @@
 {% block title %}Player Research | Gridiron IQ{% endblock %}
 
 {% block body %}
-<section class="pr-page" data-platform="{{ active_platform|default('ESPN') }}">
-      <header class="pr-header">
-        <div class="pr-heading">
-          <p class="pr-eyebrow">Player Database</p>
-          <h1>Player Research</h1>
-          <p>Current NFL players, 2025 statistics, 2026 projections, and ADP rankings. Click any player for the full profile. Historical seasons are read from the SQLite database.</p>
-        </div>
-
-        <div class="pr-league-control">
-          <label for="pr-league">League</label>
-          <select id="pr-league">
-            {% for league in draft_leagues|default([]) %}
-              <option value="{{ league.key }}"
-                {% if league.key == active_league_key %}selected{% endif %}>
-                {{ league.name }} — {{ league.platform }}
-              </option>
-            {% endfor %}
-          </select>
-          <small>{{ active_scoring|default('') }}</small>
-        </div>
-      </header>
-
-      <div id="pr-alert" class="pr-alert" hidden></div>
-
-      <section class="pr-controls">
-        <label class="pr-search-control">
-          <span>Search</span>
-          <input id="pr-search" type="search" placeholder="Search player or team">
-        </label>
-
-        <label>
-          <span>Sort</span>
-          <select id="pr-sort">
-            <option value="adp">ADP</option>
-            <option value="projection_2026">2026 projected points</option>
-            <option value="points_2025">2025 PPR points</option>
-            <option value="name">Player name</option>
-            <option value="team">Team</option>
-          </select>
-        </label>
-
-        <label>
-          <span>Order</span>
-          <select id="pr-direction">
-            <option value="asc">Ascending</option>
-            <option value="desc">Descending</option>
-          </select>
-        </label>
-
-        <div class="pr-action-buttons">
-          <button id="pr-refresh-stats" class="pr-secondary-button" type="button">
-            Import 2025 into Database
-          </button>
-          <button id="pr-refresh-adp" class="pr-secondary-button" type="button">
-            Import Teams & 2026 ADP
-          </button>
-          <button id="pr-reload" class="pr-primary-button" type="button">
-            Reload table
-          </button>
-        </div>
-      </section>
-
-      <nav class="pr-tabs" aria-label="Player positions">
-        {% for value, label in [
-          ("", "All Players"),
-          ("QB", "QB"),
-          ("RB", "RB"),
-          ("WR", "WR"),
-          ("TE", "TE"),
-          ("K", "K"),
-          ("DEF", "DEF")
-        ] %}
-          <button
-            type="button"
-            data-position="{{ value }}"
-            class="{% if selected_position|default('') == value %}active{% endif %}">
-            {{ label }}
-            <small data-count="{{ value or 'ALL' }}">—</small>
-          </button>
-        {% endfor %}
-      </nav>
-
-      <section class="pr-summary">
-        <article>
-          <span>Players shown</span>
-          <strong id="pr-count">—</strong>
-        </article>
-        <article>
-          <span>Platform</span>
-          <strong id="pr-platform">{{ active_platform|default('ESPN') }}</strong>
-        </article>
-        <article>
-          <span>2025 stats</span>
-          <strong id="pr-stats">Loading</strong>
-        </article>
-        <article>
-          <span>2026 ADP</span>
-          <strong id="pr-adp">Loading</strong>
-        </article>
-      </section>
-
-      <section class="pr-table-card">
-        <div class="pr-table-wrap">
-          <table class="pr-table">
-            <thead>
-              <tr>
-                <th>ADP</th>
-                <th>Pos. ADP</th>
-                <th>Player</th>
-                <th>Team</th>
-                <th>Pos.</th>
-                <th>2025 GP</th>
-                <th>2025 PPR</th>
-                <th>Pass Yds</th>
-                <th>Pass TD</th>
-                <th>Rush Yds</th>
-                <th>Rush TD</th>
-                <th>Rec</th>
-                <th>Rec Yds</th>
-                <th>Rec TD</th>
-                <th>2026 Proj. PPR</th>
-              </tr>
-            </thead>
-            <tbody id="pr-body">
-              <tr>
-                <td colspan="15" class="pr-loading">Loading current players…</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <p id="pr-source" class="pr-source">Loading data sources…</p>
-      <div class="pr-pager" id="pr-pager">
-        <button id="pr-prev-page" class="pr-secondary-button" type="button">Previous</button>
-        <span id="pr-page-label">Page 1 of 1</span>
-        <button id="pr-next-page" class="pr-secondary-button" type="button">Next</button>
-      </div>
-
-      <div id="pr-player-overlay" class="pr-player-overlay" hidden></div>
-      <aside id="pr-player-drawer" class="pr-player-drawer" hidden>
-        <div class="pr-drawer-header">
-          <div>
-            <p class="pr-eyebrow">Player profile</p>
-            <h2 id="pr-detail-name">Player</h2>
-            <p id="pr-detail-meta">Position · Team</p>
-          </div>
-          <button id="pr-detail-close" class="pr-close-button" type="button">×</button>
-        </div>
-        <div id="pr-detail-loading" class="pr-detail-loading">Loading player profile…</div>
-        <div id="pr-detail-content" hidden>
-          <section class="pr-detail-summary">
-            <article><span>2026 ADP</span><strong id="pr-detail-adp">—</strong></article>
-            <article><span>Positional ADP</span><strong id="pr-detail-pos-adp">—</strong></article>
-            <article><span>2025 PPR</span><strong id="pr-detail-2025-ppr">—</strong></article>
-            <article><span>2026 Projection</span><strong id="pr-detail-projection">—</strong></article>
-          </section>
-          <section class="pr-detail-card"><h3>2025 Statistics</h3><div id="pr-detail-stats" class="pr-detail-stats"></div></section>
-          <section class="pr-detail-card">
-            <h3>2026 Projected Statistics</h3>
-            <div id="pr-detail-projected-stats" class="pr-detail-stats"></div>
-          </section>
-          <section class="pr-detail-card">
-            <div class="pr-news-heading">
-              <h3>Complete NFL Career</h3>
-              <span id="pr-career-range" class="pr-muted">Stored in SQLite</span>
-            </div>
-            <div id="pr-career-summary" class="pr-detail-stats"></div>
-            <div class="pr-career-tabs" role="group" aria-label="Career summary view">
-              <button type="button" class="pr-career-tab is-active" data-career-view="totals">Career totals</button>
-              <button type="button" class="pr-career-tab" data-career-view="per_game">Per game</button>
-              <button type="button" class="pr-career-tab" data-career-view="per_season">Per season</button>
-            </div>
-            <div id="pr-career-totals" class="pr-detail-stats"></div>
-            <p id="pr-career-progress" class="pr-muted"></p>
-            <div class="pr-history-scroll">
-              <div id="pr-detail-history"></div>
-            </div>
-          </section>
-          <section class="pr-detail-card"><h3>Injury and Status</h3><p id="pr-detail-injury">No current injury designation.</p></section>
-          <section class="pr-detail-card">
-            <div class="pr-news-heading"><h3>Current News</h3><button id="pr-load-news" class="pr-secondary-button" type="button">Load news</button></div>
-            <div id="pr-detail-news"><p class="pr-muted">Select Load news for current updates.</p></div>
-          </section>
-        </div>
-      </aside>
-
-</section>
-
 <style>
-  .pr-page {
-    width: 100%;
-    max-width: 1600px;
-    margin: 0 auto;
-    padding-bottom: 32px;
-    color: #142033;
-  }
-
-  .pr-header {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 420px);
-    gap: 30px;
-    align-items: end;
-    margin-bottom: 22px;
-  }
-
-  .pr-heading h1 {
-    margin: 0 0 8px;
-    font-size: clamp(36px, 4vw, 54px);
-    line-height: 1.02;
-  }
-
-  .pr-heading p {
-    max-width: 760px;
-    margin: 0;
-    color: #68778c;
-    font-size: 17px;
-    line-height: 1.5;
-  }
-
-  .pr-eyebrow {
-    margin: 0 0 8px !important;
-    color: #6652e8 !important;
-    font-size: 12px !important;
-    font-weight: 900;
-    letter-spacing: .13em;
-    text-transform: uppercase;
-  }
-
-  .pr-league-control,
-  .pr-controls label {
-    display: grid;
-    gap: 7px;
-  }
-
-  .pr-league-control label,
-  .pr-controls label span {
-    color: #718096;
-    font-size: 11px;
-    font-weight: 900;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-  }
-
-  .pr-league-control select,
-  .pr-controls input,
-  .pr-controls select {
-    width: 100%;
-    min-height: 46px;
-    padding: 10px 13px;
-    border: 1px solid #d5dde8;
-    border-radius: 10px;
-    background: #fff;
-    color: #172033;
-    font-size: 15px;
-  }
-
-  .pr-league-control small {
-    color: #718096;
-  }
-
-  .pr-controls {
-    display: grid;
-    grid-template-columns: minmax(280px, 2fr) minmax(190px, 1fr) minmax(170px, .8fr);
-    gap: 14px;
-    align-items: end;
-    padding: 18px;
-    border: 1px solid #e0e6ee;
-    border-radius: 14px;
-    background: #fff;
-  }
-
-  .pr-primary-button {
-    min-height: 46px;
-    padding: 0 20px;
-    border: 0;
-    border-radius: 10px;
-    background: #6652e8;
-    color: #fff;
-    font-weight: 900;
-    cursor: pointer;
-  }
-
-  .pr-action-buttons {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-    align-items: stretch;
-  }
-
-  .pr-action-buttons button {
-    width: 100%;
-    min-width: 0;
-    min-height: 50px;
-    padding: 0 14px;
-    text-align: center;
-  }
-
-  .pr-secondary-button {
-    min-height: 46px;
-    padding: 0 18px;
-    border: 1px solid #6652e8;
-    border-radius: 10px;
-    background: #fff;
-    color: #6652e8;
-    font-weight: 900;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .pr-primary-button:disabled,
-  .pr-secondary-button:disabled {
-    cursor: wait;
-    opacity: .65;
-  }
-
-  .pr-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 9px;
-    margin: 18px 0;
-  }
-
-  .pr-tabs button {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    min-width: 74px;
-    padding: 11px 16px;
-    border: 1px solid #d9e0e9;
-    border-radius: 10px;
-    background: #fff;
-    color: #56657a;
-    font-weight: 900;
-    cursor: pointer;
-  }
-
-  .pr-tabs button.active {
-    border-color: #6652e8;
-    background: #6652e8;
-    color: #fff;
-  }
-
-  .pr-tabs small {
-    opacity: .75;
-  }
-
-  .pr-summary {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(160px, 1fr));
-    gap: 12px;
-    margin-bottom: 16px;
-  }
-
-  .pr-summary article {
-    padding: 15px 17px;
-    border: 1px solid #e0e6ed;
-    border-radius: 12px;
-    background: #fff;
-  }
-
-  .pr-summary span,
-  .pr-summary strong {
-    display: block;
-  }
-
-  .pr-summary span {
-    color: #758196;
-    font-size: 11px;
-    letter-spacing: .05em;
-    text-transform: uppercase;
-  }
-
-  .pr-summary strong {
-    margin-top: 6px;
-    font-size: 21px;
-  }
-
-  .pr-table-card {
-    width: 100%;
-    overflow: hidden;
-    border: 1px solid #dfe5ed;
-    border-radius: 14px;
-    background: #fff;
-  }
-
-  .pr-table-wrap {
-    width: 100%;
-    max-height: 70vh;
-    overflow: auto;
-  }
-
-  .pr-table {
-    width: 100%;
-    min-width: 1450px;
-    border-collapse: collapse;
-  }
-
-  .pr-table th {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    padding: 12px 11px;
-    border-bottom: 1px solid #dbe2eb;
-    background: #f4f6fa;
-    color: #59677b;
-    font-size: 11px;
-    text-align: right;
-    white-space: nowrap;
-  }
-
-  .pr-table td {
-    padding: 12px 11px;
-    border-bottom: 1px solid #edf0f4;
-    font-size: 13px;
-    text-align: right;
-    white-space: nowrap;
-  }
-
-  .pr-table th:nth-child(3),
-  .pr-table th:nth-child(4),
-  .pr-table th:nth-child(5),
-  .pr-table td:nth-child(3),
-  .pr-table td:nth-child(4),
-  .pr-table td:nth-child(5) {
-    text-align: left;
-  }
-
-  .pr-table tbody tr:hover {
-    background: #f7f6ff;
-  }
-
-  .pr-player-name {
-    font-weight: 900;
-  }
-
-  .pr-position {
-    display: inline-block;
-    min-width: 35px;
-    padding: 4px 7px;
-    border-radius: 6px;
-    background: #eeecff;
-    color: #5545c8;
-    font-weight: 900;
-    text-align: center;
-  }
-
-  .pr-muted {
-    color: #a0a9b7;
-  }
-
-  .pr-loading {
-    padding: 48px !important;
-    color: #6e7b8f;
-    text-align: center !important;
-  }
-
-  .pr-alert {
-    margin-bottom: 15px;
-    padding: 12px 14px;
-    border: 1px solid #efbdc4;
-    border-radius: 10px;
-    background: #fdebec;
-    color: #99293a;
-  }
-
-  .pr-source {
-    margin-top: 11px;
-    color: #718096;
-    font-size: 12px;
-  }
-
-
-  .pr-pager {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 14px;
-    margin: 16px 0 4px;
-  }
-
-  .pr-pager button {
-    min-width: 110px;
-  }
-
-  .pr-pager button:disabled {
-    opacity: .45;
-    cursor: default;
-  }
-
-  .pr-table tbody tr[data-player-name]{cursor:pointer}
-  .pr-table tbody tr[data-player-name]:hover{background:#efedff}
-  .pr-player-overlay{position:fixed;inset:0;z-index:1090;background:rgba(18,25,42,.48)}
-  .pr-player-drawer{position:fixed;top:0;right:0;bottom:0;z-index:1100;width:min(680px,94vw);overflow-y:auto;padding:24px;background:#f7f9fc;box-shadow:-18px 0 48px rgba(20,32,51,.24)}
-  .pr-drawer-header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:18px}
-  .pr-drawer-header h2{margin:0 0 5px;font-size:32px}
-  .pr-close-button{width:42px;height:42px;border:1px solid #d8dfe9;border-radius:10px;background:#fff;font-size:27px;cursor:pointer}
-  .pr-detail-loading{padding:50px 20px;text-align:center;color:#68778c}
-  .pr-detail-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}
-  .pr-detail-summary article,.pr-detail-card{padding:15px;border:1px solid #dfe5ed;border-radius:12px;background:#fff}
-  .pr-detail-summary span,.pr-detail-summary strong{display:block}
-  .pr-detail-summary span{color:#718096;font-size:10px;text-transform:uppercase}
-  .pr-detail-summary strong{margin-top:5px;font-size:19px}
-  .pr-detail-card{margin-bottom:12px}
-  .pr-detail-card h3{margin:0 0 12px}
-  .pr-detail-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-  .pr-detail-stat{padding:10px;border-radius:9px;background:#f3f5f9}
-  .pr-detail-stat span,.pr-detail-stat strong{display:block}
-  .pr-detail-stat span{color:#718096;font-size:10px;text-transform:uppercase}
-  .pr-career-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 16px 0 12px;
-  }
-
-  .pr-career-tab {
-    border: 1px solid #d9e1ea;
-    border-radius: 999px;
-    background: #fff;
-    padding: 8px 13px;
-    color: #42516a;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .pr-career-tab.is-active {
-    background: #142033;
-    border-color: #142033;
-    color: #fff;
-  }
-
-  .pr-history-scroll {
-    overflow-x: auto;
-    margin-top: 16px;
-    border: 1px solid #e7ebf1;
-    border-radius: 12px;
-  }
-
-  .pr-history-table {
-    width: 100%;
-    min-width: 1450px;
-    border-collapse: collapse;
-    background: #fff;
-  }
-
-  .pr-history-table thead {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-
-  .pr-history-table th {
-    white-space: nowrap;
-    background: #f5f7fa;
-  }
-
-  .pr-history-table tbody tr:hover {
-    background: #f8fafc;
-  }
-
-  .pr-history-table .pr-total-row {
-    font-weight: 800;
-    background: #eef3f8;
-  }
-
-  .pr-history-table{width:100%;border-collapse:collapse}
-  .pr-history-table th,.pr-history-table td{padding:8px;border-bottom:1px solid #e7ebf1;text-align:right}
-  .pr-history-table th:first-child,.pr-history-table td:first-child{text-align:left}
-  .pr-news-heading{display:flex;justify-content:space-between;gap:12px;align-items:center}
-  .pr-news-item{padding:11px 0;border-bottom:1px solid #e7ebf1}
-
-  @media (max-width: 1050px) {
-    .pr-header {
-      grid-template-columns: 1fr;
-    }
-
-    .pr-controls {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (max-width: 720px) {
-    .pr-controls,
-    .pr-summary {
-      grid-template-columns: 1fr;
-    }
-
-    .pr-tabs {
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      padding-bottom: 4px;
-    }
-  }
-  @media (max-width: 760px) {
-    .pr-action-buttons {
-      grid-template-columns: 1fr;
-    }
-  }
-
+.pr{--ink:#142033;--muted:#68778e;--line:#dfe5ef;--soft:#f6f8fc;--purple:#5d3df5;--red:#dc2626;--red-soft:#fff1f2;--blue:#2563eb;--blue-soft:#eff6ff;color:var(--ink)}
+.pr-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.pr-kicker{font-size:11px;font-weight:900;letter-spacing:.1em;color:var(--purple)}.pr h1{font-size:36px;line-height:1.05;margin:5px 0 8px}.pr-sub{max-width:760px;color:var(--muted);margin:0;line-height:1.5}.pr-refresh{display:flex;align-items:center;gap:7px;border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:999px;padding:8px 11px;font-size:10px;font-weight:900;white-space:nowrap}.pr-refresh.stale{border-color:#fde68a;background:#fffbeb;color:#92400e}.pr-refresh-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.pr-card{background:#fff;border:1px solid var(--line);border-radius:16px;margin-bottom:14px}.pr-controls{display:grid;grid-template-columns:minmax(220px,1fr) 150px;gap:10px;padding:15px}.pr-field label{display:block;font-size:9px;color:var(--muted);font-weight:900;letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}.pr-field input,.pr-field select{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px;background:#fff;color:var(--ink);font-size:12px}.pr-field input:focus,.pr-field select:focus{outline:2px solid #ddd6fe;border-color:var(--purple)}
+.pr-tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}.pr-tab{border:1px solid var(--line);border-radius:999px;padding:8px 13px;background:#fff;color:#4b5870;font-size:11px;font-weight:900;cursor:pointer}.pr-tab.active{background:var(--purple);border-color:var(--purple);color:#fff}.pr-count{opacity:.72;margin-left:3px}
+.pr-legend{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:10px}.pr-legend-items{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.pr-legend-item{display:inline-flex;gap:5px;align-items:center}.pr-mini-icon{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:7px;font-size:12px;font-weight:900}.pr-mini-icon.injury{color:var(--red);background:var(--red-soft);border:1px solid #fecdd3}.pr-mini-icon.news{color:var(--blue);background:var(--blue-soft);border:1px solid #bfdbfe}
+.pr-table-scroll{overflow:auto;max-height:690px}.pr-table{width:100%;min-width:930px;border-collapse:separate;border-spacing:0}.pr-table th,.pr-table td{padding:10px 9px;border-bottom:1px solid #e8ecf3;text-align:right;font-size:10px;white-space:nowrap}.pr-table th{position:sticky;top:0;z-index:4;background:#f7f8fc;color:#607089;font-size:8px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;user-select:none}.pr-table th:hover{background:#eeeaff;color:#4937d8}.pr-table th:first-child,.pr-table td:first-child{text-align:left;position:sticky;left:0;z-index:3;background:#fff;box-shadow:5px 0 10px rgba(31,41,55,.05)}.pr-table th:first-child{z-index:6;background:#f7f8fc}.pr-table tr:hover td{background:#faf9ff}.pr-table tr:hover td:first-child{background:#faf9ff}.pr-player-line{display:flex;align-items:center;gap:6px}.pr-player{border:0;background:none;padding:0;color:#3025b8;font:inherit;font-weight:900;cursor:pointer;text-align:left}.pr-player:hover{text-decoration:underline}.pr-icons{display:inline-flex;gap:4px}.pr-icon{display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;border-radius:7px;border:1px solid transparent;font-size:12px;line-height:1;cursor:pointer}.pr-icon.injury{color:var(--red);background:var(--red-soft);border-color:#fecdd3}.pr-icon.news{color:var(--blue);background:var(--blue-soft);border-color:#bfdbfe}.pr-icon:hover{transform:translateY(-1px);filter:saturate(1.2)}.pr-pos{display:inline-block;padding:3px 6px;border-radius:6px;background:#ede9fe;color:#5138d4;font-size:8px;font-weight:900}.pr-team{font-weight:800}.pr-injury-text{color:var(--red);font-weight:900}.pr-healthy{color:#15803d}.pr-na{color:#a5afbe}.pr-loading,.pr-empty{padding:45px!important;text-align:center!important;color:var(--muted);font-size:12px!important}.pr-foot{display:flex;justify-content:space-between;gap:10px;padding:11px 14px;background:#fafbfe;color:var(--muted);font-size:9px;border-top:1px solid var(--line)}
+.pr-modal{position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,.48);display:none;align-items:center;justify-content:center;padding:18px}.pr-modal.open{display:flex}.pr-dialog{width:min(760px,100%);max-height:88vh;overflow:auto;background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(15,23,42,.25)}.pr-dialog-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2}.pr-dialog-head h2{margin:3px 0 2px;font-size:24px}.pr-dialog-head p{margin:0;color:var(--muted);font-size:11px}.pr-close{border:1px solid var(--line);border-radius:9px;background:#fff;width:34px;height:34px;font-size:18px;cursor:pointer}.pr-dialog-body{padding:18px}.pr-alert{border-radius:12px;padding:13px;margin-bottom:14px}.pr-alert.injury{background:var(--red-soft);border:1px solid #fecdd3}.pr-alert.healthy{background:#f0fdf4;border:1px solid #bbf7d0}.pr-alert h3{margin:0 0 5px;font-size:13px}.pr-alert p{margin:3px 0;color:#5f6d82;font-size:11px}.pr-news-list{display:grid;gap:10px}.pr-news-item{border:1px solid var(--line);border-radius:12px;padding:12px}.pr-news-item h3{margin:0 0 5px;font-size:13px}.pr-news-item p{margin:0 0 7px;color:var(--muted);font-size:11px;line-height:1.45}.pr-news-meta{display:flex;gap:8px;align-items:center;color:#75849b;font-size:9px}.pr-news-item a{color:var(--blue);font-weight:900;text-decoration:none}.pr-section-title{font-size:10px;color:var(--muted);font-weight:900;letter-spacing:.07em;text-transform:uppercase;margin:17px 0 8px}.pr-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.pr-stat{background:var(--soft);border-radius:10px;padding:10px}.pr-stat span,.pr-stat strong{display:block}.pr-stat span{font-size:8px;color:var(--muted);font-weight:900;text-transform:uppercase}.pr-stat strong{font-size:16px;margin-top:4px}
+@media(max-width:700px){.pr-head{display:block}.pr-refresh{margin-top:12px;width:max-content}.pr-controls{grid-template-columns:1fr}.pr-stat-grid{grid-template-columns:repeat(2,1fr)}.pr h1{font-size:31px}.pr-legend{align-items:flex-start;flex-direction:column}}
 </style>
+
+<div class="pr">
+  <div class="pr-head">
+    <div>
+      <div class="pr-kicker">GRIDIRON IQ PLAYER CENTER</div>
+      <h1>Player Research</h1>
+      <p class="pr-sub">Current teams, platform ADP, previous-season production and 2026 projections. Injury and news badges appear directly beside each affected player.</p>
+    </div>
+    <div id="pr-refresh" class="pr-refresh {% if not daily_refresh_fresh %}stale{% endif %}">
+      <span class="pr-refresh-dot"></span>
+      <span>{% if daily_refresh and daily_refresh.checked_at %}Daily update active{% else %}Waiting for first daily update{% endif %}</span>
+    </div>
+  </div>
+
+  <section class="pr-card pr-controls">
+    <div class="pr-field"><label for="pr-search">Player or NFL team</label><input id="pr-search" type="search" placeholder="Search Ja'Marr Chase, CIN, WR…"></div>
+    <div class="pr-field"><label for="pr-platform">ADP platform</label><select id="pr-platform"><option value="ESPN" {% if active_platform == 'ESPN' %}selected{% endif %}>ESPN</option><option value="YAHOO" {% if active_platform == 'YAHOO' %}selected{% endif %}>Yahoo</option></select></div>
+  </section>
+
+  <div id="pr-tabs" class="pr-tabs">
+    {% for pos in ['', 'QB', 'RB', 'WR', 'TE', 'K', 'DEF'] %}
+    <button class="pr-tab {% if selected_position == pos %}active{% endif %}" data-position="{{ pos }}">{{ pos or 'All' }} <span class="pr-count" data-count="{{ pos or 'ALL' }}"></span></button>
+    {% endfor %}
+  </div>
+
+  <section class="pr-card">
+    <div class="pr-legend">
+      <div class="pr-legend-items">
+        <span class="pr-legend-item"><span class="pr-mini-icon injury">✚</span> Injury designation</span>
+        <span class="pr-legend-item"><span class="pr-mini-icon news">📰</span> New player update within 72 hours</span>
+      </div>
+      <span id="pr-result-count">Loading players…</span>
+    </div>
+    <div class="pr-table-scroll">
+      <table class="pr-table">
+        <thead><tr>
+          <th data-sort="name">Player <span data-arrow="name"></span></th>
+          <th data-sort="team">Team <span data-arrow="team"></span></th>
+          <th data-sort="position">Pos <span data-arrow="position"></span></th>
+          <th data-sort="injury_status">Status <span data-arrow="injury_status"></span></th>
+          <th data-sort="adp">ADP <span data-arrow="adp"></span></th>
+          <th data-sort="position_adp">Pos ADP <span data-arrow="position_adp"></span></th>
+          <th data-sort="games">2025 G <span data-arrow="games"></span></th>
+          <th data-sort="fantasy_points_ppr">2025 PPR <span data-arrow="fantasy_points_ppr"></span></th>
+          <th data-sort="proj_2026_ppr">2026 Proj <span data-arrow="proj_2026_ppr"></span></th>
+        </tr></thead>
+        <tbody id="pr-body"><tr><td class="pr-loading" colspan="9">Loading Player Research…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pr-foot"><span id="pr-source">Current-player data refreshes daily.</span><span>Click a player or badge for details.</span></div>
+  </section>
+</div>
+
+<div id="pr-modal" class="pr-modal" role="dialog" aria-modal="true" aria-labelledby="pr-modal-title">
+  <div class="pr-dialog">
+    <div class="pr-dialog-head"><div><div class="pr-kicker" id="pr-modal-kicker">PLAYER DETAILS</div><h2 id="pr-modal-title">Player</h2><p id="pr-modal-subtitle"></p></div><button id="pr-close" class="pr-close" aria-label="Close">×</button></div>
+    <div id="pr-modal-body" class="pr-dialog-body"></div>
+  </div>
+</div>
 
 <script>
 (() => {
-  "use strict";
-
-  const page = document.querySelector(".pr-page");
-  if (!page) return;
-
-  const state = {
-    position: document.querySelector(".pr-tabs button.active")?.dataset.position || "",
-    platform: page.dataset.platform || "ESPN",
-    controller: null
-  };
-
   const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? "").replace(/[&<>'"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[ch]));
+  const number = value => value !== null && value !== "" && value !== undefined && !Number.isNaN(Number(value));
+  const fmt = (value, digits=1) => number(value) ? Number(value).toFixed(digits) : "—";
+  const dateText = value => { if(!value) return ""; const date=new Date(value); return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); };
+  const selectedFromServer = {{ (selected_position or '')|tojson }};
+  let rows=[], position=selectedFromServer || "", sortKey="adp", sortDirection="asc";
+  const rowMap = new Map();
 
-  const escapeHtml = value =>
-    String(value ?? "").replace(/[&<>"']/g, character => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;"
-    })[character]);
-
-  const formatNumber = (value, decimals = 0) => {
-    const number = Number(value);
-    if (!Number.isFinite(number) || number === 0) {
-      return '<span class="pr-muted">—</span>';
+  async function fetchAll(){
+    $("pr-body").innerHTML='<tr><td class="pr-loading" colspan="9">Loading current players, injuries and news…</td></tr>';
+    try{
+      const platform=$("pr-platform").value;
+      const first=await fetch(`/api/player-research/table?platform=${encodeURIComponent(platform)}&page=1&page_size=250&sort=adp&direction=asc`);
+      const firstData=await first.json().catch(()=>({}));
+      if(!first.ok||!firstData.ok) throw new Error(firstData.error||`Request failed (${first.status})`);
+      let pages=[firstData];
+      if(firstData.total_pages>1){
+        const requests=[];
+        for(let page=2;page<=firstData.total_pages;page++) requests.push(fetch(`/api/player-research/table?platform=${encodeURIComponent(platform)}&page=${page}&page_size=250&sort=adp&direction=asc`).then(r=>r.json()));
+        pages=pages.concat(await Promise.all(requests));
+      }
+      rows=pages.flatMap(page=>page.players||[]);
+      rowMap.clear();rows.forEach(row=>rowMap.set(row.player_key,row));
+      const counts=firstData.position_counts||{};
+      document.querySelectorAll("[data-count]").forEach(node=>{const key=node.dataset.count;node.textContent=`(${key==="ALL"?rows.length:(counts[key]||0)})`;});
+      const updated=firstData.updated_at||{};
+      if(updated.current_players){$("pr-refresh").title=`Last current-player update: ${dateText(updated.current_players)}`;}
+      $("pr-source").textContent=`Teams and injuries: ${firstData.sources?.current_players||"daily player directory"} · News: ${firstData.sources?.recent_news||"daily news index"}`;
+      render();
+      const requested=new URLSearchParams(location.search).get("player");if(requested) openPlayerByName(requested,"profile");
+    }catch(error){
+      $("pr-body").innerHTML=`<tr><td class="pr-empty" colspan="9">Player Research could not load: ${esc(error.message)}</td></tr>`;
     }
+  }
 
-    return number.toLocaleString(undefined, {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals
+  function filtered(){
+    const query=$("pr-search").value.trim().toLowerCase();
+    return rows.filter(row=>(!position||row.position===position)&&(!query||`${row.name} ${row.team} ${row.position}`.toLowerCase().includes(query))).sort((a,b)=>{
+      let av=a[sortKey],bv=b[sortKey],result;
+      if(number(av)&&number(bv)) result=Number(av)-Number(bv);
+      else result=String(av||"").localeCompare(String(bv||""));
+      return sortDirection==="asc"?result:-result;
     });
-  };
-
-  function showAlert(message) {
-    const alert = $("pr-alert");
-    alert.hidden = !message;
-    alert.textContent = message || "";
   }
 
-  function renderRows(players) {
-    const body = $("pr-body");
-
-    if (!players.length) {
-      body.innerHTML =
-        '<tr><td colspan="15" class="pr-loading">No matching players were found.</td></tr>';
-      return;
-    }
-
-    body.innerHTML = players.map(player => `
-      <tr data-player-name="${escapeHtml(player.name)}">
-        <td>${Number(player.adp) < 999
-          ? formatNumber(player.adp, 1)
-          : '<span class="pr-muted">NR</span>'}</td>
-        <td>${escapeHtml(player.position_adp || "—")}</td>
-        <td><span class="pr-player-name">${escapeHtml(player.name)}</span></td>
-        <td>${escapeHtml(player.team || "FA")}</td>
-        <td><span class="pr-position">${escapeHtml(player.position)}</span></td>
-        <td>${formatNumber(player.games)}</td>
-        <td>${formatNumber(player.fantasy_points_ppr, 1)}</td>
-        <td>${formatNumber(player.passing_yards)}</td>
-        <td>${formatNumber(player.passing_tds)}</td>
-        <td>${formatNumber(player.rushing_yards)}</td>
-        <td>${formatNumber(player.rushing_tds)}</td>
-        <td>${formatNumber(player.receptions)}</td>
-        <td>${formatNumber(player.receiving_yards)}</td>
-        <td>${formatNumber(player.receiving_tds)}</td>
-        <td><strong>${formatNumber(player.proj_2026_ppr, 1)}</strong></td>
-      </tr>
-    `).join("");
+  function render(){
+    const visible=filtered();
+    $("pr-result-count").textContent=`${visible.length.toLocaleString()} players shown`;
+    document.querySelectorAll("[data-arrow]").forEach(node=>node.textContent=node.dataset.arrow===sortKey?(sortDirection==="asc"?"▲":"▼"):"");
+    if(!visible.length){$("pr-body").innerHTML='<tr><td class="pr-empty" colspan="9">No players match the selected filters.</td></tr>';return;}
+    $("pr-body").innerHTML=visible.map(row=>{
+      const injuryTitle=[row.injury_status,row.injury_body_part,row.practice_participation].filter(Boolean).join(" · ");
+      const newsTitle=row.latest_news_title||`${row.news_count||1} new player update`;
+      const icons=`<span class="pr-icons">${row.has_injury?`<button class="pr-icon injury" data-action="injury" data-key="${esc(row.player_key)}" title="${esc(injuryTitle)}" aria-label="Injury update for ${esc(row.name)}">✚</button>`:""}${row.has_news?`<button class="pr-icon news" data-action="news" data-key="${esc(row.player_key)}" title="${esc(newsTitle)}" aria-label="New player news for ${esc(row.name)}">📰</button>`:""}</span>`;
+      const status=row.has_injury?`<span class="pr-injury-text">${esc(row.injury_status)}</span>`:'<span class="pr-healthy">Active</span>';
+      return `<tr><td><div class="pr-player-line"><button class="pr-player" data-action="profile" data-key="${esc(row.player_key)}">${esc(row.name)}</button>${icons}</div></td><td class="pr-team">${esc(row.team||"FA")}</td><td><span class="pr-pos">${esc(row.position)}</span></td><td>${status}</td><td>${Number(row.adp)<999?fmt(row.adp):"—"}</td><td>${esc(row.position_adp||"—")}</td><td>${number(row.games)?Math.round(Number(row.games)):"—"}</td><td>${fmt(row.fantasy_points_ppr)}</td><td>${fmt(row.proj_2026_ppr)}</td></tr>`;
+    }).join("");
   }
 
-  async function loadPlayers() {
-    state.controller?.abort();
-    state.controller = new AbortController();
-
-    $("pr-body").innerHTML =
-      '<tr><td colspan="15" class="pr-loading">Loading player data…</td></tr>';
-    showAlert("");
-
-    const parameters = new URLSearchParams({
-      position: state.position,
-      platform: state.platform,
-      q: $("pr-search").value.trim(),
-      sort: $("pr-sort").value,
-      direction: $("pr-direction").value,
-      page: String(state.page),
-      page_size: String(state.pageSize)
-    });
-
-    try {
-      const response = await fetch(`/api/player-research-db/table?${parameters}`, {
-        signal: state.controller.signal,
-        headers: { "Accept": "application/json" }
-      });
-
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        throw new Error(`Server returned ${response.status} instead of JSON.`);
-      }
-
-      const data = await response.json();
-
-      if (!response.ok || !data.ok) {
-        throw new Error(
-          data.error || data.message || "Player data could not be loaded."
-        );
-      }
-
-      renderRows(data.players || []);
-
-      $("pr-count").textContent = data.count ?? 0;
-      state.page = data.page || 1;
-      $("pr-page-label").textContent =
-        `Page ${data.page || 1} of ${data.total_pages || 1} · ` +
-        `${data.returned_count || 0} shown of ${data.count || 0}`;
-      $("pr-prev-page").disabled = (data.page || 1) <= 1;
-      $("pr-next-page").disabled =
-        (data.page || 1) >= (data.total_pages || 1);
-
-      $("pr-platform").textContent = data.platform || state.platform;
-      $("pr-stats").textContent =
-        data.updated_at?.stats_2025 ? "Loaded" : "Not loaded";
-      $("pr-adp").textContent =
-        data.updated_at?.adp_2026 ? "Loaded" : "Not loaded";
-
-      document.querySelectorAll("[data-count]").forEach(node => {
-        if (data.selected_position === "ALL") {
-          node.textContent = node.dataset.count === "ALL"
-            ? data.count
-            : (data.position_counts?.[node.dataset.count] || 0);
-        } else if (node.dataset.count === data.selected_position) {
-          node.textContent = data.count;
-        }
-      });
-
-      $("pr-source").textContent =
-        `2025 stats: ${data.sources?.stats_2025 || "not loaded"} · ` +
-        `2026 projections: ${data.sources?.projections_2026 || "not loaded"} · ` +
-        `ADP: ${data.sources?.adp_2026 || "not loaded"}`;
-
-      if (data.warnings?.length && !data.updated_at?.adp_2026) {
-        showAlert(data.warnings.join(" "));
-      }
-    } catch (error) {
-      if (error.name === "AbortError") return;
-      renderRows([]);
-      showAlert(error.message);
-    }
+  function newsHtml(news){
+    if(!news?.length) return '<p class="pr-na">No recent player update was found.</p>';
+    return `<div class="pr-news-list">${news.map(item=>`<article class="pr-news-item"><h3>${esc(item.title||"Player update")}</h3>${item.summary?`<p>${esc(item.summary)}</p>`:""}<div class="pr-news-meta"><span>${esc(item.source||"")}</span><span>${esc(dateText(item.published))}</span>${item.url?`<a href="${esc(item.url)}" target="_blank" rel="noopener">Read update →</a>`:""}</div></article>`).join("")}</div>`;
   }
 
-  let searchTimer;
-
-  $("pr-search").addEventListener("input", () => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => { state.page = 1; loadPlayers(); }, 250);
-  });
-
-  async function refresh2025Stats() {
-    const button = $("pr-refresh-stats");
-    const originalText = button.textContent;
-    button.disabled = true;
-    button.textContent = "Refreshing…";
-    showAlert("");
-
-    try {
-      const response = await fetch("/api/player-research-db/import-season/2025", {
-        method: "POST",
-        headers: {
-          "Accept": "application/json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ force: true })
-      });
-
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const body = await response.text();
-        throw new Error(
-          `The server returned ${response.status} instead of JSON: ${body.slice(0, 140)}`
-        );
-      }
-
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(
-          data.error || data.message || "Unable to refresh 2025 statistics."
-        );
-      }
-
-      $("pr-stats").textContent = "Loaded";
-      showAlert(
-        `2025 database import completed for ${(data.count || data.player_count) || 0} players.`
-      );
-      await loadPlayers();
-    } catch (error) {
-      showAlert(`2025 database import failed: ${error.message}`);
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
+  function openModal(row, focus, profile){
+    const injury=profile?.injury||{status:row.injury_status,body_part:row.injury_body_part,practice:row.practice_participation,description:row.practice_description};
+    const news=profile?.news||(row.has_news?[{title:row.latest_news_title,summary:row.latest_news_summary,published:row.latest_news_published,source:row.latest_news_source,url:row.latest_news_url}]:[]);
+    $("pr-modal-title").textContent=row.name;$("pr-modal-subtitle").textContent=`${row.position} · ${row.team||"FA"}`;
+    $("pr-modal-kicker").textContent=focus==="injury"?"INJURY UPDATE":focus==="news"?"NEW PLAYER UPDATE":"PLAYER DETAILS";
+    const injuryBox=row.has_injury?`<section class="pr-alert injury"><h3>✚ ${esc(injury.status||row.injury_status)}${injury.body_part?` — ${esc(injury.body_part)}`:""}</h3>${injury.practice?`<p>Practice: ${esc(injury.practice)}</p>`:""}${injury.description?`<p>${esc(injury.description)}</p>`:""}</section>`:`<section class="pr-alert healthy"><h3>No active injury designation</h3></section>`;
+    const stats=`<div class="pr-stat-grid"><div class="pr-stat"><span>ADP</span><strong>${Number(row.adp)<999?fmt(row.adp):"—"}</strong></div><div class="pr-stat"><span>2025 PPR</span><strong>${fmt(row.fantasy_points_ppr)}</strong></div><div class="pr-stat"><span>2026 Projection</span><strong>${fmt(row.proj_2026_ppr)}</strong></div><div class="pr-stat"><span>Recent Updates</span><strong>${row.news_count||news.length||0}</strong></div></div>`;
+    $("pr-modal-body").innerHTML=`${injuryBox}${focus!=="injury"?stats:""}<div class="pr-section-title">Recent player news</div>${newsHtml(news)}`;
+    $("pr-modal").classList.add("open");document.body.style.overflow="hidden";
   }
 
-  async function refresh2026Adp() {
-    const button = $("pr-refresh-adp");
-    const originalText = button.textContent;
-    button.disabled = true;
-    button.textContent = "Refreshing…";
-    showAlert("");
-
-    try {
-      const response = await fetch("/api/player-research-db/import-adp", {
-        method: "POST",
-        headers: {
-          "Accept": "application/json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          platform: state.platform,
-          force: true
-        })
-      });
-
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        const body = await response.text();
-        throw new Error(
-          `The server returned ${response.status} instead of JSON: ${body.slice(0, 160)}`
-        );
-      }
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error
-          || data.message
-          || "The 2026 ADP refresh request failed."
-        );
-      }
-
-      if (!data.ok || !(data.count || data.player_count)) {
-        throw new Error(
-          data.warning
-          || data.message
-          || "No usable 2026 ADP players were returned."
-        );
-      }
-
-      const usedSavedData = String(data.status || "").toLowerCase() === "cached";
-      $("pr-adp").textContent = usedSavedData ? "Saved data" : "Loaded";
-
-      const source = data.source || state.platform;
-
-      if (usedSavedData) {
-        showAlert(
-          `Using ${data.count || data.player_count} saved ADP players from ${source}. Reconnect ESPN under League Sync, then refresh ADP for a live update.`
-        );
-      } else {
-        showAlert(
-          `Imported ${data.count || data.player_count || 0} ${state.platform} ADP rows into SQLite from ${source}.`
-        );
-      }
-
-      await loadPlayers();
-    } catch (error) {
-      showAlert(`2026 ADP update failed: ${error.message}`);
-    } finally {
-      button.disabled = false;
-      button.textContent = originalText;
-    }
+  async function openPlayer(row,focus){
+    openModal(row,focus,null);
+    try{
+      const response=await fetch(`/api/player-research/profile-by-name/${encodeURIComponent(row.name)}?platform=${encodeURIComponent($("pr-platform").value)}`);
+      const data=await response.json().catch(()=>({}));
+      if(response.ok&&data.ok) openModal(row,focus,data.profile);
+    }catch(_error){}
   }
+  function openPlayerByName(name,focus){const target=rows.find(row=>row.name.toLowerCase()===String(name).toLowerCase());if(target)openPlayer(target,focus);}
+  function closeModal(){$("pr-modal").classList.remove("open");document.body.style.overflow="";}
 
-  $("pr-sort").addEventListener("change", () => { state.page = 1; loadPlayers(); });
-  $("pr-direction").addEventListener("change", () => { state.page = 1; loadPlayers(); });
-  $("pr-prev-page").addEventListener("click", () => {
-    if (state.page > 1) {
-      state.page -= 1;
-      loadPlayers();
-    }
-  });
-
-  $("pr-next-page").addEventListener("click", () => {
-    state.page += 1;
-    loadPlayers();
-  });
-
-  $("pr-reload").addEventListener("click", loadPlayers);
-  $("pr-refresh-stats").addEventListener("click", refresh2025Stats);
-  $("pr-refresh-adp").addEventListener("click", refresh2026Adp);
-
-  document.querySelectorAll(".pr-tabs button").forEach(button => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll(".pr-tabs button").forEach(tab => {
-        tab.classList.toggle("active", tab === button);
-      });
-
-      state.position = button.dataset.position || "";
-      loadPlayers();
-    });
-  });
-
-
-  let activePlayerName = "";
-  const careerLoadsAttempted = new Set();
-
-  function closePlayerDrawer() {
-    $("pr-player-overlay").hidden = true;
-    $("pr-player-drawer").hidden = true;
-    document.body.style.overflow = "";
-    activePlayerName = "";
-  }
-
-  function readable(value, decimals = 0) {
-    const n = Number(value);
-    if (!Number.isFinite(n) || n === 0) return "—";
-    return n.toLocaleString(undefined, {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
-  }
-
-  async function openPlayerDrawer(playerName, skipAutomaticCareerLoad = false) {
-    activePlayerName = playerName;
-    $("pr-player-overlay").hidden = false;
-    $("pr-player-drawer").hidden = false;
-    document.body.style.overflow = "hidden";
-    $("pr-detail-loading").hidden = false;
-    $("pr-detail-loading").textContent = "Loading player profile…";
-    $("pr-detail-content").hidden = true;
-
-    try {
-      const response = await fetch(`/api/player-research-db/profile/${encodeURIComponent(playerName)}?platform=${encodeURIComponent(state.platform)}`);
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data.error || "Unable to load player profile.");
-
-      const profile = data.profile, bio = profile.bio || {}, stats = profile.previous_year || {}, projection = profile.projection || {};
-      $("pr-detail-name").textContent = bio.name || playerName;
-      $("pr-detail-meta").textContent = `${bio.position || "—"} · ${bio.team || "FA"}${bio.age ? ` · Age ${bio.age}` : ""}`;
-      $("pr-detail-adp").textContent = Number(bio.adp) < 999 ? readable(bio.adp, 1) : "NR";
-      $("pr-detail-pos-adp").textContent = bio.position_adp || "—";
-      $("pr-detail-2025-ppr").textContent = readable(stats.fantasy_points_ppr, 1);
-      $("pr-detail-projection").textContent = readable(projection.fantasy_points_ppr, 1);
-
-      const fields = [
-        ["Games", stats.games],["PPR points", stats.fantasy_points_ppr],["Pass yards", stats.passing_yards],
-        ["Pass TD", stats.passing_tds],["Interceptions", stats.interceptions],["Carries", stats.carries],
-        ["Rush yards", stats.rushing_yards],["Rush TD", stats.rushing_tds],["Targets", stats.targets],
-        ["Receptions", stats.receptions],["Rec yards", stats.receiving_yards],["Rec TD", stats.receiving_tds]
-      ];
-      $("pr-detail-stats").innerHTML = fields.map(([label,value]) => `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value,label==="PPR points"?1:0)}</strong></div>`).join("");
-
-      const projectedFields = [
-        ["Games", projection.games],
-        ["PPR points", projection.fantasy_points_ppr],
-        ["Pass yards", projection.passing_yards],
-        ["Pass TD", projection.passing_tds],
-        ["Interceptions", projection.interceptions],
-        ["Carries", projection.carries],
-        ["Rush yards", projection.rushing_yards],
-        ["Rush TD", projection.rushing_tds],
-        ["Targets", projection.targets],
-        ["Receptions", projection.receptions],
-        ["Rec yards", projection.receiving_yards],
-        ["Rec TD", projection.receiving_tds]
-      ];
-      $("pr-detail-projected-stats").innerHTML = projectedFields.map(
-        ([label, value]) => `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value, label === "PPR points" ? 1 : 0)}</strong></div>`
-      ).join("");
-
-      const history = profile.history || [];
-      const career = profile.career || {};
-      const careerTotals = career.totals || {};
-      const careerPerGame = career.per_game || {};
-      const careerPerSeason = career.per_season || {};
-
-      $("pr-career-range").textContent = career.seasons_played
-        ? `${career.first_season}–${career.last_season} · ${career.seasons_played} seasons`
-        : "No completed seasons stored";
-
-      $("pr-career-summary").innerHTML = [
-        ["Seasons", career.seasons_played || 0],
-        ["Career games", careerTotals.games || 0],
-        ["Current team", bio.team || "FA"],
-        ["Career PPR", careerTotals.fantasy_points_ppr || 0]
-      ].map(
-        ([label, value]) =>
-          `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value, label === "Career PPR" ? 1 : 0)}</strong></div>`
-      ).join("");
-
-      const careerViews = {
-        totals: careerTotals,
-        per_game: careerPerGame,
-        per_season: careerPerSeason
-      };
-
-      function renderCareerSummary(viewName) {
-        const values = careerViews[viewName] || careerTotals;
-        const decimals = viewName === "totals" ? 0 : 1;
-        const careerFields = [
-          ["Games", values.games],
-          ["Standard points", values.fantasy_points],
-          ["PPR points", values.fantasy_points_ppr],
-          ["Completions", values.completions],
-          ["Pass attempts", values.attempts],
-          ["Pass yards", values.passing_yards],
-          ["Pass TD", values.passing_tds],
-          ["Interceptions", values.interceptions],
-          ["Carries", values.carries],
-          ["Rush yards", values.rushing_yards],
-          ["Rush TD", values.rushing_tds],
-          ["Targets", values.targets],
-          ["Receptions", values.receptions],
-          ["Rec yards", values.receiving_yards],
-          ["Rec TD", values.receiving_tds]
-        ];
-
-        $("pr-career-totals").innerHTML = careerFields.map(
-          ([label, value]) =>
-            `<div class="pr-detail-stat"><span>${escapeHtml(label)}</span><strong>${readable(value, decimals)}</strong></div>`
-        ).join("");
-      }
-
-      renderCareerSummary("totals");
-
-      document.querySelectorAll(".pr-career-tab").forEach((button) => {
-        button.onclick = () => {
-          document.querySelectorAll(".pr-career-tab").forEach(
-            (candidate) => candidate.classList.remove("is-active")
-          );
-          button.classList.add("is-active");
-          renderCareerSummary(button.dataset.careerView);
-        };
-      });
-
-      const columns = [
-        ["Season", "season", 0],
-        ["Team", "season_team", 0],
-        ["G", "games", 0],
-        ["Cmp", "completions", 0],
-        ["Att", "attempts", 0],
-        ["Pass Yds", "passing_yards", 0],
-        ["Pass TD", "passing_tds", 0],
-        ["INT", "interceptions", 0],
-        ["Car", "carries", 0],
-        ["Rush Yds", "rushing_yards", 0],
-        ["Rush TD", "rushing_tds", 0],
-        ["Tgt", "targets", 0],
-        ["Rec", "receptions", 0],
-        ["Rec Yds", "receiving_yards", 0],
-        ["Rec TD", "receiving_tds", 0],
-        ["STD Pts", "fantasy_points", 1],
-        ["PPR Pts", "fantasy_points_ppr", 1]
-      ];
-
-      if (history.length) {
-        const header = columns.map(([label]) => `<th>${escapeHtml(label)}</th>`).join("");
-        const rowsHtml = history.slice().reverse().map((season) => {
-          const cells = columns.map(([label, key, decimals]) => {
-            if (key === "season_team") {
-              return `<td>${escapeHtml(season.season_team || season.team || "FA")}</td>`;
-            }
-            if (key === "season") {
-              return `<td>${escapeHtml(season.season)}</td>`;
-            }
-            return `<td>${readable(season[key], decimals)}</td>`;
-          }).join("");
-          return `<tr>${cells}</tr>`;
-        }).join("");
-
-        const totalCells = columns.map(([label, key, decimals], index) => {
-          if (index === 0) return "<td>Career</td>";
-          if (key === "season_team") return "<td>All teams</td>";
-          return `<td>${readable(careerTotals[key], decimals)}</td>`;
-        }).join("");
-
-        $("pr-detail-history").innerHTML =
-          `<table class="pr-history-table">` +
-          `<thead><tr>${header}</tr></thead>` +
-          `<tbody>${rowsHtml}<tr class="pr-total-row">${totalCells}</tr></tbody>` +
-          `</table>`;
-      } else {
-        $("pr-detail-history").innerHTML =
-          '<p class="pr-muted">Career seasons have not been imported into SQLite.</p>';
-      }
-
-      $("pr-detail-injury").textContent =
-        bio.injury_status
-        || profile.injury?.status
-        || "No current injury designation reported by the current player directory.";
-
-      $("pr-detail-news").innerHTML =
-        '<p class="pr-muted">Select Load news for current updates.</p>';
-
-      $("pr-detail-loading").hidden = true;
-      $("pr-detail-content").hidden = false;
-
-    } catch (error) {
-      $("pr-detail-loading").textContent = error.message;
-    }
-  }
-
-  async function loadCareerHistory(yearsExperience = null, automatic = false) {
-    const button = $("pr-load-career");
-    const progress = $("pr-career-progress");
-    button.disabled = true;
-
-    const experience = Number(yearsExperience);
-    const firstSeason = Number.isFinite(experience) && experience > 0
-      ? Math.max(2005, 2025 - Math.ceil(experience) + 1)
-      : 2015;
-
-    const seasons = [];
-    for (let season = firstSeason; season <= 2024; season += 1) {
-      seasons.push(season);
-    }
-
-    try {
-      for (let index = 0; index < seasons.length; index += 1) {
-        const season = seasons[index];
-        button.textContent = `${index + 1}/${seasons.length}`;
-        progress.textContent = `Loading ${season} season…`;
-
-        const response = await fetch(
-          `/api/data/career-history/season/${season}`,
-          {
-            method: "POST",
-            headers: {
-              "Accept": "application/json",
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({force: false})
-          }
-        );
-
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          throw new Error(data.error || `Season ${season} failed.`);
-        }
-      }
-
-      progress.textContent = "Career history loaded. Refreshing profile…";
-      const playerName = activePlayerName;
-      await openPlayerDrawer(playerName, true);
-    } catch (error) {
-      progress.textContent = `Career-history load stopped: ${error.message}`;
-    } finally {
-      button.disabled = false;
-      button.textContent = "Reload career";
-    }
-  }
-
-  async function loadPlayerNews() {
-    if (!activePlayerName) return;
-    const button = $("pr-load-news");
-    button.disabled = true;
-    button.textContent = "Loading…";
-    try {
-      const response = await fetch(`/api/player-research/news/${encodeURIComponent(activePlayerName)}`);
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data.error || "Unable to load news.");
-      const news = data.news || [];
-      $("pr-detail-news").innerHTML = news.length ? news.map(item => `<article class="pr-news-item"><strong>${escapeHtml(item.title || "Player update")}</strong><p>${escapeHtml(item.summary || item.analysis || "")}</p><span>${escapeHtml(item.source || "")} ${escapeHtml(item.published || "")}</span></article>`).join("") : `<p class="pr-muted">${escapeHtml(data.warnings?.slice(-1)[0] || "No current news was returned.")}</p>`;
-    } catch (error) {
-      $("pr-detail-news").innerHTML = `<p class="pr-muted">${escapeHtml(error.message)}</p>`;
-    } finally {
-      button.disabled = false;
-      button.textContent = "Load news";
-    }
-  }
-
-  $("pr-body").addEventListener("click", event => {
-    const row = event.target.closest("tr[data-player-name]");
-    if (row) openPlayerDrawer(row.dataset.playerName);
-  });
-  $("pr-detail-close").addEventListener("click", closePlayerDrawer);
-  $("pr-player-overlay").addEventListener("click", closePlayerDrawer);
-  $("pr-load-news").addEventListener("click", loadPlayerNews);
-
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape") closePlayerDrawer();
-  });
-
-  $("pr-league").addEventListener("change", event => {
-    const url = new URL(window.location.href);
-    url.searchParams.set("league", event.target.value);
-    window.location.href = url.toString();
-  });
-
-  loadPlayers();
+  $("pr-body").addEventListener("click",event=>{const button=event.target.closest("[data-action]");if(!button)return;const row=rowMap.get(button.dataset.key);if(row)openPlayer(row,button.dataset.action);});
+  $("pr-search").addEventListener("input",render);$("pr-platform").addEventListener("change",fetchAll);
+  $("pr-tabs").addEventListener("click",event=>{const button=event.target.closest("[data-position]");if(!button)return;position=button.dataset.position;document.querySelectorAll(".pr-tab").forEach(item=>item.classList.toggle("active",item===button));render();});
+  document.querySelectorAll(".pr-table th[data-sort]").forEach(th=>th.addEventListener("click",()=>{const key=th.dataset.sort;if(sortKey===key)sortDirection=sortDirection==="asc"?"desc":"asc";else{sortKey=key;sortDirection=["name","team","position","injury_status","position_adp"].includes(key)?"asc":"desc";}render();}));
+  $("pr-close").addEventListener("click",closeModal);$("pr-modal").addEventListener("click",event=>{if(event.target===$("pr-modal"))closeModal();});document.addEventListener("keydown",event=>{if(event.key==="Escape")closeModal();});
+  fetchAll();
 })();
 </script>
 {% endblock %}
