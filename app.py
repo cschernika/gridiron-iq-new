@@ -2434,7 +2434,36 @@ import re
 import time
 
 PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
+BUNDLED_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
+PLAYER_DAILY_STATUS_FILE = DATA_DIR / "player_research_daily_status.json"
+BUNDLED_PLAYER_DAILY_STATUS_FILE = BASE_DIR / "data" / "player_research_daily_status.json"
 PLAYER_CACHE_TTL = 24 * 60 * 60
+
+
+def _player_daily_refresh_status():
+    for path in (PLAYER_DAILY_STATUS_FILE, BUNDLED_PLAYER_DAILY_STATUS_FILE):
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+    return {}
+
+
+def _player_daily_refresh_is_fresh():
+    value = str(_player_daily_refresh_status().get("checked_at") or "")
+    if not value:
+        return False
+    try:
+        checked = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - checked).total_seconds() < 48 * 60 * 60
+    except (TypeError, ValueError):
+        return False
 
 def _pr_norm(value):
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
@@ -2459,12 +2488,16 @@ def _pr_players():
     The local 2026 master file is used only as a fallback, not as the full
     player universe.
     """
+    cache_path = PLAYER_CACHE_FILE if PLAYER_CACHE_FILE.exists() else BUNDLED_PLAYER_CACHE_FILE
     try:
         if (
-            PLAYER_CACHE_FILE.exists()
-            and (time.time() - PLAYER_CACHE_FILE.stat().st_mtime) < PLAYER_CACHE_TTL
+            cache_path.exists()
+            and (
+                (time.time() - cache_path.stat().st_mtime) < PLAYER_CACHE_TTL
+                or _player_daily_refresh_is_fresh()
+            )
         ):
-            cached = json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
             if isinstance(cached, dict) and cached:
                 return cached
     except Exception:
@@ -2491,8 +2524,8 @@ def _pr_players():
         app.logger.warning("Current player directory refresh failed: %s", exc)
 
     try:
-        if PLAYER_CACHE_FILE.exists():
-            cached = json.loads(PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+        if cache_path.exists():
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
             if isinstance(cached, dict) and cached:
                 return cached
     except Exception:
@@ -3125,15 +3158,18 @@ def career_history_status_api():
 # 2026 MASTER PLAYER DATABASE + REFRESH ENGINE
 # ============================================================
 MASTER_PLAYERS_2026_FILE = DATA_DIR / "nfl_players_2026.json"
+BUNDLED_MASTER_PLAYERS_2026_FILE = BASE_DIR / "data" / "nfl_players_2026.json"
 
 def _master_players_2026():
-    try:
-        if MASTER_PLAYERS_2026_FILE.exists():
-            payload = json.loads(MASTER_PLAYERS_2026_FILE.read_text(encoding="utf-8"))
+    for path in (MASTER_PLAYERS_2026_FILE, BUNDLED_MASTER_PLAYERS_2026_FILE):
+        try:
+            if not path.exists():
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(payload, dict):
                 return payload
-    except Exception:
-        pass
+        except Exception:
+            continue
     return {
         "season": 2026,
         "updated_at": "",
@@ -3920,6 +3956,7 @@ def _player_research_data_status(platform="ESPN"):
     master = _master_players_2026()
     stats = _stats_2025_snapshot()
     adp = _platform_2026_adp_data(platform)
+    daily = _player_daily_refresh_status()
 
     projection_count = sum(
         1 for p in master.get("players", {}).values()
@@ -3944,6 +3981,11 @@ def _player_research_data_status(platform="ESPN"):
         "data_directory": str(DATA_DIR),
         "persistent_data_configured": bool(os.getenv("GRIDIRON_DATA_DIR", "").strip()),
         "fantasypros_base": "https://api.fantasypros.com/public/v2/json",
+        "daily_player_refresh_enabled": True,
+        "daily_player_refresh_checked_at": daily.get("checked_at", ""),
+        "daily_player_refresh_source": daily.get("source", ""),
+        "daily_player_refresh_count": daily.get("player_count", 0),
+        "daily_player_refresh_fresh": _player_daily_refresh_is_fresh(),
     }
 
 
@@ -3981,6 +4023,7 @@ def player_research():
         if "YAHOO" in str(context.get("platform", "")).upper()
         else "ESPN"
     )
+    daily_refresh = _player_daily_refresh_status()
 
     return page(
         "player_research.html",
@@ -3989,6 +4032,8 @@ def player_research():
         active_league_key=league_key,
         active_platform=platform,
         active_scoring=context.get("scoring", ""),
+        daily_refresh=daily_refresh,
+        daily_refresh_fresh=_player_daily_refresh_is_fresh(),
     )
 
 
@@ -4072,6 +4117,8 @@ def player_research_table_api():
 
     stats = _stats_2025_snapshot()
     adp = _platform_2026_adp_data(platform)
+    master = _master_players_2026()
+    daily = _player_daily_refresh_status()
 
     return jsonify(
         ok=True,
@@ -4088,10 +4135,12 @@ def player_research_table_api():
             "stats_2025": stats.get("source", ""),
             "projections_2026": "2026 source projections or Gridiron IQ fallback",
             "adp_2026": adp.get("source", ""),
+            "current_players": daily.get("source") or "Sleeper current player directory",
         },
         updated_at={
             "stats_2025": stats.get("updated_at", ""),
             "adp_2026": adp.get("updated_at", ""),
+            "current_players": daily.get("checked_at") or master.get("updated_at", ""),
         },
         warnings=[],
     )
@@ -4102,6 +4151,7 @@ def diagnostics_player_research():
     directory = _pr_players()
     stats = _stats_2025_snapshot()
     adp = _platform_2026_adp_data(platform)
+    daily = _player_daily_refresh_status()
     return jsonify(
         ok=bool(directory),
         fast_mode=True,
@@ -4111,6 +4161,9 @@ def diagnostics_player_research():
         platform=platform,
         adp_source=adp.get("source"),
         note="Player Research no longer parses historical CSV files during page load.",
+        daily_refresh_enabled=True,
+        daily_refresh_checked_at=daily.get("checked_at", ""),
+        daily_refresh_fresh=_player_daily_refresh_is_fresh(),
     )
 
 
@@ -6518,7 +6571,9 @@ def _pr_data_signature(platform):
         STATS_2025_SNAPSHOT_FILE,
         _local_platform_adp_path(platform),
         MASTER_PLAYERS_2026_FILE,
+        BUNDLED_MASTER_PLAYERS_2026_FILE,
         PLAYER_CACHE_FILE,
+        BUNDLED_PLAYER_CACHE_FILE,
     ]
     signature = []
     for path in paths:
