@@ -2437,6 +2437,8 @@ PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
 BUNDLED_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 PLAYER_DAILY_STATUS_FILE = DATA_DIR / "player_research_daily_status.json"
 BUNDLED_PLAYER_DAILY_STATUS_FILE = BASE_DIR / "data" / "player_research_daily_status.json"
+PLAYER_NEWS_INDEX_FILE = DATA_DIR / "player_news_index.json"
+BUNDLED_PLAYER_NEWS_INDEX_FILE = BASE_DIR / "data" / "player_news_index.json"
 PLAYER_CACHE_TTL = 24 * 60 * 60
 
 
@@ -2464,6 +2466,31 @@ def _player_daily_refresh_is_fresh():
         return (datetime.now(timezone.utc) - checked).total_seconds() < 48 * 60 * 60
     except (TypeError, ValueError):
         return False
+
+
+def _player_news_index():
+    for path in (PLAYER_NEWS_INDEX_FILE, BUNDLED_PLAYER_NEWS_INDEX_FILE):
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and isinstance(payload.get("players"), dict):
+                return payload
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+    return {"players": {}}
+
+
+def _indexed_player_news(player_name):
+    payload = _player_news_index()
+    row = payload.get("players", {}).get(_pr_norm(player_name), {})
+    news = row.get("news", []) if isinstance(row, dict) else []
+    return [item for item in news if isinstance(item, dict)]
+
+
+def _has_active_injury(value):
+    status = str(value or "").strip()
+    return bool(status and _pr_norm(status) not in {"active", "healthy", "none", "na", "full"})
 
 def _pr_norm(value):
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
@@ -3820,6 +3847,17 @@ def _normalize_player_news(row):
     }
 
 def _player_research_news(player_name):
+    indexed = _indexed_player_news(player_name)
+    if indexed:
+        index = _player_news_index()
+        return {
+            "player": player_name,
+            "updated_at": index.get("updated_at", ""),
+            "news": indexed[:10],
+            "warnings": [],
+            "source": index.get("source") or "Daily player news index",
+        }
+
     cache = _news_cache_path(player_name)
     try:
         if cache.exists() and (time.time() - cache.stat().st_mtime) < PLAYER_NEWS_CACHE_TTL:
@@ -3957,6 +3995,7 @@ def _player_research_data_status(platform="ESPN"):
     stats = _stats_2025_snapshot()
     adp = _platform_2026_adp_data(platform)
     daily = _player_daily_refresh_status()
+    news_index = _player_news_index()
 
     projection_count = sum(
         1 for p in master.get("players", {}).values()
@@ -3986,6 +4025,9 @@ def _player_research_data_status(platform="ESPN"):
         "daily_player_refresh_source": daily.get("source", ""),
         "daily_player_refresh_count": daily.get("player_count", 0),
         "daily_player_refresh_fresh": _player_daily_refresh_is_fresh(),
+        "recent_news_player_count": len(news_index.get("players", {})),
+        "recent_news_updated_at": news_index.get("updated_at", ""),
+        "recent_news_window_hours": news_index.get("window_hours", 72),
     }
 
 
@@ -4119,6 +4161,7 @@ def player_research_table_api():
     adp = _platform_2026_adp_data(platform)
     master = _master_players_2026()
     daily = _player_daily_refresh_status()
+    news_index = _player_news_index()
 
     return jsonify(
         ok=True,
@@ -4136,11 +4179,13 @@ def player_research_table_api():
             "projections_2026": "2026 source projections or Gridiron IQ fallback",
             "adp_2026": adp.get("source", ""),
             "current_players": daily.get("source") or "Sleeper current player directory",
+            "recent_news": news_index.get("source") or "Daily player news index",
         },
         updated_at={
             "stats_2025": stats.get("updated_at", ""),
             "adp_2026": adp.get("updated_at", ""),
             "current_players": daily.get("checked_at") or master.get("updated_at", ""),
+            "recent_news": news_index.get("updated_at", ""),
         },
         warnings=[],
     )
@@ -6281,6 +6326,8 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
     )
 
     directory = _pr_players()
+    news_index = _player_news_index()
+    news_players = news_index.get("players", {}) if isinstance(news_index, dict) else {}
     pool = {}
 
     def valid_position(value):
@@ -6497,6 +6544,12 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
         if projection_total <= 0:
             projected_stats = _fast_2026_projection_from_2025(stats, pos)
 
+        injury_status = player.get("injury_status") or master.get("injury_status") or ""
+        news_row = news_players.get(norm, {}) if isinstance(news_players, dict) else {}
+        recent_news = news_row.get("news", []) if isinstance(news_row, dict) else []
+        recent_news = [item for item in recent_news if isinstance(item, dict)]
+        latest_news = recent_news[0] if recent_news else {}
+
         rows.append({
             "player_key": norm,
             "player_id": player.get("player_id") or "",
@@ -6545,8 +6598,18 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
             "college": player.get("college") or master.get("college"),
             "years_exp": player.get("years_exp") or master.get("years_exp"),
             "status": player.get("status") or master.get("status"),
-            "injury_status": player.get("injury_status")
-                or master.get("injury_status") or "",
+            "injury_status": injury_status,
+            "injury_body_part": master.get("injury_body_part") or "",
+            "practice_participation": master.get("practice_participation") or "",
+            "practice_description": master.get("practice_description") or "",
+            "has_injury": _has_active_injury(injury_status),
+            "has_news": bool(recent_news),
+            "news_count": len(recent_news),
+            "latest_news_title": latest_news.get("title") or "",
+            "latest_news_summary": latest_news.get("summary") or "",
+            "latest_news_published": latest_news.get("published") or "",
+            "latest_news_source": latest_news.get("source") or "",
+            "latest_news_url": latest_news.get("url") or "",
             "rookie": bool(player.get("rookie") or master.get("rookie")),
             "data_sources": sorted(player.get("data_sources", set())),
         })
@@ -6574,6 +6637,8 @@ def _pr_data_signature(platform):
         BUNDLED_MASTER_PLAYERS_2026_FILE,
         PLAYER_CACHE_FILE,
         BUNDLED_PLAYER_CACHE_FILE,
+        PLAYER_NEWS_INDEX_FILE,
+        BUNDLED_PLAYER_NEWS_INDEX_FILE,
     ]
     signature = []
     for path in paths:
@@ -6891,6 +6956,8 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
         return None
 
     history = _pr_history(row["name"])
+    recent_news = _indexed_player_news(row["name"])
+    news_index = _player_news_index()
     return {
         "bio": {
             key: row.get(key)
@@ -6929,9 +6996,14 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
         "trend": _pr_trend(history),
         "injury": {
             "status": row.get("injury_status") or "",
+            "body_part": row.get("injury_body_part") or "",
+            "practice": row.get("practice_participation") or "",
+            "description": row.get("practice_description") or "",
             "source": "Current player database",
         },
-        "news_available": True,
+        "news": recent_news,
+        "news_updated_at": news_index.get("updated_at", ""),
+        "news_available": bool(recent_news),
         "data_sources": row.get("data_sources", []),
     }
 

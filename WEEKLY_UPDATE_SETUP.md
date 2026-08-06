@@ -42,10 +42,16 @@ Each workflow commits its refreshed data to `main`. Render's normal
 - Active/inactive status
 - Injury and practice status
 - Depth-chart position and order
+- Recent player news and detected team changes for the update badge
 
 Player Research preserves existing projections, ADP and historical statistics
 when those current-player fields change. A transaction appears after Sleeper
 publishes it in its player directory and the next daily workflow runs.
+
+On the Player Research table, a red **✚** badge means the player has an active
+injury designation. A blue **news** badge means a player story or detected team
+change was published during the last 72 hours. Click either badge to see the
+details without leaving the table.
 
 The updater is intentionally safe before the regular season begins: if 2026
 regular-season files have not been published, it keeps the existing 2025
@@ -60,6 +66,7 @@ Daily Player Research:
 - `data/sleeper_players_cache.json`
 - `data/nfl_players_2026.json`
 - `data/player_research_daily_status.json`
+- `data/player_news_index.json`
 
 Weekly statistics:
 
