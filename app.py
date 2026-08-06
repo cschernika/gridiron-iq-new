@@ -2856,13 +2856,13 @@ def _pr_history(player_name):
         for season_key, record in season_map.items():
             if not isinstance(record, dict):
                 continue
-            clean = {k: v for k, v in record.items() if k not in {"name", "player_id", "team", "position"}}
+            clean = {k: v for k, v in record.items() if k not in {"name", "player_id"}}
             clean["season"] = int(record.get("season") or season_key)
             history.append(clean)
 
     stats_2025 = _stats_2025_for_name(player_name)
     if stats_2025 and not any(item.get("season") == 2025 for item in history):
-        clean = {k: v for k, v in stats_2025.items() if k not in {"name", "player_id", "team", "position"}}
+        clean = {k: v for k, v in stats_2025.items() if k not in {"name", "player_id"}}
         history.append({"season": 2025, **clean})
 
     history.sort(key=lambda item: int(item.get("season", 0)))
@@ -6316,7 +6316,9 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
     platform = str(platform or "ESPN").upper()
 
     stats_players = _stats_2025_snapshot().get("players", {}) or {}
-    adp_players = _platform_2026_adp_data(platform).get("players", {}) or {}
+    adp_payload = _platform_2026_adp_data(platform)
+    adp_players = adp_payload.get("players", {}) or {}
+    adp_source = adp_payload.get("source") or platform
 
     master_payload = _master_players_2026()
     master_players = (
@@ -6561,6 +6563,7 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
             "adp": round(adp, 1) if 0 < adp < 999 else 999,
             "position_adp": adp_row.get("position_adp")
                 or adp_row.get("positional_rank") or "",
+            "adp_source": adp_source,
             "games": stats.get("games", 0),
             "fantasy_points": stats.get("fantasy_points", 0),
             "fantasy_points_ppr": stats.get(
@@ -6597,6 +6600,11 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
             "age": player.get("age") or master.get("age"),
             "college": player.get("college") or master.get("college"),
             "years_exp": player.get("years_exp") or master.get("years_exp"),
+            "number": player.get("number") or master.get("number"),
+            "depth_chart_position": player.get("depth_chart_position")
+                or master.get("depth_chart_position") or "",
+            "depth_chart_order": player.get("depth_chart_order")
+                or master.get("depth_chart_order"),
             "status": player.get("status") or master.get("status"),
             "injury_status": injury_status,
             "injury_body_part": master.get("injury_body_part") or "",
@@ -6958,41 +6966,40 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
     history = _pr_history(row["name"])
     recent_news = _indexed_player_news(row["name"])
     news_index = _player_news_index()
+    master = _player_research_master_row(row["name"])
+    previous_year = dict(_player_research_stats_2025(row["name"]) or {})
+    projection = dict(row.get("projection_2026") or {})
+    projection.update({
+        "season": 2026,
+        "games": projection.get("games") or 17,
+        "fantasy_points_ppr": row.get("proj_2026_ppr", 0),
+        "passing_yards": row.get("proj_2026_pass_yards", 0),
+        "passing_tds": row.get("proj_2026_pass_tds", 0),
+        "interceptions": row.get("proj_2026_interceptions", 0),
+        "carries": row.get("proj_2026_carries", 0),
+        "rushing_yards": row.get("proj_2026_rush_yards", 0),
+        "rushing_tds": row.get("proj_2026_rush_tds", 0),
+        "targets": row.get("proj_2026_targets", 0),
+        "receptions": row.get("proj_2026_receptions", 0),
+        "receiving_yards": row.get("proj_2026_rec_yards", 0),
+        "receiving_tds": row.get("proj_2026_rec_tds", 0),
+        "method": projection.get("method") or "2026 source projection or Gridiron IQ fallback",
+    })
+    career = _career_stats_snapshot()
     return {
         "bio": {
             key: row.get(key)
             for key in (
                 "player_key", "player_id", "name", "position", "team",
                 "age", "college", "years_exp", "status", "injury_status",
-                "rookie", "adp", "position_adp",
+                "rookie", "adp", "position_adp", "number",
+                "depth_chart_position", "depth_chart_order",
             )
         },
-        "previous_year": {
-            key: row.get(key, 0)
-            for key in (
-                "games", "fantasy_points", "fantasy_points_ppr",
-                "completions", "attempts", "passing_yards", "passing_tds",
-                "interceptions", "carries", "rushing_yards", "rushing_tds",
-                "targets", "receptions", "receiving_yards", "receiving_tds",
-            )
-        },
+        "adp_source": row.get("adp_source") or platform,
+        "previous_year": previous_year,
         "history": history,
-        "projection": {
-            "season": 2026,
-            "games": (row.get("projection_2026") or {}).get("games", 17),
-            "fantasy_points_ppr": row.get("proj_2026_ppr", 0),
-            "passing_yards": row.get("proj_2026_pass_yards", 0),
-            "passing_tds": row.get("proj_2026_pass_tds", 0),
-            "interceptions": row.get("proj_2026_interceptions", 0),
-            "carries": row.get("proj_2026_carries", 0),
-            "rushing_yards": row.get("proj_2026_rush_yards", 0),
-            "rushing_tds": row.get("proj_2026_rush_tds", 0),
-            "targets": row.get("proj_2026_targets", 0),
-            "receptions": row.get("proj_2026_receptions", 0),
-            "receiving_yards": row.get("proj_2026_rec_yards", 0),
-            "receiving_tds": row.get("proj_2026_rec_tds", 0),
-            "method": "2026 source projection or Gridiron IQ fallback",
-        },
+        "projection": projection,
         "trend": _pr_trend(history),
         "injury": {
             "status": row.get("injury_status") or "",
@@ -7005,6 +7012,15 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
         "news_updated_at": news_index.get("updated_at", ""),
         "news_available": bool(recent_news),
         "data_sources": row.get("data_sources", []),
+        "career_loaded_seasons": career.get("loaded_seasons", []),
+        "career_updated_at": career.get("updated_at", ""),
+        "data_notes": [
+            "Current team, injury and depth chart refresh daily.",
+            f"ADP uses the selected {platform} dataset.",
+            "2025 statistics are actual regular-season totals.",
+            "2026 statistics are preseason projections until current-season actuals are published.",
+            "Career history displays every imported season available for this player.",
+        ],
     }
 
 
