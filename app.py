@@ -773,7 +773,7 @@ def waiver_assistant(): return page("waivers.html")
 def trade_analyzer(): return page("trade.html", league_data=league_summary())
 
 @app.get("/matchup-analyzer")
-def matchup_analyzer(): return page("matchups.html")
+def matchup_analyzer(): return redirect("/weekly-matchups")
 
 @app.get("/league-intelligence")
 def league_intelligence(): return page("league_intelligence.html", league_data=league_summary())
@@ -1083,7 +1083,7 @@ def _mock_current_player_directory():
 
     return cached
 
-def _mock_current_players_by_name(refresh=False):
+def _mock_current_players_by_name(refresh=False, allow_network=True):
     global _MOCK_CURRENT_PLAYERS_MEMORY, _MOCK_CURRENT_PLAYERS_MTIME
     try:
         cache_mtime = MOCK_PLAYER_CACHE_FILE.stat().st_mtime
@@ -1104,8 +1104,10 @@ def _mock_current_players_by_name(refresh=False):
             directory = json.loads(MOCK_PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
         except Exception:
             directory = {}
-    else:
+    elif allow_network:
         directory = _mock_current_player_directory()
+    else:
+        directory = {}
 
     by_name = {}
     for player_id, row in (directory or {}).items():
@@ -5379,7 +5381,11 @@ def _offensive_season_source(season):
 
     if season == 2026:
         prior_players = _stats_2025_snapshot().get("players", {}) or {}
-        current_players = _mock_current_players_by_name(refresh=True)
+        # Interactive tables use the bundled 2026 roster first and an existing
+        # cache second. They never wait on a live player-directory request.
+        bundled_current = (_defensive_stats_snapshot().get("current_players", {}) or {})
+        cached_current = _mock_current_players_by_name(refresh=False, allow_network=False)
+        current_players = {**bundled_current, **cached_current}
         fallback_players = {_pr_norm(player["name"]): player for player in MOCK_PLAYER_POOL}
         all_keys = set(prior_players) | set(master_players) | set(current_players) | set(fallback_players)
         rows = {}
@@ -5775,6 +5781,376 @@ def offensive_stats_table_api():
         selected_position=position,
         rows=rows,
         metadata=metadata,
+    )
+
+
+# ============================================================
+# DEFENSIVE DATA CENTER + WEEKLY MATCHUP LAB
+# Bundled 2025 defense/coverage data and 2026 schedule matchups.
+# ============================================================
+
+DEFENSIVE_STATS_FILE = DATA_DIR / "nfl_defensive_stats_2025.json"
+BUNDLED_DEFENSIVE_STATS_FILE = BASE_DIR / "data" / "nfl_defensive_stats_2025.json"
+_DEFENSIVE_SNAPSHOT_CACHE = {"path": "", "mtime": -1, "payload": None}
+
+
+def _defensive_stats_snapshot():
+    path = DEFENSIVE_STATS_FILE if DEFENSIVE_STATS_FILE.exists() else BUNDLED_DEFENSIVE_STATS_FILE
+    empty = {
+        "season": 2025, "matchup_season": 2026, "players": {}, "teams": {},
+        "offensive_lines": {}, "current_defenders": {}, "receiver_splits": {},
+        "league_receiver_splits": {}, "schedule_2026": [], "source": "",
+    }
+    if not path.exists():
+        return empty
+    try:
+        mtime = path.stat().st_mtime_ns
+        if (
+            _DEFENSIVE_SNAPSHOT_CACHE.get("path") == str(path)
+            and _DEFENSIVE_SNAPSHOT_CACHE.get("mtime") == mtime
+            and isinstance(_DEFENSIVE_SNAPSHOT_CACHE.get("payload"), dict)
+        ):
+            return _DEFENSIVE_SNAPSHOT_CACHE["payload"]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or not isinstance(payload.get("players"), dict):
+            return empty
+        _DEFENSIVE_SNAPSHOT_CACHE.update(path=str(path), mtime=mtime, payload=payload)
+        return payload
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        app.logger.warning("Defensive statistics snapshot ignored: %s", exc)
+        return empty
+
+
+def _def_clamp(value, low=1.0, high=99.0):
+    return round(max(low, min(high, _off_num(value))), 1)
+
+
+def _def_letter_grade(score):
+    score = _off_num(score)
+    if score >= 93: return "A+"
+    if score >= 87: return "A"
+    if score >= 82: return "A-"
+    if score >= 77: return "B+"
+    if score >= 71: return "B"
+    if score >= 66: return "B-"
+    if score >= 60: return "C+"
+    if score >= 54: return "C"
+    if score >= 48: return "C-"
+    if score >= 42: return "D+"
+    if score >= 35: return "D"
+    return "F"
+
+
+def _def_team_code(value):
+    value = str(value or "").strip().upper()
+    return {
+        "LAR": "LA", "STL": "LA", "JAC": "JAX", "OAK": "LV",
+        "SD": "LAC", "SDG": "LAC", "WSH": "WAS",
+    }.get(value, value)
+
+
+def _defensive_player_rows(group="ALL"):
+    payload = _defensive_stats_snapshot()
+    rows = [dict(row) for row in (payload.get("players", {}) or {}).values() if isinstance(row, dict)]
+    group = str(group or "ALL").upper()
+    if group == "DB":
+        rows = [row for row in rows if row.get("position_group") == group]
+    elif group in {"CB", "S", "LB", "DL", "EDGE"}:
+        rows = [row for row in rows if row.get("role") == group]
+    rows.sort(key=lambda row: (-_off_num(row.get("defense_grade")), row.get("name", "")))
+    return rows, payload
+
+
+def _defensive_team_rows():
+    payload = _defensive_stats_snapshot()
+    rows = [dict(row) for row in (payload.get("teams", {}) or {}).values() if isinstance(row, dict)]
+    rows.sort(key=lambda row: (-_off_num(row.get("overall_grade")), row.get("team", "")))
+    return rows, payload
+
+
+@app.get("/defensive-stats")
+def defensive_stats_page():
+    return page("defensive_stats.html")
+
+
+@app.get("/api/defensive-stats/table")
+def defensive_stats_table_api():
+    view = str(request.args.get("view") or "TEAM").upper()
+    group = str(request.args.get("group") or "ALL").upper()
+    if view == "TEAM":
+        rows, payload = _defensive_team_rows()
+    else:
+        rows, payload = _defensive_player_rows(group)
+    return jsonify(
+        ok=True,
+        count=len(rows),
+        view=view,
+        group=group,
+        rows=rows,
+        metadata={
+            "season": payload.get("season", 2025),
+            "source": payload.get("source") or "Gridiron IQ defensive snapshot",
+            "license_note": payload.get("license_note") or "",
+        },
+    )
+
+
+def _weekly_schedule_lookup(payload, week):
+    result = {}
+    for game in payload.get("schedule_2026", []) or []:
+        if int(game.get("week") or 0) != int(week):
+            continue
+        away = _def_team_code(game.get("away_team"))
+        home = _def_team_code(game.get("home_team"))
+        result[away] = {**game, "team": away, "opponent": home, "location": "Away"}
+        result[home] = {**game, "team": home, "opponent": away, "location": "Home"}
+    return result
+
+
+def _weekly_defender_candidates(payload, opponent, position):
+    players = payload.get("players", {}) or {}
+    keys = (payload.get("current_defenders", {}) or {}).get(opponent, []) or []
+    candidates = [dict(players[key]) for key in keys if key in players]
+    if position == "WR":
+        preferred = [row for row in candidates if row.get("role") == "CB"]
+    else:
+        preferred = [row for row in candidates if row.get("role") in {"S", "LB"}]
+    if not preferred:
+        preferred = [row for row in candidates if row.get("position_group") in {"DB", "LB"}]
+    preferred.sort(key=lambda row: (
+        -_off_num(row.get("snap_share")),
+        -_off_num(row.get("coverage_targets")),
+        -_off_num(row.get("coverage_grade")),
+    ))
+    return preferred[:3]
+
+
+def _matchup_percentile_grades(rows, position):
+    eligible = [row for row in rows if row.get("position") == position]
+    eligible.sort(key=lambda row: _off_num(row.get("fantasy_points")))
+    total = max(1, len(eligible) - 1)
+    return {
+        _pr_norm(row.get("name")): round(index / total * 98 + 1, 1)
+        for index, row in enumerate(eligible)
+    }
+
+
+def _weekly_matchup_rows(week=1, position="ALL"):
+    payload = _defensive_stats_snapshot()
+    schedule = _weekly_schedule_lookup(payload, week)
+    offense_rows, _ = _offensive_stats_rows(season=2026, scoring="PPR")
+    positions = {"WR", "TE"} if position == "ALL" else {position}
+    offense_rows = [
+        row for row in offense_rows
+        if (
+            row.get("position") in positions
+            and _off_num(row.get("fantasy_points")) > 0
+            and (
+                _off_num(row.get("targets")) > 0
+                or _off_num(row.get("receptions")) > 0
+                or _off_num(row.get("receiving_yards")) > 0
+            )
+        )
+    ]
+    skill_grades = {
+        **_matchup_percentile_grades(offense_rows, "WR"),
+        **_matchup_percentile_grades(offense_rows, "TE"),
+    }
+    teams = payload.get("teams", {}) or {}
+    offensive_lines = payload.get("offensive_lines", {}) or {}
+    receiver_splits = payload.get("receiver_splits", {}) or {}
+    league_splits = payload.get("league_receiver_splits", {}) or {}
+
+    position_allowed_averages = {}
+    for pos in ("WR", "TE"):
+        values = [
+            _off_num(((team.get("allowed_by_position") or {}).get(pos) or {}).get("ppr_per_target"))
+            for team in teams.values()
+            if ((team.get("allowed_by_position") or {}).get(pos) or {}).get("ppr_per_target") is not None
+        ]
+        position_allowed_averages[pos] = sum(values) / len(values) if values else 1.5
+
+    prepared = []
+    for player in offense_rows:
+        name = str(player.get("name") or "").strip()
+        player_position = str(player.get("position") or "").upper()
+        team = _def_team_code(player.get("team"))
+        game = schedule.get(team)
+        if not name or not game:
+            continue
+        opponent = game["opponent"]
+        defense = dict(teams.get(opponent) or {})
+        line = dict(offensive_lines.get(team) or {})
+        defenders = _weekly_defender_candidates(payload, opponent, player_position)
+        primary = defenders[0] if defenders else {}
+
+        man_rate = _off_num(defense.get("man_rate"))
+        zone_rate = _off_num(defense.get("zone_rate"))
+        dominant_label = "ZONE_COVERAGE" if zone_rate >= man_rate else "MAN_COVERAGE"
+        dominant_name = "Zone" if dominant_label == "ZONE_COVERAGE" else "Man"
+        dominant_rate = max(man_rate, zone_rate)
+        player_history = receiver_splits.get(_pr_norm(name), {}) or {}
+        split = ((player_history.get("splits") or {}).get(dominant_label) or {})
+        baseline = (((league_splits.get(player_position) or {}).get(dominant_label)) or {})
+        player_ppr_target = split.get("ppr_per_target")
+        baseline_ppr_target = _off_num(baseline.get("ppr_per_target"), 1.5)
+        if player_ppr_target is None:
+            player_ppr_target = baseline_ppr_target
+            split_basis = "Position baseline"
+        else:
+            split_basis = "2025 player split"
+        coverage_fit = _def_clamp(
+            (_off_num(player_ppr_target) - baseline_ppr_target) * 12,
+            -12,
+            12,
+        )
+
+        allowed = ((defense.get("allowed_by_position") or {}).get(player_position) or {})
+        allowed_ppr_target = _off_num(allowed.get("ppr_per_target"), position_allowed_averages[player_position])
+        allowed_fit = _def_clamp(
+            (allowed_ppr_target - position_allowed_averages[player_position]) * 10,
+            -10,
+            10,
+        )
+        skill_grade = _off_num(skill_grades.get(_pr_norm(name)), 50)
+        secondary_grade = _off_num(defense.get("secondary_grade"), 50)
+        defender_grade = _off_num(primary.get("coverage_grade") or primary.get("defense_grade"), 50)
+        pass_pro_grade = _off_num(line.get("pass_protection_grade"), 50)
+        run_block_grade = _off_num(line.get("run_blocking_grade"), 50)
+        pass_rush_grade = _off_num(defense.get("pass_rush_grade"), 50)
+        run_defense_grade = _off_num(defense.get("run_defense_grade"), 50)
+        pass_trench_score = _def_clamp(50 + (pass_pro_grade - pass_rush_grade) * 0.55)
+        run_trench_score = _def_clamp(50 + (run_block_grade - run_defense_grade) * 0.55)
+
+        score = _def_clamp(
+            50
+            + (skill_grade - 50) * 0.30
+            + (50 - secondary_grade) * 0.28
+            + (50 - defender_grade) * 0.12
+            + coverage_fit
+            + allowed_fit
+            + (pass_trench_score - 50) * 0.12
+        )
+        grade = _def_letter_grade(score)
+        if score >= 72:
+            verdict = "Strong advantage"
+        elif score >= 58:
+            verdict = "Favorable"
+        elif score >= 44:
+            verdict = "Neutral"
+        elif score >= 32:
+            verdict = "Difficult"
+        else:
+            verdict = "Major challenge"
+
+        top_coverage = str(defense.get("top_coverage") or "").replace("_", " ").title()
+        coverage_note = (
+            f"{opponent} used {dominant_name.lower()} on {dominant_rate:.1f}% of charted dropbacks"
+            + (f" and leaned most on {top_coverage}." if top_coverage else ".")
+            + f" {name} produced {_off_num(player_ppr_target):.2f} PPR points per target against {dominant_name.lower()} ({split_basis.lower()})."
+        )
+        if primary:
+            defender_note = (
+                f"Likely primary matchup: {primary.get('name')} ({primary.get('role')}) — "
+                f"{_off_num(primary.get('snap_share')):.1f}% snap share, "
+                f"{int(_off_num(primary.get('coverage_targets')))} coverage targets, "
+                f"{_off_num(primary.get('passer_rating_allowed')):.1f} passer rating allowed in 2025."
+            )
+        else:
+            defender_note = "No returning high-snap coverage defender was available in the bundled current roster."
+        trench_note = (
+            f"Pass protection grade {pass_pro_grade:.1f} versus {opponent} pass-rush grade {pass_rush_grade:.1f}; "
+            f"pass-trench advantage score {pass_trench_score:.1f}."
+        )
+
+        prepared.append({
+            "name": name,
+            "position": player_position,
+            "team": team,
+            "opponent": opponent,
+            "week": int(week),
+            "gameday": game.get("gameday"),
+            "gametime": game.get("gametime"),
+            "location": game.get("location"),
+            "projected_points": _off_round(player.get("fantasy_points"), 1),
+            "target_share": player.get("target_share"),
+            "air_yards_share": player.get("air_yards_share"),
+            "skill_grade": round(skill_grade, 1),
+            "matchup_score": score,
+            "matchup_grade": grade,
+            "verdict": verdict,
+            "primary_defender": primary.get("name") or "Coverage unit",
+            "primary_defender_role": primary.get("role") or "DB/LB",
+            "defender_grade": round(defender_grade, 1),
+            "defender_snap_share": primary.get("snap_share"),
+            "defender_targets": primary.get("coverage_targets"),
+            "defender_rating_allowed": primary.get("passer_rating_allowed"),
+            "defenders": [
+                {
+                    "name": item.get("name"), "role": item.get("role"),
+                    "coverage_grade": item.get("coverage_grade"),
+                    "defense_grade": item.get("defense_grade"),
+                    "snap_share": item.get("snap_share"),
+                    "coverage_targets": item.get("coverage_targets"),
+                    "passer_rating_allowed": item.get("passer_rating_allowed"),
+                    "yards_per_target_allowed": item.get("yards_per_target_allowed"),
+                }
+                for item in defenders
+            ],
+            "secondary_grade": round(secondary_grade, 1),
+            "secondary_rank": defense.get("secondary_rank"),
+            "position_ppr_per_target_allowed": round(allowed_ppr_target, 2),
+            "man_rate": defense.get("man_rate"),
+            "zone_rate": defense.get("zone_rate"),
+            "top_coverage": defense.get("top_coverage"),
+            "dominant_coverage": dominant_name,
+            "player_ppr_per_target_vs_dominant": round(_off_num(player_ppr_target), 2),
+            "coverage_split_basis": split_basis,
+            "pass_protection_grade": round(pass_pro_grade, 1),
+            "pass_rush_grade": round(pass_rush_grade, 1),
+            "pass_trench_score": pass_trench_score,
+            "run_blocking_grade": round(run_block_grade, 1),
+            "run_defense_grade": round(run_defense_grade, 1),
+            "run_trench_score": run_trench_score,
+            "coverage_note": coverage_note,
+            "defender_note": defender_note,
+            "trench_note": trench_note,
+        })
+
+    prepared.sort(key=lambda row: (-_off_num(row.get("matchup_score")), -_off_num(row.get("projected_points")), row.get("name", "")))
+    for rank, row in enumerate(prepared, 1):
+        row["matchup_rank"] = rank
+    return prepared, payload
+
+
+@app.get("/weekly-matchups")
+def weekly_matchups_page():
+    return page("weekly_matchups.html", matchup_weeks=range(1, 19))
+
+
+@app.get("/api/weekly-matchups")
+def weekly_matchups_api():
+    try:
+        week = max(1, min(18, int(request.args.get("week") or 1)))
+    except (TypeError, ValueError):
+        week = 1
+    position = str(request.args.get("position") or "ALL").upper()
+    if position not in {"ALL", "WR", "TE"}:
+        position = "ALL"
+    rows, payload = _weekly_matchup_rows(week=week, position=position)
+    return jsonify(
+        ok=True,
+        week=week,
+        position=position,
+        count=len(rows),
+        rows=rows,
+        metadata={
+            "season": payload.get("matchup_season", 2026),
+            "baseline_season": payload.get("season", 2025),
+            "source": payload.get("source") or "Gridiron IQ matchup model",
+            "license_note": payload.get("license_note") or "",
+            "assignment_note": "Primary defenders are likely matchups based on current roster role, snap share and coverage usage; they are not guaranteed shadow assignments.",
+        },
     )
 
 
