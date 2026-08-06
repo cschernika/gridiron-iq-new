@@ -5304,6 +5304,9 @@ def _fast_2026_projection_from_2025(stats, position):
 
 OFFENSIVE_ADVANCED_STATS_FILE = DATA_DIR / "offensive_advanced_stats.json"
 OFFENSIVE_POSITIONS = {"QB", "RB", "WR", "TE", "K"}
+CURRENT_OFFENSIVE_STATS_FILE = DATA_DIR / "nfl_player_stats_2026.json"
+BUNDLED_CURRENT_OFFENSIVE_STATS_FILE = BASE_DIR / "data" / "nfl_player_stats_2026.json"
+_CURRENT_OFFENSIVE_STATS_CACHE = {"path": "", "mtime": -1, "payload": None}
 
 
 def _off_num(value, default=0.0):
@@ -5313,6 +5316,29 @@ def _off_num(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _current_offensive_stats_snapshot():
+    candidates = (CURRENT_OFFENSIVE_STATS_FILE, BUNDLED_CURRENT_OFFENSIVE_STATS_FILE)
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            mtime = path.stat().st_mtime_ns
+            if (
+                _CURRENT_OFFENSIVE_STATS_CACHE.get("path") == str(path)
+                and _CURRENT_OFFENSIVE_STATS_CACHE.get("mtime") == mtime
+                and isinstance(_CURRENT_OFFENSIVE_STATS_CACHE.get("payload"), dict)
+            ):
+                return _CURRENT_OFFENSIVE_STATS_CACHE["payload"]
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if int(payload.get("season") or 0) != 2026 or not isinstance(payload.get("players"), dict) or not payload["players"]:
+                continue
+            _CURRENT_OFFENSIVE_STATS_CACHE.update(path=str(path), mtime=mtime, payload=payload)
+            return payload
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            app.logger.warning("Current offensive statistics snapshot ignored: %s", exc)
+    return {}
 
 
 def _off_round(value, digits=1):
@@ -5380,6 +5406,11 @@ def _offensive_season_source(season):
     master_players = master_payload.get("players", {}) if isinstance(master_payload, dict) else {}
 
     if season == 2026:
+        current_actual = _current_offensive_stats_snapshot()
+        if current_actual.get("players"):
+            return dict(current_actual["players"]), str(
+                current_actual.get("source") or "2026 current-season player statistics"
+            )
         prior_players = _stats_2025_snapshot().get("players", {}) or {}
         # Interactive tables use the bundled 2026 roster first and an existing
         # cache second. They never wait on a live player-directory request.
@@ -5522,7 +5553,7 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
             expected_points = _off_round(imported_expected, 1)
 
         team = _normalize_team_code(raw.get("team")) or "FA"
-        if season == 2026:
+        if season == 2026 and str(raw.get("data_type") or "").lower() != "actual":
             team = _normalize_team_code(master.get("team") or team) or "FA"
 
         row = {
@@ -5725,15 +5756,20 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
         row["position_rank"] = position_ranks[row["position"]]
         row["rank_label"] = f"{row['position']}{row['position_rank']}"
 
+    current_snapshot = _current_offensive_stats_snapshot() if season == 2026 else {}
+    data_type = "actual" if any(str(row.get("data_type") or "").lower() == "actual" for row in prepared) else "projection" if season == 2026 else "actual"
     return prepared, {
         "season": season,
+        "data_type": data_type,
         "scoring": scoring,
         "source": source_label,
         "advanced_source": advanced_source,
         "advanced_available": bool(advanced_players),
         "public_advanced_available": any(row.get("snap_share") is not None for row in prepared),
         "next_gen_note": "NFL Next Gen Stats fields include only players meeting the NFL minimum-attempt threshold.",
-        "usage_basis_year": 2025 if season == 2026 else None,
+        "usage_basis_year": 2025 if season == 2026 and data_type == "projection" else None,
+        "updated_at": current_snapshot.get("updated_at") if data_type == "actual" else None,
+        "games_played_max": current_snapshot.get("games_played_max") if data_type == "actual" else None,
     }
 
 
@@ -5753,7 +5789,7 @@ def offensive_stats_page():
     return page(
         "offensive_stats.html",
         offensive_seasons=_offensive_stats_seasons(),
-        default_offensive_season=2025,
+        default_offensive_season=2026,
     )
 
 
@@ -5791,34 +5827,42 @@ def offensive_stats_table_api():
 
 DEFENSIVE_STATS_FILE = DATA_DIR / "nfl_defensive_stats_2025.json"
 BUNDLED_DEFENSIVE_STATS_FILE = BASE_DIR / "data" / "nfl_defensive_stats_2025.json"
+CURRENT_DEFENSIVE_STATS_FILE = DATA_DIR / "nfl_defensive_stats_current.json"
+BUNDLED_CURRENT_DEFENSIVE_STATS_FILE = BASE_DIR / "data" / "nfl_defensive_stats_current.json"
 _DEFENSIVE_SNAPSHOT_CACHE = {"path": "", "mtime": -1, "payload": None}
 
 
 def _defensive_stats_snapshot():
-    path = DEFENSIVE_STATS_FILE if DEFENSIVE_STATS_FILE.exists() else BUNDLED_DEFENSIVE_STATS_FILE
     empty = {
         "season": 2025, "matchup_season": 2026, "players": {}, "teams": {},
         "offensive_lines": {}, "current_defenders": {}, "receiver_splits": {},
         "league_receiver_splits": {}, "schedule_2026": [], "source": "",
     }
-    if not path.exists():
-        return empty
-    try:
-        mtime = path.stat().st_mtime_ns
-        if (
-            _DEFENSIVE_SNAPSHOT_CACHE.get("path") == str(path)
-            and _DEFENSIVE_SNAPSHOT_CACHE.get("mtime") == mtime
-            and isinstance(_DEFENSIVE_SNAPSHOT_CACHE.get("payload"), dict)
-        ):
-            return _DEFENSIVE_SNAPSHOT_CACHE["payload"]
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict) or not isinstance(payload.get("players"), dict):
-            return empty
-        _DEFENSIVE_SNAPSHOT_CACHE.update(path=str(path), mtime=mtime, payload=payload)
-        return payload
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        app.logger.warning("Defensive statistics snapshot ignored: %s", exc)
-        return empty
+    candidates = (
+        CURRENT_DEFENSIVE_STATS_FILE,
+        BUNDLED_CURRENT_DEFENSIVE_STATS_FILE,
+        DEFENSIVE_STATS_FILE,
+        BUNDLED_DEFENSIVE_STATS_FILE,
+    )
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            mtime = path.stat().st_mtime_ns
+            if (
+                _DEFENSIVE_SNAPSHOT_CACHE.get("path") == str(path)
+                and _DEFENSIVE_SNAPSHOT_CACHE.get("mtime") == mtime
+                and isinstance(_DEFENSIVE_SNAPSHOT_CACHE.get("payload"), dict)
+            ):
+                return _DEFENSIVE_SNAPSHOT_CACHE["payload"]
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or not isinstance(payload.get("players"), dict) or len(payload.get("teams", {})) < 28:
+                continue
+            _DEFENSIVE_SNAPSHOT_CACHE.update(path=str(path), mtime=mtime, payload=payload)
+            return payload
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            app.logger.warning("Defensive statistics snapshot ignored: %s", exc)
+    return empty
 
 
 def _def_clamp(value, low=1.0, high=99.0):
@@ -5891,6 +5935,7 @@ def defensive_stats_table_api():
             "season": payload.get("season", 2025),
             "source": payload.get("source") or "Gridiron IQ defensive snapshot",
             "license_note": payload.get("license_note") or "",
+            "updated_at": payload.get("updated_at") or "",
         },
     )
 
@@ -6073,6 +6118,7 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             "gametime": game.get("gametime"),
             "location": game.get("location"),
             "projected_points": _off_round(player.get("fantasy_points"), 1),
+            "offense_data_type": player.get("data_type") or "projection",
             "target_share": player.get("target_share"),
             "air_yards_share": player.get("air_yards_share"),
             "skill_grade": round(skill_grade, 1),
@@ -6138,6 +6184,7 @@ def weekly_matchups_api():
     if position not in {"ALL", "WR", "TE"}:
         position = "ALL"
     rows, payload = _weekly_matchup_rows(week=week, position=position)
+    offense_data_type = "actual" if any(str(row.get("offense_data_type") or "").lower() == "actual" for row in rows) else "projection"
     return jsonify(
         ok=True,
         week=week,
@@ -6147,6 +6194,7 @@ def weekly_matchups_api():
         metadata={
             "season": payload.get("matchup_season", 2026),
             "baseline_season": payload.get("season", 2025),
+            "offense_data_type": offense_data_type,
             "source": payload.get("source") or "Gridiron IQ matchup model",
             "license_note": payload.get("license_note") or "",
             "assignment_note": "Primary defenders are likely matchups based on current roster role, snap share and coverage usage; they are not guaranteed shadow assignments.",
