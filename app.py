@@ -2761,22 +2761,36 @@ def _pr_aggregate(rows, player_name):
     }
 
 CAREER_STATS_FILE = DATA_DIR / "nfl_player_career_history.json"
+BUNDLED_CAREER_STATS_FILE = BASE_DIR / "data" / "nfl_player_career_history.json"
 
 
 def _career_stats_snapshot():
     empty = {"updated_at": "", "loaded_seasons": [], "players": {}, "status": "missing"}
-    if not CAREER_STATS_FILE.exists():
+    candidates = []
+    for path in (CAREER_STATS_FILE, BUNDLED_CAREER_STATS_FILE):
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                continue
+            payload.setdefault("loaded_seasons", [])
+            payload.setdefault("players", {})
+            payload["loaded_from"] = str(path)
+            player_seasons = sum(
+                len(seasons) for seasons in payload["players"].values()
+                if isinstance(seasons, dict)
+            )
+            candidates.append((
+                len(payload["loaded_seasons"]),
+                player_seasons,
+                payload,
+            ))
+        except Exception as exc:
+            app.logger.warning("Career-history database %s could not be read: %s", path, exc)
+    if not candidates:
         return empty
-    try:
-        payload = json.loads(CAREER_STATS_FILE.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            return empty
-        payload.setdefault("loaded_seasons", [])
-        payload.setdefault("players", {})
-        return payload
-    except Exception as exc:
-        app.logger.warning("Career-history database could not be read: %s", exc)
-        return empty
+    return max(candidates, key=lambda item: (item[0], item[1]))[2]
 
 
 def _aggregate_season_rows(rows, season):

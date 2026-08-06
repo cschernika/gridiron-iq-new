@@ -1,12 +1,16 @@
 # Gridiron IQ automatic data updates
 
-The package includes two GitHub Actions workflows:
+The package includes three GitHub Actions workflows:
 
 - **Daily Player Research refresh** runs every day at **6:37 AM Eastern**. It
   refreshes player teams, new signings, free agents, active status, injuries,
   practice status and depth-chart fields from Sleeper's current NFL directory.
 - **Weekly NFL statistics refresh** runs every Tuesday morning. It refreshes
   current-season offensive and defensive production.
+- **Complete player career history** runs every January 15. It adds the newly
+  completed season to every offensive player's year-by-year profile. The
+  package already includes all available regular seasons from 1999 through
+  2025, so no workflow run is required to see the full history now.
 
 Each workflow commits its refreshed data to `main`. Render's normal
 **Auto-Deploy: On Commit** setting then publishes the update automatically.
@@ -18,9 +22,12 @@ Each workflow commits its refreshed data to `main`. Render's normal
 
    - `.github/workflows/daily-player-research.yml`
    - `.github/workflows/weekly-nfl-stats.yml`
+   - `.github/workflows/career-history.yml`
    - `refresh_daily_player_research.py`
    - `refresh_weekly_data.py`
    - `build_defensive_snapshot.py`
+   - `build_career_history.py`
+   - `data/nfl_player_career_history.json`
 
    Do not create another project folder. The `.github` folder belongs at the
    top level of the same repository as `app.py`.
@@ -34,6 +41,8 @@ Each workflow commits its refreshed data to `main`. Render's normal
    instead of waiting until the next morning.
 6. You can test weekly statistics the same way by choosing
    **Weekly NFL statistics refresh**.
+7. The supplied career-history file works immediately. If you want to rebuild
+   it manually, choose **Complete player career history** in GitHub Actions.
 
 ## What updates daily
 
@@ -72,5 +81,9 @@ Weekly statistics:
 
 - `data/nfl_player_stats_2026.json`
 - `data/nfl_defensive_stats_current.json`
+
+Annual career history:
+
+- `data/nfl_player_career_history.json`
 
 No FantasyPros key or paid data subscription is required for this refresh.
