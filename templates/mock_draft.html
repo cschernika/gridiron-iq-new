@@ -32,12 +32,14 @@
 .ms-board-empty{padding:8px;min-height:58px;border-bottom:1px solid #edf0f5;color:#b0bac7;font-size:9px}
 .ms-board-legend{font-size:10px;color:var(--m)}
 .ms-status{display:none;margin-top:12px;padding:11px 12px;border-radius:10px;font-size:11px;font-weight:800}
-.ms-status.show{display:block}.ms-status.busy{color:#264a88;background:#edf4ff;border:1px solid #cfe0ff}.ms-status.error{color:#991b1b;background:#fff1f2;border:1px solid #fecdd3}
+.ms-status.show{display:block}.ms-status.busy{color:#264a88;background:#edf4ff;border:1px solid #cfe0ff}.ms-status.error{color:#991b1b;background:#fff1f2;border:1px solid #fecdd3}.ms-status.good{color:#166534;background:#f0fdf4;border:1px solid #bbf7d0}
+.ms-build-check{margin:0 0 14px}.ms-rank-source{display:block;color:var(--m);font-size:8px;margin-top:2px;max-width:125px;line-height:1.25}
 
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
 </style>
 <div class="ms">
-<div class="ms-head"><div><div class="ms-k">AI DRAFT SIMULATOR · COMPLETE PLAYER POOL V2</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams with different draft strategies, roster needs and platform ADP.</p></div></div>
+<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · SMART DRAFT FORMULA V4</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
+<div id="build-status" class="ms-status ms-build-check show busy" role="status" aria-live="polite">Checking the deployed server and complete player database…</div>
 
 <div id="setup" class="ms-grid">
 <div class="ms-card"><div class="ms-k">DRAFT SETTINGS</div><h2>Start a Mock Draft</h2>
@@ -50,14 +52,14 @@
 <button id="start" class="ms-btn primary ms-full">Start AI Mock Draft</button>
 <div id="start-status" class="ms-status" role="status" aria-live="polite"></div>
 </div>
-<div class="ms-card"><div class="ms-k">AI OPPONENTS</div><h2>11 Different Draft Personalities</h2><p>Opponent teams use a mix of balanced, RB-heavy, WR-heavy, Zero-RB, Hero-RB, early-QB, late-QB and best-player approaches. Picks also account for platform ADP, roster construction, 2025 production and 2026 projection.</p><p>The AI intentionally adds controlled randomness so repeated mocks do not produce the exact same board.</p></div>
+<div class="ms-card"><div class="ms-k">AI OPPONENTS</div><h2>11 Different Draft Personalities</h2><p>Opponent teams use balanced, RB-heavy, WR-heavy, Zero-RB, Hero-RB, early-QB, late-QB and best-player approaches. Market rank remains the strongest input, so strategy changes a team’s preference without causing unrealistic reaches.</p><p>Teams react to position runs and tier cliffs, build legal rosters, avoid early kicker and defense picks, and use only mild randomness so repeated mocks feel different but credible.</p></div>
 </div>
 
 <div id="live" class="ms-live">
 <div class="ms-card">
 <div class="ms-tools"><input id="search" class="ms-search" placeholder="Search available players..."><div id="tabs" class="ms-tabs"><button class="active" data-pos="" data-label="All">All <small></small></button><button data-pos="QB" data-label="QB">QB <small></small></button><button data-pos="RB" data-label="RB">RB <small></small></button><button data-pos="WR" data-label="WR">WR <small></small></button><button data-pos="TE" data-label="TE">TE <small></small></button><button data-pos="K" data-label="K">K <small></small></button><button data-pos="DEF" data-label="D/ST">D/ST <small></small></button></div></div>
 <div id="pool-summary" class="ms-pool-summary"><span>Loading the complete player pool…</span></div>
-<div class="ms-table-wrap"><table class="ms-table"><thead><tr><th>Player</th><th>Pos</th><th>NFL</th><th>Platform ADP</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead><tbody id="players"></tbody></table></div>
+<div class="ms-table-wrap"><table class="ms-table"><thead><tr><th>Player</th><th>Pos</th><th>NFL</th><th id="rank-heading">Draft Rank</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead><tbody id="players"></tbody></table></div>
 </div>
 <div class="ms-card">
 <div class="ms-stat"><span>ON THE CLOCK</span><strong id="pick">—</strong></div>
@@ -89,13 +91,49 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  let id = null, available = [], pos = "", poolTotal = 0, positionCounts = {};
+  const expectedBuild="mock-draft-v4-cache-guard";
+  let id = null, available = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="";
 
   async function api(url,opt={}){
     const r=await fetch(url,{headers:{"Content-Type":"application/json"},...opt});
     const d=await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.detail||d.error||`Request failed (${r.status})`);
     return d;
+  }
+
+  function formatCounts(counts={}){
+    return ["QB","RB","WR","TE","K","DEF"]
+      .map(position=>`${position==="DEF"?"D/ST":position} ${Number(counts[position]||0)}`)
+      .join(" · ");
+  }
+
+  async function verifyBuild(){
+    const status=$("build-status");
+    const button=$("start");
+    status.className="ms-status ms-build-check show busy";
+    status.textContent="Checking the deployed server and complete player database…";
+    button.disabled=true;
+    try{
+      const d=await api(`/api/diagnostics/mock-draft?league=${encodeURIComponent($("league").value)}`);
+      if(d.build_id!==expectedBuild){
+        throw new Error("Render is running an older app.py. Upload every V4 replacement file together, redeploy, then refresh this page.");
+      }
+      if(!d.player_pool_complete){
+        throw new Error(`The deployed player database is incomplete (${formatCounts(d.position_counts)}). The draft has been disabled so it cannot make incorrect picks.`);
+      }
+      const source=d.platform_adp_valid
+        ? `${d.ranking_label} loaded`
+        : "Consensus Rank active; verified platform ADP has not been loaded";
+      status.className="ms-status ms-build-check show good";
+      status.textContent=`Player database verified: ${d.player_pool_count} players · ${formatCounts(d.position_counts)} · ${source}`;
+      button.disabled=false;
+      button.textContent="Start AI Mock Draft";
+    }catch(e){
+      status.className="ms-status ms-build-check show error";
+      status.textContent=`Mock Draft unavailable: ${e.message}`;
+      button.disabled=true;
+      button.textContent="Mock Draft Disabled Until Data Is Fixed";
+    }
   }
 
   $("start").onclick=async()=>{
@@ -137,6 +175,9 @@
       counts[player.pos]=(counts[player.pos]||0)+1;
       return counts;
     },{});
+    rankingLabel=d.ranking_label||"Draft Rank";
+    rankingSource=d.ranking_source||"";
+    $("rank-heading").textContent=rankingLabel;
     renderPlayers();
 
     $("grade").textContent=(d.grade||{}).overall||"—";
@@ -211,7 +252,7 @@
     const q=$("search").value.toLowerCase();
     const filtered=available.filter(p=>(!q||p.name.toLowerCase().includes(q))&&(!pos||p.pos===pos));
     const availableTotal=available.length;
-    $("pool-summary").innerHTML=`<span><b>${filtered.length}</b> shown · <b>${availableTotal}</b> available · ${poolTotal} total players</span><span>Search checks every player</span>`;
+    $("pool-summary").innerHTML=`<span><b>${filtered.length}</b> shown · <b>${availableTotal}</b> available · ${poolTotal} total players</span><span>${rankingLabel}${rankingSource?` · ${rankingSource}`:""}</span>`;
 
     document.querySelectorAll("#tabs button").forEach(button=>{
       const tabPos=button.dataset.pos;
@@ -224,7 +265,7 @@
           <td><b>${p.name}</b></td>
           <td>${p.pos}</td>
           <td>${p.team}</td>
-          <td>${p.adp}</td>
+          <td><b>${p.adp}</b><small class="ms-rank-source">${p.is_platform_adp?"Verified platform ADP":"Gridiron IQ consensus"}</small></td>
           <td>${p.projection}</td>
           <td>${p.pick_score}</td>
           <td><button class="ms-pick" data-p="${p.name.replace(/"/g,'&quot;')}">Draft</button></td>
@@ -250,6 +291,8 @@
 
   $("search").oninput=renderPlayers;
 
+  $("league").onchange=verifyBuild;
+
   document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{
     document.querySelectorAll("#tabs button").forEach(x=>x.classList.remove("active"));
     b.classList.add("active");
@@ -265,6 +308,8 @@
     });
     await refresh();
   };
+
+  verifyBuild();
 })();
 </script>
 {% endblock %}
