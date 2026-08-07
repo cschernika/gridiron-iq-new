@@ -47,6 +47,16 @@ jobs:
               payload = json.loads(defense.read_text(encoding="utf-8"))
               assert payload.get("season") == 2026
               assert len(payload.get("teams", {})) >= 28
+              assert len(payload.get("offensive_lines", {})) >= 28
+              assert len(payload.get("schedule_2026", [])) >= 200
+              assert all(
+                  row.get("run_blocking_grade") is not None
+                  for row in payload.get("offensive_lines", {}).values()
+              )
+              assert all(
+                  row.get("run_defense_grade") is not None
+                  for row in payload.get("teams", {}).values()
+              )
           PY
 
       - name: Commit changed snapshots
