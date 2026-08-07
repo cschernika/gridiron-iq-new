@@ -2762,12 +2762,43 @@ def _pr_aggregate(rows, player_name):
 
 CAREER_STATS_FILE = DATA_DIR / "nfl_player_career_history.json"
 BUNDLED_CAREER_STATS_FILE = BASE_DIR / "data" / "nfl_player_career_history.json"
+_CAREER_STATS_CACHE = {"signature": None, "payload": None}
+
+
+def _career_stats_paths():
+    paths = []
+    seen = set()
+    for path in (CAREER_STATS_FILE, BUNDLED_CAREER_STATS_FILE):
+        identity = str(path.resolve(strict=False))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        paths.append(path)
+    return paths
+
+
+def _career_stats_signature():
+    signature = []
+    for path in _career_stats_paths():
+        try:
+            stat = path.stat()
+            signature.append((str(path), stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            signature.append((str(path), 0, 0))
+    return tuple(signature)
 
 
 def _career_stats_snapshot():
     empty = {"updated_at": "", "loaded_seasons": [], "players": {}, "status": "missing"}
+    signature = _career_stats_signature()
+    if (
+        _CAREER_STATS_CACHE.get("signature") == signature
+        and isinstance(_CAREER_STATS_CACHE.get("payload"), dict)
+    ):
+        return _CAREER_STATS_CACHE["payload"]
+
     candidates = []
-    for path in (CAREER_STATS_FILE, BUNDLED_CAREER_STATS_FILE):
+    for path in _career_stats_paths():
         if not path.exists():
             continue
         try:
@@ -2790,7 +2821,9 @@ def _career_stats_snapshot():
             app.logger.warning("Career-history database %s could not be read: %s", path, exc)
     if not candidates:
         return empty
-    return max(candidates, key=lambda item: (item[0], item[1]))[2]
+    payload = max(candidates, key=lambda item: (item[0], item[1]))[2]
+    _CAREER_STATS_CACHE.update({"signature": signature, "payload": payload})
+    return payload
 
 
 def _aggregate_season_rows(rows, season):
@@ -2860,9 +2893,13 @@ def _build_career_history_season(season, force=False):
     return payload, len(season_players)
 
 
-def _pr_history(player_name):
+def _pr_history(player_name, career_snapshot=None):
     norm = _pr_norm(player_name)
-    payload = _career_stats_snapshot()
+    payload = (
+        career_snapshot
+        if isinstance(career_snapshot, dict)
+        else _career_stats_snapshot()
+    )
     season_map = payload.get("players", {}).get(norm, {})
     history = []
 
@@ -6648,6 +6685,8 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
 
 _PR_ROWS_CACHE = {}
 _PR_ROWS_CACHE_TTL = 300
+_PR_PROFILE_CACHE = {}
+_PR_PROFILE_CACHE_TTL = 300
 
 
 def _pr_data_signature(platform):
@@ -6674,6 +6713,7 @@ def _pr_data_signature(platform):
 
 def _clear_pr_rows_cache():
     _PR_ROWS_CACHE.clear()
+    _PR_PROFILE_CACHE.clear()
 
 
 def _pr_position_rows(position="", limit=1000, platform="ESPN"):
@@ -6967,6 +7007,20 @@ def _pr_profile(player_id):
 
 def _player_research_profile_by_name(player_name, platform="ESPN"):
     norm = _pr_norm(player_name)
+    platform = str(platform or "ESPN").upper()
+    if platform not in {"ESPN", "YAHOO"}:
+        platform = "ESPN"
+
+    signature = (_pr_data_signature(platform), _career_stats_signature())
+    cache_key = (platform, norm)
+    cached = _PR_PROFILE_CACHE.get(cache_key)
+    if (
+        cached
+        and cached.get("signature") == signature
+        and time.time() - cached.get("created_at", 0) < _PR_PROFILE_CACHE_TTL
+    ):
+        return cached.get("profile")
+
     row = next(
         (
             item for item in _pr_position_rows("", limit=1000, platform=platform)
@@ -6977,7 +7031,8 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
     if not row:
         return None
 
-    history = _pr_history(row["name"])
+    career = _career_stats_snapshot()
+    history = _pr_history(row["name"], career)
     recent_news = _indexed_player_news(row["name"])
     news_index = _player_news_index()
     master = _player_research_master_row(row["name"])
@@ -6999,8 +7054,7 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
         "receiving_tds": row.get("proj_2026_rec_tds", 0),
         "method": projection.get("method") or "2026 source projection or Gridiron IQ fallback",
     })
-    career = _career_stats_snapshot()
-    return {
+    profile = {
         "bio": {
             key: row.get(key)
             for key in (
@@ -7036,6 +7090,12 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
             "Career history displays every imported season available for this player.",
         ],
     }
+    _PR_PROFILE_CACHE[cache_key] = {
+        "signature": signature,
+        "created_at": time.time(),
+        "profile": profile,
+    }
+    return profile
 
 
 @app.get("/api/player-research/profile-by-name/<path:player_name>")
@@ -7046,7 +7106,9 @@ def player_research_profile_by_name_api(player_name):
     profile = _player_research_profile_by_name(player_name, platform)
     if not profile:
         return jsonify(ok=False, error="Player not found."), 404
-    return jsonify(ok=True, profile=profile)
+    response = jsonify(ok=True, profile=profile)
+    response.headers["Cache-Control"] = "private, max-age=300"
+    return response
 
 
 @app.get("/api/player-research/profile/<player_id>")
