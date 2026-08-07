@@ -39,10 +39,12 @@
     </div>
     <div class="giq-hero-actions">
       <span class="giq-status {{ 'connected' if connected else 'disconnected' }}"><i></i>{{ 'League connected' if connected else 'League not connected' }}</span>
-      <a class="giq-button {{ 'secondary' if connected else 'primary' }}" href="/league-sync">↻ Sync League</a>
-      {% if connected and roster_count == 0 %}
+      <a class="giq-button secondary" href="/league-sync">↻ Sync League</a>
+      {% if not connected %}
+        <a class="giq-button primary" href="/connect-league">Connect a League</a>
+      {% elif roster_count == 0 %}
         <a class="giq-button primary" href="/draft-center">Open Draft Center</a>
-      {% elif connected %}
+      {% else %}
         <a class="giq-button primary" href="/lineup-optimizer">Optimize Lineup</a>
       {% endif %}
     </div>
@@ -51,7 +53,7 @@
   <section class="giq-league-strip">
     <div class="giq-league-main">
       <div class="giq-ball">🏈</div>
-      <div><span>Active League</span><strong>{{ league.league_name if connected and league else "Sync ESPN or Yahoo" }}</strong></div>
+      <div><span>Active League</span><strong>{{ league.league_name if connected and league else "Connect ESPN or Yahoo" }}</strong></div>
     </div>
     <div class="giq-league-detail"><span>Platform</span><strong>{{ league.platform|default("ESPN", true) if connected and league else "—" }}</strong></div>
     <div class="giq-league-detail"><span>League Size</span><strong>{{ (league.teams if league and league.teams else 12) ~ " Teams" if connected else "—" }}</strong></div>
@@ -60,7 +62,7 @@
   </section>
 
   <section class="giq-metrics">
-    <article class="giq-metric"><div class="giq-metric-icon purple">🏆</div><div><span>Team Strength</span><strong>{{ stats.team_strength if connected and stats and stats.team_strength is defined else "—" }}</strong><small>{% if connected %}League rank #{{ stats.team_rank if stats and stats.team_rank is defined else "—" }}{% else %}Sync league to calculate{% endif %}</small></div></article>
+    <article class="giq-metric"><div class="giq-metric-icon purple">🏆</div><div><span>Team Strength</span><strong>{{ stats.team_strength if connected and stats and stats.team_strength is defined else "—" }}</strong><small>{% if connected %}League rank #{{ stats.team_rank if stats and stats.team_rank is defined else "—" }}{% else %}Connect league to calculate{% endif %}</small></div></article>
     <article class="giq-metric"><div class="giq-metric-icon green">↗</div><div><span>Playoff Probability</span><strong>{{ (stats.playoff_probability|string ~ "%") if connected and stats and stats.playoff_probability is defined else "—" }}</strong><small>Current roster projection</small></div></article>
     <article class="giq-metric"><div class="giq-metric-icon orange">☆</div><div><span>Championship Odds</span><strong>{{ (stats.championship_probability|string ~ "%") if connected and stats and stats.championship_probability is defined else "—" }}</strong><small>League-wide forecast</small></div></article>
     <article class="giq-metric"><div class="giq-metric-icon blue">〽</div><div><span>Lineup Gain</span><strong>{{ ("+" ~ stats.lineup_gain) if connected and stats and stats.lineup_gain is defined else "—" }}</strong><small>Points available from optimization</small></div></article>
@@ -96,7 +98,7 @@
           {% elif connected %}
             <tr><td class="giq-empty" colspan="4">Sync the league to calculate power rankings.</td></tr>
           {% else %}
-            <tr><td class="giq-empty" colspan="4">Sync your ESPN or Yahoo league to see every team.</td></tr>
+            <tr><td class="giq-empty" colspan="4">Connect your ESPN or Yahoo league to see every team.</td></tr>
           {% endif %}
           </tbody>
         </table>
@@ -108,7 +110,7 @@
       <div class="giq-action-wrap">
         <div class="giq-next-action">
           {% if not connected %}
-            <span>TOP PRIORITY</span><h3>Sync your league</h3><p>Unlock personalized rankings, team analysis, trades, waivers and lineup recommendations.</p><a href="/league-sync">Sync ESPN or Yahoo →</a>
+            <span>TOP PRIORITY</span><h3>Connect your league</h3><p>Unlock personalized rankings, team analysis, trades, waivers and lineup recommendations.</p><a href="/connect-league">Connect ESPN or Yahoo →</a>
           {% elif roster_count == 0 %}
             <span>PRE-DRAFT PRIORITY</span><h3>Build your draft plan</h3><p>Review ADP, position scarcity and mock-draft outcomes before your live draft.</p><a href="/draft-center">Open Draft Center →</a>
           {% else %}
