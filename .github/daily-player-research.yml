@@ -26,7 +26,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Refresh current players, teams and injuries
+      - name: Refresh current players, teams, depth charts and injuries
         run: python refresh_daily_player_research.py
 
       - name: Validate Player Research files
