@@ -6205,20 +6205,22 @@ def _weekly_matchup_rows(week=1, position="ALL"):
     payload = _defensive_stats_snapshot()
     schedule = _weekly_schedule_lookup(payload, week)
     offense_rows, _ = _offensive_stats_rows(season=2026, scoring="PPR")
-    positions = {"WR", "TE"} if position == "ALL" else {position}
+    positions = {"RB", "WR", "TE"} if position == "ALL" else {position}
     offense_rows = [
         row for row in offense_rows
         if (
             row.get("position") in positions
             and _off_num(row.get("fantasy_points")) > 0
             and (
-                _off_num(row.get("targets")) > 0
+                _off_num(row.get("carries")) > 0
+                or _off_num(row.get("targets")) > 0
                 or _off_num(row.get("receptions")) > 0
                 or _off_num(row.get("receiving_yards")) > 0
             )
         )
     ]
     skill_grades = {
+        **_matchup_percentile_grades(offense_rows, "RB"),
         **_matchup_percentile_grades(offense_rows, "WR"),
         **_matchup_percentile_grades(offense_rows, "TE"),
     }
@@ -6228,7 +6230,7 @@ def _weekly_matchup_rows(week=1, position="ALL"):
     league_splits = payload.get("league_receiver_splits", {}) or {}
 
     position_allowed_averages = {}
-    for pos in ("WR", "TE"):
+    for pos in ("RB", "WR", "TE"):
         values = [
             _off_num(((team.get("allowed_by_position") or {}).get(pos) or {}).get("ppr_per_target"))
             for team in teams.values()
@@ -6285,18 +6287,47 @@ def _weekly_matchup_rows(week=1, position="ALL"):
         run_block_grade = _off_num(line.get("run_blocking_grade"), 50)
         pass_rush_grade = _off_num(defense.get("pass_rush_grade"), 50)
         run_defense_grade = _off_num(defense.get("run_defense_grade"), 50)
+        front_grade = _off_num(defense.get("front_grade"), 50)
         pass_trench_score = _def_clamp(50 + (pass_pro_grade - pass_rush_grade) * 0.55)
         run_trench_score = _def_clamp(50 + (run_block_grade - run_defense_grade) * 0.55)
-
-        score = _def_clamp(
-            50
-            + (skill_grade - 50) * 0.30
-            + (50 - secondary_grade) * 0.28
-            + (50 - defender_grade) * 0.12
-            + coverage_fit
-            + allowed_fit
-            + (pass_trench_score - 50) * 0.12
+        rush_share = _off_num(player.get("rush_share"))
+        opportunity_share = _off_num(player.get("opportunity_share"))
+        red_zone_carry_share = player.get("red_zone_carry_share")
+        if red_zone_carry_share in (None, ""):
+            red_zone_carry_share = rush_share
+        red_zone_carry_share = _off_num(red_zone_carry_share)
+        workload_grade = _def_clamp(
+            20 + rush_share * 0.45 + opportunity_share * 0.25 + red_zone_carry_share * 0.20
         )
+        receiving_matchup_grade = _def_clamp(
+            50
+            + (allowed_ppr_target - position_allowed_averages[player_position]) * 20
+            + _off_num(player.get("target_share")) * 0.20
+        )
+        run_defense_advantage = _def_clamp(100 - run_defense_grade)
+
+        if player_position == "RB":
+            # RB model: 25% player, 40% OL/front comparison, 20% opponent
+            # run defense, 10% workload, and 5% receiving matchup.
+            score = _def_clamp(
+                skill_grade * 0.25
+                + run_trench_score * 0.40
+                + run_defense_advantage * 0.20
+                + workload_grade * 0.10
+                + receiving_matchup_grade * 0.05
+            )
+            matchup_model = "RUNNING_BACK"
+        else:
+            score = _def_clamp(
+                50
+                + (skill_grade - 50) * 0.30
+                + (50 - secondary_grade) * 0.28
+                + (50 - defender_grade) * 0.12
+                + coverage_fit
+                + allowed_fit
+                + (pass_trench_score - 50) * 0.12
+            )
+            matchup_model = "RECEIVER"
         grade = _def_letter_grade(score)
         if score >= 72:
             verdict = "Strong advantage"
@@ -6315,7 +6346,14 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             + (f" and leaned most on {top_coverage}." if top_coverage else ".")
             + f" {name} produced {_off_num(player_ppr_target):.2f} PPR points per target against {dominant_name.lower()} ({split_basis.lower()})."
         )
-        if primary:
+        if player_position == "RB":
+            defender_note = (
+                f"{opponent}'s defensive front grade is {front_grade:.1f} "
+                f"(rank #{int(_off_num(defense.get('front_rank'), 0)) or '—'}), with a "
+                f"{run_defense_grade:.1f} run-defense grade. The RB receiving matchup allows "
+                f"{allowed_ppr_target:.2f} PPR points per target."
+            )
+        elif primary:
             defender_note = (
                 f"Likely primary matchup: {primary.get('name')} ({primary.get('role')}) — "
                 f"{_off_num(primary.get('snap_share')):.1f}% snap share, "
@@ -6324,10 +6362,20 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             )
         else:
             defender_note = "No returning high-snap coverage defender was available in the bundled current roster."
-        trench_note = (
-            f"Pass protection grade {pass_pro_grade:.1f} versus {opponent} pass-rush grade {pass_rush_grade:.1f}; "
-            f"pass-trench advantage score {pass_trench_score:.1f}."
-        )
+        if player_position == "RB":
+            trench_note = (
+                f"{team} projected run-blocking grade {run_block_grade:.1f} "
+                f"(rank #{int(_off_num(line.get('run_blocking_rank'), 0)) or '—'}) versus "
+                f"{opponent} run-defense grade {run_defense_grade:.1f} "
+                f"(rank #{int(_off_num(defense.get('run_defense_rank'), 0)) or '—'}); "
+                f"run-trench advantage score {run_trench_score:.1f}. "
+                f"That is a {verdict.lower()} RB matchup."
+            )
+        else:
+            trench_note = (
+                f"Pass protection grade {pass_pro_grade:.1f} versus {opponent} pass-rush grade {pass_rush_grade:.1f}; "
+                f"pass-trench advantage score {pass_trench_score:.1f}."
+            )
 
         prepared.append({
             "name": name,
@@ -6340,9 +6388,19 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             "location": game.get("location"),
             "projected_points": _off_round(player.get("fantasy_points"), 1),
             "offense_data_type": player.get("data_type") or "projection",
+            "matchup_model": matchup_model,
+            "carries": player.get("carries"),
+            "rushing_yards": player.get("rushing_yards"),
+            "yards_per_carry": player.get("yards_per_carry"),
             "target_share": player.get("target_share"),
+            "rush_share": player.get("rush_share"),
+            "opportunity_share": player.get("opportunity_share"),
+            "red_zone_carry_share": player.get("red_zone_carry_share"),
+            "red_zone_touch_share": player.get("red_zone_touch_share"),
             "air_yards_share": player.get("air_yards_share"),
             "skill_grade": round(skill_grade, 1),
+            "workload_grade": workload_grade,
+            "receiving_matchup_grade": receiving_matchup_grade,
             "matchup_score": score,
             "matchup_grade": grade,
             "verdict": verdict,
@@ -6366,6 +6424,8 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             ],
             "secondary_grade": round(secondary_grade, 1),
             "secondary_rank": defense.get("secondary_rank"),
+            "front_grade": round(front_grade, 1),
+            "front_rank": defense.get("front_rank"),
             "position_ppr_per_target_allowed": round(allowed_ppr_target, 2),
             "man_rate": defense.get("man_rate"),
             "zone_rate": defense.get("zone_rate"),
@@ -6377,7 +6437,13 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             "pass_rush_grade": round(pass_rush_grade, 1),
             "pass_trench_score": pass_trench_score,
             "run_blocking_grade": round(run_block_grade, 1),
+            "run_blocking_rank": line.get("run_blocking_rank"),
             "run_defense_grade": round(run_defense_grade, 1),
+            "run_defense_rank": defense.get("run_defense_rank"),
+            "opponent_yards_per_carry": defense.get("yards_per_carry"),
+            "opponent_rush_epa_per_carry": defense.get("rush_epa_per_carry"),
+            "opponent_stuff_rate": defense.get("stuff_rate"),
+            "opponent_explosive_run_rate": defense.get("explosive_run_rate"),
             "run_trench_score": run_trench_score,
             "coverage_note": coverage_note,
             "defender_note": defender_note,
@@ -6402,7 +6468,7 @@ def weekly_matchups_api():
     except (TypeError, ValueError):
         week = 1
     position = str(request.args.get("position") or "ALL").upper()
-    if position not in {"ALL", "WR", "TE"}:
+    if position not in {"ALL", "RB", "WR", "TE"}:
         position = "ALL"
     rows, payload = _weekly_matchup_rows(week=week, position=position)
     offense_data_type = "actual" if any(str(row.get("offense_data_type") or "").lower() == "actual" for row in rows) else "projection"
@@ -6413,11 +6479,21 @@ def weekly_matchups_api():
         count=len(rows),
         rows=rows,
         metadata={
+            "model_version": "RB Model V2",
             "season": payload.get("matchup_season", 2026),
             "baseline_season": payload.get("season", 2025),
             "offense_data_type": offense_data_type,
             "source": payload.get("source") or "Gridiron IQ matchup model",
             "license_note": payload.get("license_note") or "",
+            "line_projection_type": (
+                "current-season performance"
+                if int(payload.get("season") or 0) == int(payload.get("matchup_season") or 2026)
+                else "latest-complete-season performance projection"
+            ),
+            "line_projection_note": (
+                "The offensive-line run grade uses team rushing EPA, yards per carry, stuff rate and explosive-run rate. "
+                "Before current-season samples are available it is a performance-based preseason projection; the weekly refresh automatically switches to current-season results."
+            ),
             "assignment_note": "Primary defenders are likely matchups based on current roster role, snap share and coverage usage; they are not guaranteed shadow assignments.",
         },
     )
