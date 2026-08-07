@@ -6,7 +6,8 @@
 .ms-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.ms-k{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}.ms h1{font-size:36px;margin:5px 0}.ms p{color:var(--m)}
 .ms-grid{display:grid;grid-template-columns:.7fr 1.3fr;gap:16px}.ms-card{background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px}.ms-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ms-form label{font-size:10px;color:var(--m);font-weight:800}.ms-form input,.ms-form select{width:100%;box-sizing:border-box;border:1px solid var(--l);border-radius:9px;padding:10px;background:#fff;margin-top:5px}
 .ms-btn{border:1px solid var(--l);border-radius:10px;padding:10px 13px;background:#fff;font-weight:900;cursor:pointer}.ms-btn.primary{border:0;background:linear-gradient(90deg,#2d70f4,#6038f3);color:#fff}.ms-full{width:100%;margin-top:12px}
-.ms-live{display:none;grid-template-columns:1.45fr .75fr;gap:16px;margin-top:16px}.ms-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}.ms-search{flex:1;min-width:180px;border:1px solid var(--l);border-radius:9px;padding:9px}.ms-tabs{display:flex;gap:6px}.ms-tabs button{border:0;border-radius:999px;padding:7px 10px;background:#f0f3f8;font-weight:800}.ms-tabs button.active{background:var(--p);color:#fff}
+.ms-live{display:none;grid-template-columns:1.45fr .75fr;gap:16px;margin-top:16px}.ms-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}.ms-search{flex:1;min-width:180px;border:1px solid var(--l);border-radius:9px;padding:9px}.ms-tabs{display:flex;gap:6px;flex-wrap:wrap}.ms-tabs button{border:0;border-radius:999px;padding:7px 10px;background:#f0f3f8;font-weight:800;cursor:pointer}.ms-tabs button small{font-size:8px;opacity:.72;margin-left:3px}.ms-tabs button.active{background:var(--p);color:#fff}
+.ms-pool-summary{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 9px;color:var(--m);font-size:10px}.ms-pool-summary b{color:var(--t)}.ms-empty{text-align:center!important;color:var(--m);padding:28px 8px!important}
 .ms-table-wrap{overflow:auto;max-height:610px}.ms-table{width:100%;border-collapse:collapse;min-width:700px}.ms-table th,.ms-table td{padding:9px 7px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:10px}.ms-table th{font-size:8px;color:var(--m);position:sticky;top:0;background:#fff}.ms-pick{border:0;border-radius:8px;background:var(--p);color:#fff;padding:7px 9px;font-weight:900}
 .ms-stat{background:#f7f8fc;border-radius:11px;padding:11px;margin-bottom:10px}.ms-stat span,.ms-stat strong{display:block}.ms-stat span{font-size:9px;color:var(--m)}.ms-stat strong{font-size:22px;margin-top:3px}.ms-roster{width:100%;border-collapse:collapse}.ms-roster td,.ms-roster th{padding:7px 4px;border-bottom:1px solid #e8ebf1;font-size:10px;text-align:left}
 .ms-saved{margin-top:16px}.ms-saved-row{display:grid;grid-template-columns:1fr 130px 80px;gap:10px;padding:10px;border-bottom:1px solid #e7eaf1;font-size:11px}.ms-link{color:#4637e5;font-weight:900;text-decoration:none}
@@ -36,7 +37,7 @@
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
 </style>
 <div class="ms">
-<div class="ms-head"><div><div class="ms-k">AI DRAFT SIMULATOR</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams with different draft strategies, roster needs and platform ADP.</p></div></div>
+<div class="ms-head"><div><div class="ms-k">AI DRAFT SIMULATOR · COMPLETE PLAYER POOL V2</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams with different draft strategies, roster needs and platform ADP.</p></div></div>
 
 <div id="setup" class="ms-grid">
 <div class="ms-card"><div class="ms-k">DRAFT SETTINGS</div><h2>Start a Mock Draft</h2>
@@ -54,7 +55,8 @@
 
 <div id="live" class="ms-live">
 <div class="ms-card">
-<div class="ms-tools"><input id="search" class="ms-search" placeholder="Search available players..."><div id="tabs" class="ms-tabs"><button class="active" data-pos="">All</button><button data-pos="QB">QB</button><button data-pos="RB">RB</button><button data-pos="WR">WR</button><button data-pos="TE">TE</button></div></div>
+<div class="ms-tools"><input id="search" class="ms-search" placeholder="Search available players..."><div id="tabs" class="ms-tabs"><button class="active" data-pos="" data-label="All">All <small></small></button><button data-pos="QB" data-label="QB">QB <small></small></button><button data-pos="RB" data-label="RB">RB <small></small></button><button data-pos="WR" data-label="WR">WR <small></small></button><button data-pos="TE" data-label="TE">TE <small></small></button><button data-pos="K" data-label="K">K <small></small></button><button data-pos="DEF" data-label="D/ST">D/ST <small></small></button></div></div>
+<div id="pool-summary" class="ms-pool-summary"><span>Loading the complete player pool…</span></div>
 <div class="ms-table-wrap"><table class="ms-table"><thead><tr><th>Player</th><th>Pos</th><th>NFL</th><th>Platform ADP</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead><tbody id="players"></tbody></table></div>
 </div>
 <div class="ms-card">
@@ -87,7 +89,7 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  let id = null, available = [], pos = "";
+  let id = null, available = [], pos = "", poolTotal = 0, positionCounts = {};
 
   async function api(url,opt={}){
     const r=await fetch(url,{headers:{"Content-Type":"application/json"},...opt});
@@ -130,6 +132,11 @@
   async function refresh(){
     const d=await api(`/api/mock-draft/manual/${id}`);
     available=d.available||[];
+    poolTotal=Number(d.player_pool_count||available.length);
+    positionCounts=d.position_counts||available.reduce((counts,player)=>{
+      counts[player.pos]=(counts[player.pos]||0)+1;
+      return counts;
+    },{});
     renderPlayers();
 
     $("grade").textContent=(d.grade||{}).overall||"—";
@@ -202,10 +209,17 @@
 
   function renderPlayers(){
     const q=$("search").value.toLowerCase();
-    $("players").innerHTML=available
-      .filter(p=>(!q||p.name.toLowerCase().includes(q))&&(!pos||p.pos===pos))
-      .slice(0,160)
-      .map(p=>`
+    const filtered=available.filter(p=>(!q||p.name.toLowerCase().includes(q))&&(!pos||p.pos===pos));
+    const availableTotal=available.length;
+    $("pool-summary").innerHTML=`<span><b>${filtered.length}</b> shown · <b>${availableTotal}</b> available · ${poolTotal} total players</span><span>Search checks every player</span>`;
+
+    document.querySelectorAll("#tabs button").forEach(button=>{
+      const tabPos=button.dataset.pos;
+      const count=tabPos ? Number(positionCounts[tabPos]||0) : availableTotal;
+      button.querySelector("small").textContent=`${count}`;
+    });
+
+    $("players").innerHTML=filtered.length ? filtered.map(p=>`
         <tr>
           <td><b>${p.name}</b></td>
           <td>${p.pos}</td>
@@ -214,7 +228,7 @@
           <td>${p.projection}</td>
           <td>${p.pick_score}</td>
           <td><button class="ms-pick" data-p="${p.name.replace(/"/g,'&quot;')}">Draft</button></td>
-        </tr>`).join("");
+        </tr>`).join("") : `<tr><td class="ms-empty" colspan="7">No available players match this search and position.</td></tr>`;
 
     document.querySelectorAll(".ms-pick").forEach(b=>b.onclick=async()=>{
       b.disabled=true;
