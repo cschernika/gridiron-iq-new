@@ -1,14 +1,18 @@
 """Refresh the current Player Research directory once per day.
 
-The daily job uses Sleeper's public NFL player directory for current team,
-free-agent, depth-chart and injury fields. Existing projection, ADP and
-historical-stat blocks in the master database are preserved.
+The daily job uses Sleeper's public NFL player directory for current teams,
+free agents and injuries, then overlays nflverse's published ESPN depth charts
+when they are available. Existing projections, ADP and historical-stat blocks
+in the master database are preserved.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
+import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -22,6 +26,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parent
 SLEEPER_PLAYERS_URL = "https://api.sleeper.app/v1/players/nfl"
 ESPN_NFL_NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=100"
+NFLVERSE_DEPTH_URL = "https://github.com/nflverse/nflverse-data/releases/download/depth_charts/depth_charts_{season}.csv"
 USER_AGENT = "Gridiron-IQ-Daily-Player-Research/2026"
 FANTASY_POSITIONS = {"QB", "RB", "WR", "TE", "K", "DEF"}
 NEWS_WINDOW_HOURS = 72
@@ -100,6 +105,29 @@ def fetch_espn_news():
     return payload
 
 
+def fetch_nflverse_depth_charts(season=2026):
+    """Download the current nflverse/ESPN depth-chart release as CSV."""
+    errors = []
+    base_url = NFLVERSE_DEPTH_URL.format(season=int(season))
+    for url in (base_url, base_url + ".gz"):
+        try:
+            request = Request(
+                url,
+                headers={"User-Agent": USER_AGENT, "Accept": "text/csv,*/*"},
+            )
+            with urlopen(request, timeout=90) as response:
+                raw = response.read()
+            if url.endswith(".gz") or raw[:2] == b"\x1f\x8b":
+                raw = gzip.decompress(raw)
+            rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+            if not rows:
+                raise RuntimeError("the release contained no rows")
+            return rows
+        except (HTTPError, URLError, TimeoutError, OSError, UnicodeError, ValueError, RuntimeError) as exc:
+            errors.append(f"{url}: {exc}")
+    raise RuntimeError("Published depth-chart download failed: " + " | ".join(errors))
+
+
 def player_name(row):
     return str(
         row.get("full_name")
@@ -115,6 +143,97 @@ def fantasy_position(row):
         or ""
     ).upper()
     return "DEF" if position == "DST" else position
+
+
+def depth_fantasy_position(value):
+    position = str(value or "").strip().upper()
+    return {
+        "DST": "DEF", "HB": "RB", "FB": "RB",
+        "LWR": "WR", "RWR": "WR", "SWR": "WR",
+    }.get(position, position)
+
+
+def positive_int(value):
+    try:
+        number = int(float(value))
+        return number if number > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def depth_record_name(row):
+    return str(
+        row.get("full_name")
+        or row.get("football_name")
+        or " ".join(
+            value for value in (row.get("first_name"), row.get("last_name")) if value
+        )
+        or ""
+    ).strip()
+
+
+def build_depth_index(rows, season=2026):
+    """Keep each player's latest published team depth-chart position."""
+    candidates = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        row_season = positive_int(row.get("season"))
+        if row_season and row_season != int(season):
+            continue
+        name = depth_record_name(row)
+        order = positive_int(
+            row.get("depth_team")
+            or row.get("depth_chart_order")
+            or row.get("depth")
+        )
+        position = depth_fantasy_position(
+            row.get("position") or row.get("depth_position")
+        )
+        team = team_code(row.get("club_code") or row.get("team"))
+        if not name or not order or not team or position not in FANTASY_POSITIONS:
+            continue
+        week = positive_int(row.get("week")) or 0
+        recency = (
+            row_season or int(season),
+            str(row.get("date") or row.get("timestamp") or ""),
+            week,
+        )
+        key = norm(name)
+        current = candidates.get(key)
+        if (
+            not current
+            or recency > current["recency"]
+            or (recency == current["recency"] and order < current["depth_chart_order"])
+        ):
+            candidates[key] = {
+                "team": team,
+                "position": position,
+                "depth_chart_position": str(row.get("depth_position") or position).upper(),
+                "depth_chart_order": order,
+                "depth_chart_source": "nflverse / ESPN published depth chart",
+                "recency": recency,
+            }
+    for record in candidates.values():
+        record.pop("recency", None)
+    return candidates
+
+
+def apply_published_depth_charts(directory, depth_index):
+    updated = 0
+    for current in directory.values():
+        published = depth_index.get(norm(current.get("full_name")))
+        if not published:
+            continue
+        if team_code(current.get("team")) != team_code(published.get("team")):
+            continue
+        if depth_fantasy_position(current.get("position")) != depth_fantasy_position(published.get("position")):
+            continue
+        current["depth_chart_position"] = published.get("depth_chart_position") or current.get("position") or ""
+        current["depth_chart_order"] = published.get("depth_chart_order")
+        current["depth_chart_source"] = published.get("depth_chart_source") or "Published team depth chart"
+        updated += 1
+    return updated
 
 
 def compact_directory(raw_directory, minimum_players=500):
@@ -143,6 +262,7 @@ def compact_directory(raw_directory, minimum_players=500):
             "number": row.get("number"),
             "depth_chart_position": row.get("depth_chart_position") or "",
             "depth_chart_order": row.get("depth_chart_order"),
+            "depth_chart_source": "Sleeper published depth chart" if positive_int(row.get("depth_chart_order")) else "",
             "injury_status": row.get("injury_status") or "",
             "injury_body_part": row.get("injury_body_part") or "",
             "injury_start_date": row.get("injury_start_date") or "",
@@ -308,6 +428,7 @@ def build_master(directory, old_master, stats_payload, signature, checked_at):
             "number": current.get("number"),
             "depth_chart_position": current.get("depth_chart_position") or "",
             "depth_chart_order": current.get("depth_chart_order"),
+            "depth_chart_source": current.get("depth_chart_source") or "",
             "fantasy_positions": current.get("fantasy_positions") or [current["position"]],
             "injury_status": new_injury,
             "injury_body_part": current.get("injury_body_part") or "",
@@ -338,7 +459,10 @@ def build_master(directory, old_master, stats_payload, signature, checked_at):
         "daily_refresh": True,
         "count": len(merged),
         "rookie_count": sum(1 for player in merged.values() if player.get("rookie")),
-        "sources": ["Sleeper public NFL player directory — daily"],
+        "sources": [
+            "Sleeper public NFL player directory — daily",
+            "nflverse / ESPN published depth charts — daily when available",
+        ],
         "team_resolution_priority": ["Sleeper daily player directory", "FA when no current team is published"],
         "roster_signature": signature,
         "team_change_count": len(team_changes),
@@ -354,6 +478,7 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=ROOT / "data")
     parser.add_argument("--input-json", type=Path, help="Use a local Sleeper-shaped fixture instead of downloading")
     parser.add_argument("--news-json", type=Path, help="Use a local ESPN-shaped news fixture instead of downloading")
+    parser.add_argument("--depth-json", type=Path, help="Use a local nflverse-shaped depth-chart fixture instead of downloading")
     parser.add_argument(
         "--minimum-players",
         type=int,
@@ -365,6 +490,22 @@ def main():
 
     raw = read_json(args.input_json) if args.input_json else fetch_sleeper_players()
     directory = compact_directory(raw, max(1, args.minimum_players))
+    depth_warning = ""
+    published_depth_count = 0
+    try:
+        if args.depth_json:
+            depth_payload = read_json(args.depth_json, default=[])
+            depth_rows = depth_payload if isinstance(depth_payload, list) else depth_payload.get("rows", [])
+        elif args.input_json:
+            depth_rows = []
+        else:
+            depth_rows = fetch_nflverse_depth_charts(2026)
+        depth_index = build_depth_index(depth_rows, 2026)
+        published_depth_count = apply_published_depth_charts(directory, depth_index)
+        print(f"Applied {published_depth_count} published depth-chart positions")
+    except Exception as exc:
+        depth_warning = str(exc)
+        print(f"Published depth-chart refresh warning: {depth_warning}")
     signature = directory_signature(directory)
     checked_at = utc_now()
 
@@ -426,6 +567,9 @@ def main():
         "team_change_count": int(master.get("team_change_count") or 0) if changed else 0,
         "injury_change_count": int(master.get("injury_change_count") or 0) if changed else 0,
         "source": "Sleeper public NFL player directory",
+        "depth_chart_source": "nflverse / ESPN published depth charts plus client-side team projection",
+        "published_depth_count": published_depth_count,
+        "depth_chart_warning": depth_warning,
         "news_source": news_index.get("source", ""),
         "news_player_count": int(news_index.get("player_count") or 0),
         "news_article_count": int(news_index.get("article_count") or 0),

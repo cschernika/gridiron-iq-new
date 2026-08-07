@@ -3414,6 +3414,8 @@ def _sleeper_active_players_2026():
             "number": p.get("number"),
             "injury_status": p.get("injury_status"),
             "depth_chart_position": p.get("depth_chart_position"),
+            "depth_chart_order": p.get("depth_chart_order"),
+            "depth_chart_source": "Sleeper published depth chart" if p.get("depth_chart_order") else "",
             "fantasy_positions": p.get("fantasy_positions") or [],
             "source_player": "Sleeper",
         }
@@ -6726,6 +6728,8 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
                 or master.get("depth_chart_position") or "",
             "depth_chart_order": player.get("depth_chart_order")
                 or master.get("depth_chart_order"),
+            "depth_chart_source": player.get("depth_chart_source")
+                or master.get("depth_chart_source") or "",
             "status": player.get("status") or master.get("status"),
             "injury_status": injury_status,
             "injury_body_part": master.get("injury_body_part") or "",
@@ -7047,6 +7051,8 @@ def _pr_profile(player_id):
         "status": master.get("status") or p.get("status"),
         "injury_status": master.get("injury_status") or p.get("injury_status"),
         "depth_chart_position": master.get("depth_chart_position") or p.get("depth_chart_position"),
+        "depth_chart_order": master.get("depth_chart_order") or p.get("depth_chart_order"),
+        "depth_chart_source": master.get("depth_chart_source") or "",
         "rookie": bool(master.get("rookie") or p.get("rookie")),
         "adp": adp_info.get("adp"),
         "position_adp": adp_info.get("position_adp"),
@@ -7132,6 +7138,7 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
                 "age", "college", "years_exp", "status", "injury_status",
                 "rookie", "adp", "position_adp", "number",
                 "depth_chart_position", "depth_chart_order",
+                "depth_chart_source",
             )
         },
         "adp_source": row.get("adp_source") or platform,
