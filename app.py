@@ -1039,7 +1039,12 @@ def yahoo_callback():
 
 MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
+BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
+MOCK_DRAFT_BUILD = "mock-draft-v4-cache-guard"
+MOCK_DIRECTORY_MINIMUMS = {
+    "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
+}
 _MANUAL_MOCK_MEMORY = None
 _MOCK_CURRENT_PLAYERS_MEMORY = {}
 _MOCK_CURRENT_PLAYERS_MTIME = 0.0
@@ -1048,16 +1053,61 @@ def _manual_mock_public(mock):
     """Return only the mock fields the browser needs, excluding the large pool."""
     return {key: value for key, value in mock.items() if key != "player_pool"}
 
+def _mock_directory_position_counts(directory):
+    rows = directory.get("players", {}) if isinstance(directory, dict) and isinstance(directory.get("players"), dict) else directory
+    counts = Counter()
+    for row in (rows or {}).values() if isinstance(rows, dict) else []:
+        if not isinstance(row, dict):
+            continue
+        position = str(
+            row.get("position")
+            or ((row.get("fantasy_positions") or [""])[0])
+            or ""
+        ).upper()
+        if position in {"DST", "D/ST"}:
+            position = "DEF"
+        if position == "FB":
+            position = "RB"
+        if position in MOCK_DIRECTORY_MINIMUMS:
+            counts[position] += 1
+    return counts
+
+def _mock_directory_is_complete(directory):
+    counts = _mock_directory_position_counts(directory)
+    return all(
+        counts.get(position, 0) >= minimum
+        for position, minimum in MOCK_DIRECTORY_MINIMUMS.items()
+    )
+
+def _mock_read_directory(path):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+def _mock_player_cache_read_path():
+    """Use persistent data only when it contains every fantasy position."""
+    for path in (MOCK_PLAYER_CACHE_FILE, BUNDLED_MOCK_PLAYER_CACHE_FILE):
+        if path.exists() and _mock_directory_is_complete(_mock_read_directory(path)):
+            return path
+    if BUNDLED_MOCK_PLAYER_CACHE_FILE.exists():
+        return BUNDLED_MOCK_PLAYER_CACHE_FILE
+    if MOCK_PLAYER_CACHE_FILE.exists():
+        return MOCK_PLAYER_CACHE_FILE
+    return MOCK_PLAYER_CACHE_FILE
+
 def _mock_current_player_directory():
     """Load current teams once per day and reuse the saved Sleeper directory."""
     cached = {}
+    cache_path = _mock_player_cache_read_path()
     try:
-        if MOCK_PLAYER_CACHE_FILE.exists():
-            cached = json.loads(MOCK_PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+        if cache_path.exists():
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
             if not isinstance(cached, dict):
                 cached = {}
-            age = time.time() - MOCK_PLAYER_CACHE_FILE.stat().st_mtime
-            if cached and age < MOCK_PLAYER_CACHE_TTL:
+            age = time.time() - cache_path.stat().st_mtime
+            if _mock_directory_is_complete(cached) and age < MOCK_PLAYER_CACHE_TTL:
                 return cached
     except Exception:
         cached = {}
@@ -1070,7 +1120,7 @@ def _mock_current_player_directory():
         )
         response.raise_for_status()
         payload = response.json()
-        if isinstance(payload, dict) and payload:
+        if isinstance(payload, dict) and _mock_directory_is_complete(payload):
             try:
                 MOCK_PLAYER_CACHE_FILE.write_text(
                     json.dumps(payload, ensure_ascii=False),
@@ -1079,15 +1129,20 @@ def _mock_current_player_directory():
             except Exception:
                 pass
             return payload
+        raise RuntimeError(
+            "Sleeper returned an incomplete player directory: "
+            + str(dict(_mock_directory_position_counts(payload)))
+        )
     except Exception as exc:
         app.logger.warning("Mock Draft current-team refresh failed: %s", exc)
 
-    return cached
+    return cached if _mock_directory_is_complete(cached) else {}
 
 def _mock_current_players_by_name(refresh=False, allow_network=True):
     global _MOCK_CURRENT_PLAYERS_MEMORY, _MOCK_CURRENT_PLAYERS_MTIME
+    cache_path = _mock_player_cache_read_path()
     try:
-        cache_mtime = MOCK_PLAYER_CACHE_FILE.stat().st_mtime
+        cache_mtime = cache_path.stat().st_mtime
         cache_age = time.time() - cache_mtime
     except Exception:
         cache_mtime = 0.0
@@ -1100,14 +1155,17 @@ def _mock_current_players_by_name(refresh=False, allow_network=True):
     ):
         return _MOCK_CURRENT_PLAYERS_MEMORY
 
-    if not refresh and MOCK_PLAYER_CACHE_FILE.exists():
+    if not refresh and cache_path.exists():
         try:
-            directory = json.loads(MOCK_PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+            directory = json.loads(cache_path.read_text(encoding="utf-8"))
         except Exception:
             directory = {}
     elif allow_network:
         directory = _mock_current_player_directory()
     else:
+        directory = {}
+
+    if not _mock_directory_is_complete(directory):
         directory = {}
 
     by_name = {}
@@ -1123,7 +1181,7 @@ def _mock_current_players_by_name(refresh=False, allow_network=True):
             by_name[_pr_norm(name)] = {"player_id": str(player_id), **row}
     _MOCK_CURRENT_PLAYERS_MEMORY = by_name
     try:
-        _MOCK_CURRENT_PLAYERS_MTIME = MOCK_PLAYER_CACHE_FILE.stat().st_mtime
+        _MOCK_CURRENT_PLAYERS_MTIME = cache_path.stat().st_mtime
     except Exception:
         _MOCK_CURRENT_PLAYERS_MTIME = cache_mtime
     return _MOCK_CURRENT_PLAYERS_MEMORY
@@ -1177,170 +1235,357 @@ def _mock_projection_from_stats(stats, pos):
     defaults = {"QB": 240, "RB": 150, "WR": 145, "TE": 110, "K": 120, "DEF": 120}
     return defaults.get(pos, 100)
 
+def _mock_identity_key(name):
+    """Match common suffix variants without merging unrelated player names."""
+    key = _pr_norm(name)
+    for suffix in ("iii", "ii", "iv", "jr", "sr", "v"):
+        if key.endswith(suffix) and len(key) > len(suffix) + 4:
+            return key[:-len(suffix)]
+    return key
+
 def _build_dynamic_mock_pool(context):
     """
-    Build the mock pool from the current 2026 master player database whenever
-    available. This prevents stale hard-coded teams and includes rookies.
+    Merge every available player source into one complete draft pool.
+
+    An older implementation returned immediately when the 2026 master file
+    contained *any* players. A partial master file could therefore shrink the
+    entire mock draft to only a few dozen names. The pool now uses union/merge
+    semantics so a partial source can enrich records but can never remove
+    players supplied by another source.
     """
-    master = _master_players_2026()
-    master_players = master.get("players", {})
-    # Current Sleeper teams override any older team saved in the master file.
-    current_players = _mock_current_players_by_name(refresh=True)
-
-    if master_players:
-        players = []
-        for norm, p in master_players.items():
-            name = str(p.get("name") or "").strip()
-            if not name:
-                continue
-            current = current_players.get(_pr_norm(name), {})
-            current_team = (
-                _normalize_team_code(current.get("team")) or "FA"
-                if current
-                else (_normalize_team_code(p.get("team")) or "FA")
-            )
-            pos = str(current.get("position") or p.get("position") or "").upper()
-            if pos == "DST":
-                pos = "DEF"
-            if pos not in {"QB","RB","WR","TE","K","DEF"}:
-                continue
-
-            projection_data = p.get("projection") or {}
-            projection = (
-                projection_data.get("ppr_points")
-                or projection_data.get("fantasy_points")
-                or 0
-            )
-            try:
-                projection = float(projection or 0)
-            except Exception:
-                projection = 0.0
-
-            adp = p.get("adp")
-            try:
-                adp = float(adp)
-            except Exception:
-                adp = 999.0
-
-            stats = p.get("stats_2025") or {}
-            if not projection:
-                projection = _mock_projection_from_stats(stats, pos)
-
-            players.append({
-                "rank": 999,
-                "name": name,
-                "pos": pos,
-                "team": current_team,
-                "tier": 9,
-                "adp": adp,
-                "projection": round(projection, 1),
-                "rookie": bool(p.get("rookie")),
-                "fantasypros_id": p.get("fantasypros_id"),
-                "sleeper_id": p.get("sleeper_id"),
-            })
-
-        def master_sort(p):
-            adp = p.get("adp", 999)
-            return (
-                adp if adp < 999 else 9999,
-                -float(p.get("projection", 0) or 0),
-                p.get("name") or "",
-            )
-
-        players.sort(key=master_sort)
-        for idx, p in enumerate(players, 1):
-            p["rank"] = idx
-            if p.get("adp", 999) >= 999:
-                p["adp"] = round(max(1, idx + 8), 1)
-
-        return players[:300]
-
-    # Fallback to the prior local pool until the first master refresh is run.
     platform = "YAHOO" if "YAHOO" in str(context.get("platform","")).upper() else "ESPN"
-    # Starting a mock draft must never wait on an external ADP refresh. Use
-    # whatever has already been saved locally; the ADP refresh tools can update
-    # these files separately in the background/admin workflow.
     adp_data = _mock_local_adp_data(platform)
-    adp_map = adp_data.get("players", {})
-    stats_map = _stats_2025_snapshot().get("players", {})
-    directory = _pr_players()
-
+    adp_map = adp_data.get("players", {}) or {}
+    raw_stats_map = _stats_2025_snapshot().get("players", {}) or {}
+    stats_map = {
+        _mock_identity_key(key): value
+        for key, value in raw_stats_map.items()
+        if isinstance(value, dict)
+    }
+    master_players = (_master_players_2026().get("players", {}) or {})
+    # Draft startup stays fast and deterministic. The daily refresh populates
+    # this local cache; starting a draft never waits on Sleeper's network API.
+    current_players = _mock_current_players_by_name(
+        refresh=False,
+        allow_network=False,
+    )
+    allowed_positions = {"QB", "RB", "WR", "TE", "K", "DEF"}
     pool = {}
-    for p in MOCK_PLAYER_POOL:
-        item = dict(p)
-        norm = _pr_norm(item["name"])
-        adp_row = adp_map.get(norm, {})
-        try:
-            item["adp"] = float(adp_row.get("adp", item.get("adp", 999)))
-        except Exception:
-            item["adp"] = float(item.get("adp", 999))
-        stats = stats_map.get(norm, {})
-        if not item.get("projection"):
-            item["projection"] = _mock_projection_from_stats(stats, item.get("pos"))
-        pool[norm] = item
 
-    for pid, p in directory.items():
-        name = p.get("full_name") or " ".join(x for x in [p.get("first_name"),p.get("last_name")] if x)
-        pos = str(p.get("position") or ((p.get("fantasy_positions") or [""])[0]) or "").upper()
-        if pos == "DST":
-            pos = "DEF"
-        if not name or pos not in {"QB","RB","WR","TE","K","DEF"}:
-            continue
-        norm = _pr_norm(name)
-        if norm in pool:
-            continue
-        adp_row = adp_map.get(norm, {})
+    def clean_position(value):
+        position = str(value or "").upper().strip()
+        return "DEF" if position in {"DST", "D/ST"} else "RB" if position == "FB" else position
+
+    def clean_number(value, default=0.0):
         try:
-            adp = float(adp_row.get("adp", 999))
-        except Exception:
-            adp = 999.0
-        stats = stats_map.get(norm, {})
-        pool[norm] = {
+            number = float(value)
+            return number if number == number else default
+        except (TypeError, ValueError):
+            return default
+
+    def add_player(name, position, team="", **values):
+        name = str(name or "").strip()
+        position = clean_position(position)
+        if not name or position not in allowed_positions:
+            return None
+        key = _mock_identity_key(name)
+        if not key:
+            return None
+        item = pool.setdefault(key, {
             "rank": 999,
             "name": name,
-            "pos": pos,
-            "team": p.get("team") or stats.get("team") or "FA",
+            "pos": position,
+            "team": _normalize_team_code(team) or "FA",
             "tier": 9,
-            "adp": adp,
-            "projection": _mock_projection_from_stats(stats, pos),
-            "rookie": bool(p.get("rookie")),
-        }
+            "adp": 999.0,
+            "projection": 0.0,
+        })
+        item["name"] = name or item["name"]
+        item["pos"] = position or item["pos"]
+        normalized_team = _normalize_team_code(team)
+        if normalized_team:
+            item["team"] = normalized_team
+        for field, value in values.items():
+            if value not in (None, ""):
+                item[field] = value
+        return item
 
-    players = list(pool.values())
-    players.sort(key=lambda p: (
-        float(p.get("adp",999)),
-        -float(p.get("projection",0) or 0),
-        p.get("name","")
-    ))
-    for idx, p in enumerate(players, 1):
+    # Guaranteed local baseline.
+    for p in MOCK_PLAYER_POOL:
+        item = add_player(
+            p.get("name"), p.get("pos"), p.get("team"),
+            adp=clean_number(p.get("adp"), 999.0),
+            projection=clean_number(p.get("projection")),
+            tier=p.get("tier", 9),
+            adp_source="Gridiron IQ preseason baseline",
+        )
+        if item:
+            item["_built_in"] = True
+
+    # Complete prior-season production adds hundreds of relevant players even
+    # if a current-player refresh has not run yet.
+    for key, stats in stats_map.items():
+        if not isinstance(stats, dict):
+            continue
+        name = stats.get("name") or stats.get("player_display_name") or key
+        position = stats.get("position") or stats.get("position_group")
+        item = add_player(name, position, stats.get("team") or stats.get("recent_team"))
+        if not item:
+            continue
+        if clean_number(item.get("projection")) <= 0:
+            item["projection"] = _mock_projection_from_stats(stats, item["pos"])
+        item["stats_2025"] = True
+
+    # Partial or complete 2026 master data enriches the union; it never replaces
+    # the union. This is the key protection against a tiny draft pool.
+    for key, player in master_players.items():
+        if not isinstance(player, dict):
+            continue
+        name = player.get("name") or player.get("full_name") or key
+        position = player.get("position") or ((player.get("fantasy_positions") or [""])[0])
+        item = add_player(
+            name, position, player.get("team"),
+            rookie=bool(player.get("rookie")),
+            fantasypros_id=player.get("fantasypros_id"),
+            sleeper_id=player.get("sleeper_id") or player.get("player_id"),
+            active=player.get("active"),
+            status=player.get("status"),
+        )
+        if not item:
+            continue
+        projection_data = player.get("projection") or player.get("projection_2026") or {}
+        if not isinstance(projection_data, dict):
+            projection_data = {}
+        projection = clean_number(
+            projection_data.get("ppr_points")
+            or projection_data.get("fantasy_points_ppr")
+            or projection_data.get("fantasy_points")
+            or player.get("proj_2026_ppr")
+        )
+        if projection > 0:
+            item["projection"] = projection
+        master_adp = clean_number(player.get("adp"), 999.0)
+        if 0 < master_adp < 999:
+            item["adp"] = master_adp
+        item["_master_seen"] = True
+
+    # Current directory has final authority over NFL team, position and active
+    # status, including rookies who do not have a 2025 stat line.
+    for key, player in current_players.items():
+        if not isinstance(player, dict):
+            continue
+        name = player.get("full_name") or " ".join(
+            value for value in (player.get("first_name"), player.get("last_name")) if value
+        ) or key
+        position = player.get("position") or ((player.get("fantasy_positions") or [""])[0])
+        item = add_player(
+            name, position, player.get("team") or "FA",
+            sleeper_id=player.get("player_id") or player.get("sleeper_id"),
+            rookie=bool(player.get("rookie")) or clean_number(player.get("years_exp"), 1) == 0,
+            active=player.get("active"),
+            status=player.get("status"),
+            search_rank=player.get("search_rank"),
+            years_exp=player.get("years_exp"),
+            depth_chart_order=player.get("depth_chart_order"),
+            injury_status=player.get("injury_status"),
+        )
+        if item:
+            item["_current_seen"] = True
+
+    # Platform ADP is applied last and can also introduce a player omitted from
+    # every roster/stat source when the ADP record contains name and position.
+    for key, adp_row in adp_map.items():
+        if not isinstance(adp_row, dict):
+            continue
+        item = pool.get(_mock_identity_key(key))
+        if not item:
+            item = add_player(
+                adp_row.get("name") or key,
+                adp_row.get("position") or adp_row.get("pos"),
+                adp_row.get("team"),
+            )
+        if not item:
+            continue
+        adp = clean_number(adp_row.get("adp"), 999.0)
+        if 0 < adp < 999:
+            item["adp"] = adp
+            item["adp_source"] = f"{platform} saved ADP"
+
+    players = []
+    for key, item in pool.items():
+        # Exclude only players explicitly confirmed inactive by the current
+        # directory. Unknown status is retained so data-source outages cannot
+        # erase most of the board.
+        if item.get("_current_seen") and item.get("active") is False:
+            continue
+        if (
+            item.get("_current_seen")
+            and item.get("team") in {"", "FA"}
+            and not item.get("stats_2025")
+            and not str(item.get("adp_source") or "").endswith("saved ADP")
+            and clean_number(item.get("years_exp"), 0) >= 2
+        ):
+            # Sleeper retains a few long-retired veterans as active free agents.
+            # They remain searchable in Player Research but do not belong in a
+            # current redraft simulation.
+            continue
+        if clean_number(item.get("projection")) <= 0:
+            item["projection"] = _mock_projection_from_stats(
+                stats_map.get(key, {}) or {}, item.get("pos")
+            )
+        item["projection"] = round(clean_number(item.get("projection")), 1)
+        item["adp"] = clean_number(item.get("adp"), 999.0)
+        search_rank = clean_number(item.get("search_rank"), 9999.0)
+        has_current_rank = 0 < search_rank < 9999
+        has_adp = 0 < item["adp"] < 999
+        if not str(item.get("adp_source") or "").endswith("saved ADP") and has_current_rank:
+            # Sleeper's current search rank moves daily and catches rookies,
+            # signings and role changes. Blend it with the preseason baseline
+            # until an authenticated platform ADP file is available.
+            # Sleeper search rank is a strong daily player signal but tends to
+            # resemble superflex at QB. Convert it to a normal one-QB redraft
+            # market before blending with the preseason baseline.
+            adjusted_search_rank = search_rank + {
+                "QB": 15, "TE": 2, "K": 250, "DEF": 250,
+            }.get(item.get("pos"), 0)
+            item["consensus_search_rank"] = round(adjusted_search_rank, 1)
+            item["adp"] = round(
+                adjusted_search_rank if not has_adp else (adjusted_search_rank * 0.70 + item["adp"] * 0.30),
+                1,
+            )
+            item["adp_source"] = "Current consensus rank"
+        for internal in ("_built_in", "_master_seen", "_current_seen"):
+            item.pop(internal, None)
+        players.append(item)
+
+    def draft_order(player):
+        adp = clean_number(player.get("adp"), 999.0)
+        sleeper_rank = clean_number(player.get("search_rank"), 9999.0)
+        market_rank = adp if 0 < adp < 999 else sleeper_rank
+        # Signed/current-team players sort ahead of free agents when two
+        # records have similar market rank.
+        free_agent_penalty = 1000 if player.get("team") in {"", "FA"} else 0
+        return (
+            market_rank + free_agent_penalty,
+            -clean_number(player.get("projection")),
+            player.get("name", ""),
+        )
+
+    players.sort(key=draft_order)
+
+    # Keep the response quick while guaranteeing a deep board at every fantasy
+    # position. A single global slice used to overfill the pool with QBs/RBs and
+    # leave only a handful of WRs or TEs.
+    position_limits = {
+        "QB": 100,
+        "RB": 180,
+        "WR": 260,
+        "TE": 100,
+        "K": 30,
+        "DEF": 32,
+    }
+    selected = []
+    selected_counts = Counter()
+    for player in players:
+        position = player.get("pos")
+        if selected_counts[position] >= position_limits.get(position, 0):
+            continue
+        selected.append(player)
+        selected_counts[position] += 1
+
+    selected.sort(key=draft_order)
+    for idx, p in enumerate(selected, 1):
         p["rank"] = idx
-        if p.get("adp", 999) >= 999:
+        if not 0 < p.get("adp", 999) < 999:
             p["adp"] = round(max(1, idx + 8), 1)
-    return players[:300]
+        try:
+            p["tier"] = int(p.get("tier") or max(1, min(12, (idx - 1) // 24 + 1)))
+        except (TypeError, ValueError):
+            p["tier"] = max(1, min(12, (idx - 1) // 24 + 1))
+
+    return selected
+
+def _mock_pool_is_complete(pool):
+    counts = Counter(player.get("pos") for player in (pool or []))
+    return (
+        len(pool or []) >= 500
+        and counts.get("QB", 0) >= 50
+        and counts.get("RB", 0) >= 100
+        and counts.get("WR", 0) >= 150
+        and counts.get("TE", 0) >= 70
+        and counts.get("K", 0) >= 10
+        and counts.get("DEF", 0) >= 20
+    )
+
+def _manual_ensure_complete_pool(mock):
+    """Upgrade saved drafts created by the old partial-pool implementation."""
+    existing = mock.get("player_pool") or []
+    changed = False
+    if mock.get("formula_version") != "smart-draft-v4":
+        mock["formula_version"] = "smart-draft-v4"
+        changed = True
+    needs_pool_upgrade = (
+        not _mock_pool_is_complete(existing)
+        or mock.get("pool_version") != "complete-v4"
+    )
+    if not needs_pool_upgrade:
+        return changed
+
+    context = dict(CONTEXTS.get(mock.get("league_key"), CONTEXTS["espn-gramps"]))
+    complete = _build_dynamic_mock_pool(context)
+    if not _mock_pool_is_complete(complete):
+        return changed
+    merged = {_mock_identity_key(player.get("name")): dict(player) for player in complete}
+    drafted = {
+        _mock_identity_key(pick.get("player"))
+        for pick in mock.get("picks", [])
+    }
+    # Preserve only a previously drafted player that is no longer present in
+    # the new directory. Undrafted stale/duplicate records are intentionally
+    # discarded during the upgrade.
+    for player in existing:
+        key = _mock_identity_key(player.get("name"))
+        if key in drafted and key not in merged:
+            merged[key] = dict(player)
+    mock["player_pool"] = list(merged.values())
+    mock["pool_version"] = "complete-v4"
+    mock["formula_version"] = "smart-draft-v4"
+    mock["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return True
 
 def _manual_player_lookup(mock=None):
     pool = (mock or {}).get("player_pool") if mock else None
     pool = pool or MOCK_PLAYER_POOL
-    return {p["name"]: p for p in pool}
+    lookup = {p["name"]: p for p in pool}
+    lookup.update({_mock_identity_key(p["name"]): p for p in pool})
+    return lookup
 
 def _manual_available(mock):
-    drafted = {p["player"] for p in mock.get("picks", [])}
+    drafted = {_mock_identity_key(p["player"]) for p in mock.get("picks", [])}
     pool = mock.get("player_pool") or MOCK_PLAYER_POOL
-    return [dict(p) for p in pool if p["name"] not in drafted]
+    return [dict(p) for p in pool if _mock_identity_key(p["name"]) not in drafted]
 
 def _manual_refresh_pool_teams(mock):
     """Correct teams in new and previously saved mocks from the local daily cache."""
-    current = _mock_current_players_by_name(refresh=False)
+    # Never make a live HTTP request in the pick/render loop. The bundled cache
+    # is refreshed daily by GitHub Actions.
+    current = _mock_current_players_by_name(refresh=False, allow_network=False)
     if not current:
         return mock
 
     for player in mock.get("player_pool", []):
-        row = current.get(_pr_norm(player.get("name")), {})
+        row = (
+            current.get(_pr_norm(player.get("name")), {})
+            or current.get(_mock_identity_key(player.get("name")), {})
+        )
         if row:
             player["team"] = _normalize_team_code(row.get("team")) or "FA"
 
     for pick in mock.get("picks", []):
-        row = current.get(_pr_norm(pick.get("player")), {})
+        row = (
+            current.get(_pr_norm(pick.get("player")), {})
+            or current.get(_mock_identity_key(pick.get("player")), {})
+        )
         if row:
             pick["team"] = _normalize_team_code(row.get("team")) or "FA"
     return mock
@@ -1358,7 +1603,10 @@ def _manual_user_roster(mock):
     roster = []
     for pick in mock.get("picks", []):
         if pick.get("user_pick"):
-            player = lookup.get(pick.get("player"))
+            player = (
+                lookup.get(pick.get("player"))
+                or lookup.get(_mock_identity_key(pick.get("player")))
+            )
             if player:
                 roster.append({"round": pick["round"], "overall": pick["overall"], **player})
     return roster
@@ -1432,15 +1680,25 @@ def _manual_player_pick_score(mock, player, counts=None, overall=None, round_no=
         overall = row["overall"] if row else len(mock.get("picks", [])) + 1
         round_no = row["round"] if row else int(mock["rounds"])
 
-    adp_value = float(player.get("adp", overall)) - overall
-    projection = float(player.get("projection", 0) or 0)
-
-    score = 70
-    score += min(12, max(-12, adp_value)) * 1.1
-    score += projection / 75.0
-    score += _manual_need_bonus(player["pos"], counts, round_no)
-
-    return round(max(35, min(99, score)))
+    roster = [
+        {"pos": position, "team": ""}
+        for position, amount in counts.items()
+        for _ in range(int(amount or 0))
+    ]
+    context = dict(CONTEXTS.get(mock.get("league_key"), CONTEXTS["espn-gramps"]))
+    raw_score, _ = _mock_ai_score(
+        player,
+        context,
+        roster,
+        overall,
+        round_no,
+        int(mock.get("rounds") or 12),
+        "balanced",
+        adp_players={},
+        stats_players={},
+        randomness=0,
+    )
+    return round(max(35, min(99, raw_score - 15)))
 
 def _manual_2025_points_map(names):
     # Fast snapshot lookup; never reparse the full CSV during a draft.
@@ -1597,6 +1855,35 @@ def _manual_finalize_if_complete(mock):
 # FantasyPros-style fast simulator for ESPN/Yahoo league profiles
 # ============================================================
 
+def _mock_adp_payload_is_valid(payload):
+    players = payload.get("players", {}) if isinstance(payload, dict) else {}
+    if not isinstance(players, dict):
+        return False
+    counts = Counter()
+    ranked_count = 0
+    for item in players.values():
+        if not isinstance(item, dict):
+            continue
+        try:
+            adp = float(item.get("adp", 999) or 999)
+        except (TypeError, ValueError):
+            continue
+        if not 0 < adp < 999:
+            continue
+        ranked_count += 1
+        position = str(item.get("position") or item.get("pos") or "").upper()
+        if position in {"DST", "D/ST"}:
+            position = "DEF"
+        if position in {"QB", "RB", "WR", "TE", "K", "DEF"}:
+            counts[position] += 1
+    return (
+        ranked_count >= 75
+        and counts.get("QB", 0) >= 8
+        and counts.get("RB", 0) >= 15
+        and counts.get("WR", 0) >= 20
+        and counts.get("TE", 0) >= 8
+    )
+
 def _mock_local_adp_data(platform):
     """Return saved ADP without making a network request."""
     platform = "YAHOO" if str(platform or "").upper() == "YAHOO" else "ESPN"
@@ -1604,7 +1891,7 @@ def _mock_local_adp_data(platform):
         path = _local_platform_adp_path(platform)
         if path.exists():
             payload = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict) and payload.get("players"):
+            if _mock_adp_payload_is_valid(payload):
                 return payload
     except Exception as exc:
         app.logger.warning("Saved %s mock-draft ADP could not be read: %s", platform, exc)
@@ -1612,12 +1899,17 @@ def _mock_local_adp_data(platform):
     if platform == "ESPN":
         try:
             payload = _load_espn_native_adp()
-            if isinstance(payload, dict) and payload.get("players"):
+            if _mock_adp_payload_is_valid(payload):
                 return payload
         except Exception:
             pass
 
-    return {"platform": platform, "source": "built-in mock pool", "players": {}}
+    return {
+        "platform": platform,
+        "source": "Gridiron IQ current consensus (platform ADP unavailable)",
+        "status": "consensus",
+        "players": {},
+    }
 
 def _mock_platform_adp(context):
     platform = "YAHOO" if "YAHOO" in str(context.get("platform", "")).upper() else "ESPN"
@@ -1641,36 +1933,93 @@ def _mock_roster_template(context):
 def _mock_team_counts(team_roster):
     return Counter(p.get("pos") for p in team_roster)
 
-def _mock_position_need_score(pos, roster, round_no, total_rounds):
-    counts = _mock_team_counts(roster)
+def _mock_roster_plan(total_rounds):
+    """Build a practical redraft roster plan for 6-15 round simulations."""
+    total_rounds = max(6, int(total_rounds or 12))
+    plan = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 0, "DEF": 0}
 
-    # Starter requirements / practical depth.
-    targets = {
-        "QB": 1,
-        "RB": 4,
-        "WR": 5,
-        "TE": 1,
-        "K": 1,
-        "DEF": 1,
+    if total_rounds >= 8:
+        plan["K"] = 1
+        plan["DEF"] = 1
+
+    remaining = total_rounds - sum(plan.values())
+    if total_rounds >= 14 and remaining > 0:
+        plan["QB"] += 1
+        remaining -= 1
+
+    depth_order = ("RB", "WR", "RB", "WR", "RB", "WR", "TE")
+    for index in range(max(0, remaining)):
+        plan[depth_order[index % len(depth_order)]] += 1
+    return plan
+
+def _mock_position_caps(total_rounds):
+    plan = _mock_roster_plan(total_rounds)
+    return {
+        "QB": plan["QB"],
+        "RB": plan["RB"] + 1,
+        "WR": plan["WR"] + 1,
+        "TE": plan["TE"] + (1 if int(total_rounds) >= 13 else 0),
+        "K": 1 if plan["K"] else 0,
+        "DEF": 1 if plan["DEF"] else 0,
     }
 
+def _mock_mandatory_minimums(total_rounds):
+    minimums = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 0, "DEF": 0}
+    if int(total_rounds) >= 8:
+        minimums["K"] = 1
+        minimums["DEF"] = 1
+    return minimums
+
+def _mock_allowed_positions(roster, round_no, total_rounds):
+    """Prevent impossible rosters and force unfilled starters at the end."""
+    counts = _mock_team_counts(roster)
+    caps = _mock_position_caps(total_rounds)
+    minimums = _mock_mandatory_minimums(total_rounds)
+    remaining_picks = max(1, int(total_rounds) - len(roster))
+    missing = {
+        pos: max(0, required - counts.get(pos, 0))
+        for pos, required in minimums.items()
+    }
+    missing_total = sum(missing.values())
+
+    if missing_total and remaining_picks <= missing_total:
+        return {pos for pos, amount in missing.items() if amount > 0}
+
+    allowed = {
+        pos for pos, maximum in caps.items()
+        if maximum > 0 and counts.get(pos, 0) < maximum
+    }
+    # Kicker and defense belong in the final three rounds unless a short draft
+    # has reached the point where a required slot must be filled.
+    late_round_start = max(8, int(total_rounds) - 2)
+    if int(round_no) < late_round_start:
+        allowed -= {"K", "DEF"}
+    return allowed or {pos for pos, amount in missing.items() if amount > 0}
+
+def _mock_position_need_score(pos, roster, round_no, total_rounds):
+    counts = _mock_team_counts(roster)
+    targets = _mock_roster_plan(total_rounds)
+    minimums = _mock_mandatory_minimums(total_rounds)
     current = counts.get(pos, 0)
-    target = targets.get(pos, 99)
+    target = targets.get(pos, 0)
+    minimum = minimums.get(pos, 0)
 
-    if current == 0 and pos in {"QB","RB","WR","TE"}:
-        score = 10
+    if current < minimum:
+        score = 10.0
     elif current < target:
-        score = 5
+        score = 4.0
     else:
-        score = -5
+        score = -9.0 - max(0, current - target) * 4.0
 
-    # Avoid unrealistic early K/DST and excessive QB/TE hoarding.
-    if pos in {"K","DEF"} and round_no < max(8, total_rounds - 4):
-        score -= 18
-    if pos == "QB" and counts.get("QB", 0) >= 1 and round_no <= 8:
-        score -= 9
-    if pos == "TE" and counts.get("TE", 0) >= 1 and round_no <= 8:
-        score -= 7
+    remaining_picks = max(1, int(total_rounds) - len(roster))
+    missing_total = sum(
+        max(0, required - counts.get(position, 0))
+        for position, required in minimums.items()
+    )
+    if current < minimum and remaining_picks <= missing_total + 1:
+        score += 14.0
+    if pos in {"K", "DEF"} and int(round_no) < max(8, int(total_rounds) - 2):
+        score -= 60.0
 
     return score
 
@@ -1692,31 +2041,63 @@ def _mock_strategy_archetype(team_slot):
     ]
     return styles[(int(team_slot)-1) % len(styles)]
 
-def _mock_strategy_bonus_for_ai(player, style, round_no):
+def _mock_strategy_bonus_for_ai(player, style, round_no, roster_counts=None):
+    roster_counts = roster_counts or Counter()
     pos = player["pos"]
-    if style == "rb-heavy" and pos == "RB" and round_no <= 5:
-        return 8
-    if style == "wr-heavy" and pos == "WR" and round_no <= 6:
-        return 8
+    if style == "balanced" and pos in {"RB", "WR"} and round_no <= 6:
+        return 1.0
+    if style == "rb-heavy" and pos == "RB" and round_no <= 5 and roster_counts.get("RB", 0) < 4:
+        return 4.5
+    if style == "wr-heavy" and pos == "WR" and round_no <= 6 and roster_counts.get("WR", 0) < 5:
+        return 4.5
     if style == "late-qb" and pos == "QB" and round_no <= 7:
-        return -12
-    if style == "early-qb" and pos == "QB" and round_no <= 4:
-        return 8
+        return -10.0
+    if style == "early-qb" and pos == "QB" and 2 <= round_no <= 5 and roster_counts.get("QB", 0) == 0:
+        return 4.0
     if style == "hero-rb":
-        if pos == "RB" and round_no <= 2:
-            return 10
+        if pos == "RB" and round_no <= 2 and roster_counts.get("RB", 0) == 0:
+            return 4.0
         if pos == "WR" and 2 <= round_no <= 6:
-            return 5
+            return 3.0
+        if pos == "RB" and 2 <= round_no <= 5 and roster_counts.get("RB", 0) >= 1:
+            return -3.0
     if style == "zero-rb":
-        if pos == "WR" and round_no <= 5:
-            return 9
+        if pos in {"WR", "TE"} and round_no <= 5:
+            return 5.0
         if pos == "RB" and round_no <= 4:
-            return -8
-    return 0
+            return -6.0
+        if pos == "RB" and 5 <= round_no <= 8 and roster_counts.get("RB", 0) < 2:
+            return 5.0
+    return 0.0
+
+def _mock_resolved_adp(player, adp_players):
+    normalized_name = _pr_norm(player.get("name"))
+    adp_row = (adp_players or {}).get(normalized_name, {})
+    try:
+        platform_adp = float(adp_row.get("adp"))
+    except (TypeError, ValueError, AttributeError):
+        platform_adp = 999.0
+    if not 0 < platform_adp < 999:
+        try:
+            platform_adp = float(player.get("adp", 999))
+        except (TypeError, ValueError):
+            platform_adp = 999.0
+    if not 0 < platform_adp < 999:
+        platform_adp = float(player.get("rank", 999) or 999)
+    return platform_adp
+
+def _mock_scoring_format_bonus(pos, scoring):
+    label = str(scoring or "").upper()
+    if "FULL" in label or ("PPR" in label and "HALF" not in label):
+        return {"WR": 1.5, "TE": 1.0, "RB": 0.5}.get(pos, 0.0)
+    if "HALF" in label:
+        return {"RB": 1.0, "WR": 0.5, "TE": 0.25}.get(pos, 0.0)
+    return {"RB": 2.0, "WR": -0.75}.get(pos, 0.0)
 
 def _mock_ai_score(
     player, context, team_roster, overall_pick, round_no, total_rounds, style,
-    adp_players=None, stats_players=None,
+    adp_players=None, stats_players=None, tier_bonus=0.0,
+    position_run_bonus=0.0, randomness=2.25,
 ):
     # adp_players/stats_players are supplied by _mock_ai_pick so hundreds of
     # candidates do not repeatedly read the same files from disk.
@@ -1727,34 +2108,80 @@ def _mock_ai_score(
         stats_players = _stats_2025_snapshot().get("players", {})
 
     normalized_name = _pr_norm(player["name"])
-    adp_row = adp_players.get(normalized_name, {})
-    platform_adp = adp_row.get("adp")
-    try:
-        platform_adp = float(platform_adp)
-    except Exception:
-        platform_adp = float(player.get("adp", 999))
+    platform_adp = _mock_resolved_adp(player, adp_players)
 
     projection = float(player.get("projection", 0) or 0)
     prior = stats_players.get(normalized_name, {}) or {}
     prior_points = float(prior.get("fantasy_points_ppr") or prior.get("fantasy_points") or 0)
+    pos = player.get("pos")
 
-    # Base: market ADP + talent/projection + previous production.
-    adp_distance = abs(platform_adp - overall_pick) if platform_adp < 999 else 50
-    score = 100 - min(30, adp_distance * 0.9)
-    score += min(12, projection / 28)
-    score += min(10, prior_points / 32)
+    # Market rank is the strongest signal. Reaches are penalized much more than
+    # small ADP values are rewarded, which prevents unrealistic early picks.
+    reach = platform_adp - float(overall_pick)
+    score = 100.0
+    if reach > 0:
+        score -= min(72.0, reach * 1.45)
+    else:
+        score += min(22.0, abs(reach) * 0.65)
+
+    replacement_projection = {
+        "QB": 245, "RB": 125, "WR": 125, "TE": 85, "K": 95, "DEF": 95,
+    }.get(pos, 100)
+    projection_span = {
+        "QB": 115, "RB": 175, "WR": 175, "TE": 135, "K": 55, "DEF": 55,
+    }.get(pos, 150)
+    projection_signal = max(-2.0, min(10.0, (projection - replacement_projection) / projection_span * 10.0))
+    score += projection_signal
+    if prior_points > 0:
+        replacement_prior = {"QB": 220, "RB": 115, "WR": 115, "TE": 75}.get(pos, 90)
+        score += max(0.0, min(5.0, (prior_points - replacement_prior) / 35.0))
 
     score += _mock_position_need_score(
-        player["pos"], team_roster, round_no, total_rounds
+        pos, team_roster, round_no, total_rounds
     )
-    score += _mock_strategy_bonus_for_ai(player, style, round_no)
+    roster_counts = _mock_team_counts(team_roster)
+    score += _mock_strategy_bonus_for_ai(player, style, round_no, roster_counts)
+    score += _mock_scoring_format_bonus(pos, context.get("scoring"))
+    score += float(tier_bonus or 0)
+    score += float(position_run_bonus or 0)
 
-    # Controlled randomness prevents all mocks from being identical.
-    score += random.uniform(-7.5, 7.5)
+    # A small, market-respecting stack bonus makes later rounds feel human.
+    if pos in {"WR", "TE"} and any(
+        pick.get("pos") == "QB" and pick.get("team") == player.get("team")
+        for pick in team_roster
+    ):
+        score += 1.5
+    elif pos == "QB" and any(
+        pick.get("pos") in {"WR", "TE"} and pick.get("team") == player.get("team")
+        for pick in team_roster
+    ):
+        score += 1.0
+
+    injury = str(player.get("injury_status") or "").upper()
+    if any(label in injury for label in ("IR", "PUP", "SUSP", "OUT")):
+        score -= 14.0
+    elif "DOUBTFUL" in injury:
+        score -= 8.0
+    elif "QUESTIONABLE" in injury:
+        score -= 2.0
+    if player.get("team") in {"", "FA"}:
+        score -= 12.0
+    try:
+        if int(player.get("depth_chart_order") or 0) >= 4 and platform_adp > 100:
+            score -= 3.0
+    except (TypeError, ValueError):
+        pass
+
+    # Enough variation for repeat mocks without overriding a full ADP tier.
+    if randomness:
+        score += random.uniform(-abs(float(randomness)), abs(float(randomness)))
 
     return score, platform_adp
 
-def _mock_ai_pick(mock, order_row, adp_players=None, stats_players=None):
+def _mock_ai_pick(
+    mock, order_row, adp_players=None, stats_players=None,
+    style_override=None,
+):
     available = _manual_available(mock)
     if not available:
         return None
@@ -1769,7 +2196,7 @@ def _mock_ai_pick(mock, order_row, adp_players=None, stats_players=None):
         p for p in mock.get("picks", [])
         if int(p.get("slot", 0)) == slot
     ]
-    style = _mock_strategy_archetype(slot)
+    style = style_override or _mock_strategy_archetype(slot)
 
     # Load both datasets once for this pick, rather than once per candidate.
     if adp_players is None:
@@ -1778,17 +2205,59 @@ def _mock_ai_pick(mock, order_row, adp_players=None, stats_players=None):
     if stats_players is None:
         stats_players = _stats_2025_snapshot().get("players", {})
 
+    allowed_positions = _mock_allowed_positions(roster, round_no, total_rounds)
+    eligible = [player for player in available if player.get("pos") in allowed_positions]
+    if not eligible:
+        eligible = available
+
+    # Consider a realistic market window instead of allowing a deep sleeper to
+    # jump hundreds of spots because of one noisy input.
+    ranked = sorted(eligible, key=lambda player: (
+        _mock_resolved_adp(player, adp_players),
+        int(player.get("rank", 9999)),
+    ))
+    reach_window = 18 if round_no <= 3 else 26 if round_no <= 8 else 40
+    candidates = [
+        player for player in ranked
+        if _mock_resolved_adp(player, adp_players) <= overall + reach_window
+    ]
+    if len(candidates) < min(36, len(ranked)):
+        candidates = ranked[:min(36, len(ranked))]
+    else:
+        candidates = candidates[:80]
+
+    by_position = defaultdict(list)
+    for player in ranked:
+        by_position[player.get("pos")].append(player)
+    tier_bonus_by_name = {}
+    for position_players in by_position.values():
+        for index, player in enumerate(position_players[:-1]):
+            current_rank = _mock_resolved_adp(player, adp_players)
+            next_rank = _mock_resolved_adp(position_players[index + 1], adp_players)
+            gap = next_rank - current_rank
+            tier_bonus_by_name[player.get("name")] = 4.0 if gap >= 12 else 2.0 if gap >= 7 else 0.0
+
+    recent_counts = Counter(
+        pick.get("pos") for pick in (mock.get("picks") or [])[-10:]
+    )
+    run_bonus = {
+        position: min(2.5, max(0, amount - 3) * 0.65)
+        for position, amount in recent_counts.items()
+    }
+
     scored = []
-    for player in available:
+    for player in candidates:
         score, platform_adp = _mock_ai_score(
             player, context, roster, overall, round_no, total_rounds, style,
             adp_players=adp_players,
             stats_players=stats_players,
+            tier_bonus=tier_bonus_by_name.get(player.get("name"), 0.0),
+            position_run_bonus=run_bonus.get(player.get("pos"), 0.0),
         )
         scored.append((score, platform_adp, player))
 
-    scored.sort(key=lambda x: x[0], reverse=True)
-    _, platform_adp, chosen = scored[0]
+    scored.sort(key=lambda row: (-row[0], row[1], int(row[2].get("rank", 9999))))
+    ai_score, platform_adp, chosen = scored[0]
 
     return {
         "overall": overall,
@@ -1802,6 +2271,8 @@ def _mock_ai_pick(mock, order_row, adp_players=None, stats_players=None):
         "user_pick": False,
         "manager": f"Team {slot}",
         "ai_style": style,
+        "ai_score": round(ai_score, 2),
+        "formula_version": "smart-draft-v4",
     }
 
 def _manual_autopick_until_user(mock):
@@ -1854,39 +2325,19 @@ def manual_mock_autodraft_rest():
             break
 
         if int(row["slot"]) == int(mock["draft_slot"]):
-            available = _manual_available(mock)
-            if not available:
+            pick = _mock_ai_pick(
+                mock,
+                row,
+                adp_players=adp_players,
+                stats_players=stats_players,
+                style_override="balanced",
+            )
+            if not pick:
                 mock["status"] = "complete"
                 break
-
-            roster = [
-                p for p in mock.get("picks", [])
-                if int(p.get("slot", 0)) == int(mock["draft_slot"])
-            ]
-            scored = []
-            for player in available:
-                score, platform_adp = _mock_ai_score(
-                    player, context, roster, row["overall"], row["round"],
-                    mock["rounds"], "balanced",
-                    adp_players=adp_players,
-                    stats_players=stats_players,
-                )
-                scored.append((score, platform_adp, player))
-            scored.sort(key=lambda x: x[0], reverse=True)
-            _, platform_adp, player = scored[0]
-            mock.setdefault("picks", []).append({
-                "overall": row["overall"],
-                "round": row["round"],
-                "slot": row["slot"],
-                "player": player["name"],
-                "pos": player["pos"],
-                "team": player["team"],
-                "adp": round(platform_adp, 1) if platform_adp < 999 else player.get("adp", 999),
-                "projection": player.get("projection", 0),
-                "user_pick": True,
-                "manager": "Your Team (Auto)",
-                "ai_style": "balanced",
-            })
+            pick["user_pick"] = True
+            pick["manager"] = "Your Team (Auto)"
+            mock.setdefault("picks", []).append(pick)
         else:
             pick = _mock_ai_pick(
                 mock, row,
@@ -1911,6 +2362,18 @@ def manual_mock_start():
     draft_slot = max(1, min(int(context.get("teams", 12)), int(data.get("draft_slot") or context.get("draft_slot", 7))))
     rounds = max(6, min(15, int(data.get("rounds") or 12)))
 
+    player_pool = _build_dynamic_mock_pool(context)
+    if not _mock_pool_is_complete(player_pool):
+        counts = dict(Counter(player.get("pos") for player in player_pool))
+        return jsonify(
+            ok=False,
+            error="Mock Draft was stopped because the player database is incomplete.",
+            detail="Gridiron IQ refused to start a draft with missing positions.",
+            server_build=MOCK_DRAFT_BUILD,
+            player_pool_count=len(player_pool),
+            position_counts=counts,
+        ), 503
+
     mock = {
         "id": uuid.uuid4().hex[:10],
         "league_key": key,
@@ -1922,7 +2385,9 @@ def manual_mock_start():
         "rounds": rounds,
         "status": "starting",
         "picks": [],
-        "player_pool": _build_dynamic_mock_pool(context),
+        "player_pool": player_pool,
+        "pool_version": "complete-v4",
+        "formula_version": "smart-draft-v4",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1935,6 +2400,9 @@ def manual_mock_start():
         ok=True,
         mock=_manual_mock_public(mock),
         player_pool_count=len(mock.get("player_pool", [])),
+        pool_version=mock.get("pool_version"),
+        formula_version=mock.get("formula_version"),
+        server_build=MOCK_DRAFT_BUILD,
     )
 
 
@@ -1967,17 +2435,38 @@ def manual_mock_state(mock_id):
     mock = _manual_mock_get(mock_id)
     if not mock:
         return jsonify(ok=False, error="Mock draft not found."), 404
+    if _manual_ensure_complete_pool(mock):
+        _manual_mock_save(mock)
+    if not _mock_pool_is_complete(mock.get("player_pool") or []):
+        return jsonify(
+            ok=False,
+            error="This saved mock has an incomplete player database.",
+            detail="Start a new mock after deploying the current app.py and player data files.",
+            server_build=MOCK_DRAFT_BUILD,
+            player_pool_count=len(mock.get("player_pool") or []),
+            position_counts=dict(Counter(
+                player.get("pos") for player in (mock.get("player_pool") or [])
+            )),
+        ), 503
     _manual_refresh_pool_teams(mock)
 
     row = _manual_current_order_row(mock)
     available = _manual_available(mock)
     platform = "YAHOO" if "YAHOO" in str(mock.get("platform", "")).upper() else "ESPN"
-    local_adp = _mock_local_adp_data(platform).get("players", {})
+    adp_payload = _mock_local_adp_data(platform)
+    local_adp = adp_payload.get("players", {})
     platform_adp = {
-        key: float(value.get("adp", 999) or 999)
+        _mock_identity_key(key): float(value.get("adp", 999) or 999)
         for key, value in local_adp.items()
         if isinstance(value, dict)
     }
+    has_platform_adp = _mock_adp_payload_is_valid(adp_payload)
+    ranking_label = f"{platform.title()} ADP" if has_platform_adp else "Consensus Rank"
+    ranking_source = (
+        adp_payload.get("source")
+        if has_platform_adp
+        else "Gridiron IQ current consensus — platform ADP has not been loaded"
+    )
 
     roster = _manual_user_roster(mock)
     counts = Counter(p["pos"] for p in roster)
@@ -1988,8 +2477,14 @@ def manual_mock_state(mock_id):
     scored = []
     for p in available:
         item = dict(p)
-        item["adp"] = platform_adp.get(_pr_norm(item["name"]), item.get("adp", 999))
-        item["adp_source"] = platform
+        identity = _mock_identity_key(item["name"])
+        if identity in platform_adp and 0 < platform_adp[identity] < 999:
+            item["adp"] = platform_adp[identity]
+            item["adp_source"] = adp_payload.get("source") or f"{platform.title()} ADP"
+            item["is_platform_adp"] = True
+        else:
+            item["adp_source"] = item.get("adp_source") or "Gridiron IQ current consensus"
+            item["is_platform_adp"] = False
         item["pick_score"] = _manual_player_pick_score(
             mock,
             item,
@@ -2001,6 +2496,7 @@ def manual_mock_state(mock_id):
     # Draft board is ranked by ADP (lowest/best ADP first).
     # Pick Score remains visible as Gridiron IQ's roster-aware recommendation.
     scored.sort(key=lambda x: (float(x.get("adp", 9999)), int(x.get("rank", 9999))))
+    position_counts = dict(Counter(player.get("pos") for player in scored))
 
     return jsonify(
         ok=True,
@@ -2010,6 +2506,15 @@ def manual_mock_state(mock_id):
         available=scored,
         grade=mock.get("grade") or _manual_grade(mock),
         teams=_manual_board_teams(mock),
+        player_pool_count=len(mock.get("player_pool", [])),
+        available_count=len(scored),
+        position_counts=position_counts,
+        pool_version=mock.get("pool_version") or "complete-v4",
+        formula_version=mock.get("formula_version") or "smart-draft-v4",
+        server_build=MOCK_DRAFT_BUILD,
+        ranking_label=ranking_label,
+        ranking_source=ranking_source,
+        platform_adp_loaded=has_platform_adp,
     )
 
 @app.post("/api/mock-draft/manual/<mock_id>/pick")
@@ -2036,12 +2541,12 @@ def manual_mock_pick(mock_id):
     platform = "YAHOO" if "YAHOO" in str(mock.get("platform", "")).upper() else "ESPN"
     local_adp = _mock_local_adp_data(platform).get("players", {})
     platform_adp = {
-        key: float(value.get("adp", 999) or 999)
+        _mock_identity_key(key): float(value.get("adp", 999) or 999)
         for key, value in local_adp.items()
         if isinstance(value, dict)
     }
     player = dict(player)
-    player["adp"] = platform_adp.get(_pr_norm(player["name"]), player.get("adp", 999))
+    player["adp"] = platform_adp.get(_mock_identity_key(player["name"]), player.get("adp", 999))
 
     pick = {
         "overall": row["overall"],
@@ -2970,43 +3475,40 @@ def _stats_2025_snapshot():
         "status": "missing",
     }
 
-    snapshot_path = (
-        STATS_2025_SNAPSHOT_FILE
-        if STATS_2025_SNAPSHOT_FILE.exists()
-        else BUNDLED_STATS_2025_FILE
-    )
+    requirements = {"QB": 30, "RB": 80, "WR": 120, "TE": 60, "K": 10}
+    best_payload = None
+    best_score = (-1, -1)
+    seen_paths = set()
 
-    if not snapshot_path.exists():
-        return empty
-
-    try:
-        raw = snapshot_path.read_text(encoding="utf-8")
-        if not raw.strip():
-            return empty
-        payload = json.loads(raw)
-        if not isinstance(payload, dict):
-            return empty
-        if not isinstance(payload.get("players"), dict):
-            payload["players"] = {}
-        payload["player_count"] = len(payload["players"])
-        payload.setdefault("position_counts", {})
-        payload.setdefault("updated_at", "")
-        payload.setdefault("source", "")
-        payload.setdefault("status", "local")
-        return payload
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        app.logger.warning("Invalid 2025 stats snapshot ignored: %s", exc)
+    for snapshot_path in (STATS_2025_SNAPSHOT_FILE, BUNDLED_STATS_2025_FILE):
+        if snapshot_path in seen_paths or not snapshot_path.exists():
+            continue
+        seen_paths.add(snapshot_path)
         try:
-            damaged = snapshot_path.with_suffix(
-                snapshot_path.suffix + ".invalid"
+            payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or not isinstance(payload.get("players"), dict):
+                continue
+            counts = _mock_directory_position_counts(payload)
+            score = (
+                sum(counts.get(position, 0) >= minimum for position, minimum in requirements.items()),
+                len(payload["players"]),
             )
-            if snapshot_path == STATS_2025_SNAPSHOT_FILE and damaged.exists():
-                damaged.unlink()
-            if snapshot_path == STATS_2025_SNAPSHOT_FILE:
-                snapshot_path.replace(damaged)
-        except Exception:
-            pass
+            if score > best_score:
+                best_payload, best_score = payload, score
+            if all(counts.get(position, 0) >= minimum for position, minimum in requirements.items()):
+                best_payload = payload
+                break
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            app.logger.warning("Invalid 2025 stats snapshot ignored: %s", exc)
+
+    if not best_payload:
         return empty
+    best_payload["player_count"] = len(best_payload["players"])
+    best_payload.setdefault("position_counts", dict(_mock_directory_position_counts(best_payload)))
+    best_payload.setdefault("updated_at", "")
+    best_payload.setdefault("source", "")
+    best_payload.setdefault("status", "local")
+    return best_payload
 
 
 
@@ -3240,16 +3742,31 @@ MASTER_PLAYERS_2026_FILE = DATA_DIR / "nfl_players_2026.json"
 BUNDLED_MASTER_PLAYERS_2026_FILE = BASE_DIR / "data" / "nfl_players_2026.json"
 
 def _master_players_2026():
+    best_payload = {}
+    best_score = (-1, -1)
     for path in (MASTER_PLAYERS_2026_FILE, BUNDLED_MASTER_PLAYERS_2026_FILE):
         try:
             if not path.exists():
                 continue
             payload = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
+            if not isinstance(payload, dict):
+                continue
+            counts = _mock_directory_position_counts(payload)
+            rows = payload.get("players", {})
+            score = (
+                sum(
+                    counts.get(position, 0) >= minimum
+                    for position, minimum in MOCK_DIRECTORY_MINIMUMS.items()
+                ),
+                len(rows) if isinstance(rows, dict) else 0,
+            )
+            if score > best_score:
+                best_payload, best_score = payload, score
+            if _mock_directory_is_complete(payload):
                 return payload
         except Exception:
             continue
-    return {
+    return best_payload or {
         "season": 2026,
         "updated_at": "",
         "count": 0,
@@ -4341,13 +4858,37 @@ def diagnostics_mock_draft():
     context = dict(CONTEXTS.get(key, CONTEXTS["espn-gramps"]))
     pool = _build_dynamic_mock_pool(context)
     counts = Counter(p.get("pos") for p in pool)
+    platform = "YAHOO" if "YAHOO" in str(context.get("platform", "")).upper() else "ESPN"
+    adp_payload = _mock_local_adp_data(platform)
+    pool_is_complete = (
+        counts.get("QB", 0) >= 50
+        and counts.get("RB", 0) >= 100
+        and counts.get("WR", 0) >= 150
+        and counts.get("TE", 0) >= 70
+    )
     return jsonify(
-        ok=len(pool) >= int(context.get("teams",12)) * 10,
+        ok=pool_is_complete,
+        build_id=MOCK_DRAFT_BUILD,
         league=key,
-        platform=context.get("platform"),
+        platform=platform,
         teams=context.get("teams"),
         player_pool_count=len(pool),
         position_counts=dict(counts),
+        player_pool_complete=pool_is_complete,
+        persistent_cache_valid=_mock_directory_is_complete(
+            _mock_read_directory(MOCK_PLAYER_CACHE_FILE)
+        ) if MOCK_PLAYER_CACHE_FILE.exists() else False,
+        bundled_cache_valid=_mock_directory_is_complete(
+            _mock_read_directory(BUNDLED_MOCK_PLAYER_CACHE_FILE)
+        ) if BUNDLED_MOCK_PLAYER_CACHE_FILE.exists() else False,
+        cache_fallback_active=(
+            _mock_player_cache_read_path() == BUNDLED_MOCK_PLAYER_CACHE_FILE
+            and MOCK_PLAYER_CACHE_FILE != BUNDLED_MOCK_PLAYER_CACHE_FILE
+        ),
+        ranking_label=(f"{platform.title()} ADP" if _mock_adp_payload_is_valid(adp_payload) else "Consensus Rank"),
+        adp_source=adp_payload.get("source"),
+        platform_adp_valid=_mock_adp_payload_is_valid(adp_payload),
+        platform_adp_count=len(adp_payload.get("players", {})),
     )
 
 @app.get("/api/player-research/search")
@@ -5302,17 +5843,7 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("players"):
             cached = payload
-            players = payload.get("players", {})
-            ranked_count = sum(
-                1 for item in players.values()
-                if float(item.get("adp", 999) or 999) < 999
-            )
-            has_position_data = any(
-                str(item.get("position") or "").upper()
-                in {"QB", "RB", "WR", "TE", "K", "DEF"}
-                for item in players.values()
-            )
-            if not force and ranked_count >= 75 and has_position_data:
+            if not force and _mock_adp_payload_is_valid(payload):
                 payload["status"] = payload.get("status") or "local"
                 return payload
     except Exception:
@@ -5323,7 +5854,7 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
     if platform == "ESPN":
         try:
             native = _fetch_espn_native_adp(season=2026)
-            if native.get("players"):
+            if _mock_adp_payload_is_valid(native):
                 path.write_text(
                     json.dumps(native, ensure_ascii=False, indent=2),
                     encoding="utf-8",
@@ -5334,41 +5865,41 @@ def _platform_2026_adp_data(platform="ESPN", force=False):
 
         try:
             native_cached = _load_espn_native_adp()
-            if native_cached and native_cached.get("players"):
-                players = native_cached.get("players", {})
-                ranked_count = sum(
-                    1 for item in players.values()
-                    if float(item.get("adp", 999) or 999) < 999
+            if native_cached and _mock_adp_payload_is_valid(native_cached):
+                native_cached["status"] = "cached"
+                native_cached["warning"] = (
+                    "Live ESPN refresh was unavailable; using saved ESPN ADP."
                 )
-                if ranked_count >= 75:
-                    native_cached["status"] = "cached"
-                    native_cached["warning"] = (
-                        "Live ESPN refresh was unavailable; using saved ESPN ADP."
-                    )
-                    path.write_text(
-                        json.dumps(native_cached, ensure_ascii=False, indent=2),
-                        encoding="utf-8",
-                    )
-                    return native_cached
+                path.write_text(
+                    json.dumps(native_cached, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                return native_cached
         except Exception as exc:
             errors.append(f"ESPN saved data: {exc}")
 
     # Public cross-platform table with explicit ESPN and Yahoo columns.
     try:
-        return _fourforfour_platform_adp_dataset(platform)
+        public_adp = _fourforfour_platform_adp_dataset(platform)
+        if _mock_adp_payload_is_valid(public_adp):
+            return public_adp
+        errors.append("4for4 public ADP: incomplete position coverage")
     except Exception as exc:
         errors.append(f"4for4 public ADP: {exc}")
 
     # Secondary public webpage source.
     try:
-        return _public_platform_adp_dataset(platform)
+        public_adp = _public_platform_adp_dataset(platform)
+        if _mock_adp_payload_is_valid(public_adp):
+            return public_adp
+        errors.append("FantasyPros public ADP: incomplete position coverage")
     except Exception as exc:
         errors.append(f"FantasyPros public ADP: {exc}")
 
     # Do not repeatedly call a restricted FantasyPros endpoint after a 403.
     # The public sources above are preferred and require no API subscription.
 
-    if cached and cached.get("players"):
+    if cached and _mock_adp_payload_is_valid(cached):
         cached["status"] = "cached"
         cached["warning"] = (
             "Live ADP refresh was unavailable. The last saved ADP is being used."
@@ -6479,6 +7010,7 @@ def weekly_matchups_api():
         count=len(rows),
         rows=rows,
         metadata={
+            "model_version": "RB Model V2",
             "season": payload.get("matchup_season", 2026),
             "baseline_season": payload.get("season", 2025),
             "offense_data_type": offense_data_type,
