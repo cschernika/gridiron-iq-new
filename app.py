@@ -36,18 +36,37 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
 @app.after_request
 def hide_legacy_connect_league_navigation(response):
-    """Keep only Sync League visible while old links remain compatible."""
+    """Keep only League Sync visible while old connection routes still work."""
     if response.status_code == 200 and response.mimetype == "text/html":
         markup = response.get_data(as_text=True)
-        if "/connect-league" in markup and "</head>" in markup:
+
+        # The legacy sidebar entry and the current entry both point to
+        # /league-sync, so an href selector cannot tell them apart. Remove the
+        # legacy nav link by its label before the response reaches the browser.
+        markup = re.sub(
+            r'<a\b(?=[^>]*\bclass=["\'][^"\']*\bnav\b[^"\']*["\'])'
+            r'[^>]*>\s*[^<]*\bConnect\s+League\s*</a>',
+            "",
+            markup,
+            flags=re.IGNORECASE,
+        )
+
+        if "</head>" in markup:
             markup = markup.replace(
                 "</head>",
                 '<style id="sync-league-nav-cleanup">'
                 'a[href="/connect-league"]{display:none!important}'
-                "</style></head>",
+                "</style>"
+                '<script id="sync-league-nav-fallback">'
+                'document.addEventListener("DOMContentLoaded",function(){'
+                'document.querySelectorAll("aside.sidebar a.nav").forEach(function(link){'
+                'var label=(link.textContent||"").replace(/[^a-z]+/gi," ").trim().toLowerCase();'
+                'if(label==="connect league"||label==="connect a league"){link.remove();}'
+                '});});'
+                "</script></head>",
                 1,
             )
-            response.set_data(markup)
+        response.set_data(markup)
     return response
 
 USER = {"id": 1, "name": "Chad"}
