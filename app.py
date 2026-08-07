@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json, os, uuid
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from math import exp
 from pathlib import Path
 from urllib.parse import urlencode
@@ -3828,7 +3829,10 @@ def _player_research_projection_2026(player_name, position):
 
 
 PLAYER_NEWS_CACHE_DIR = DATA_DIR / "player_news_cache"
-PLAYER_NEWS_CACHE_TTL = 15 * 60
+# Player news is checked on demand whenever a profile opens. Keep the server
+# cache disabled so a newly published transaction or injury is not hidden by
+# an earlier empty result.
+PLAYER_NEWS_CACHE_TTL = 0
 
 def _news_cache_path(player_name):
     PLAYER_NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -3897,30 +3901,97 @@ def _normalize_player_news(row):
         "url": row.get("url") or row.get("source_url") or "",
     }
 
+
+def _clean_news_text(value):
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text.replace("&nbsp;", " ")).strip()
+
+
+def _clean_news_title(value, source=""):
+    title = _clean_news_text(value) or "Player update"
+    suffix = f" - {str(source or '').strip()}"
+    if len(suffix) > 3 and title.lower().endswith(suffix.lower()):
+        title = title[:-len(suffix)].strip()
+    return title
+
+
+def _summarize_news_item(title, description):
+    title = _clean_news_title(title)
+    summary = _clean_news_text(description)
+
+    # Google News RSS descriptions often repeat only the headline and source.
+    # In that case, the headline itself is the most accurate compact summary.
+    if not summary or _pr_norm(summary) in {_pr_norm(title), ""}:
+        summary = title
+    elif _pr_norm(title) in _pr_norm(summary) and len(summary) < len(title) + 80:
+        summary = title
+
+    sentences = re.split(r"(?<=[.!?])\s+", summary)
+    compact = " ".join(sentences[:2]).strip()
+    if len(compact) > 420:
+        compact = compact[:417].rsplit(" ", 1)[0] + "..."
+    if compact and compact[-1] not in ".!?":
+        compact += "."
+    return compact
+
+
+def _news_timestamp(value):
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(text)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
 def _player_research_news(player_name):
     indexed = _indexed_player_news(player_name)
-    if indexed:
-        index = _player_news_index()
-        return {
-            "player": player_name,
-            "updated_at": index.get("updated_at", ""),
-            "news": indexed[:10],
-            "warnings": [],
-            "source": index.get("source") or "Daily player news index",
-        }
-
     cache = _news_cache_path(player_name)
     try:
-        if cache.exists() and (time.time() - cache.stat().st_mtime) < PLAYER_NEWS_CACHE_TTL:
+        if (
+            PLAYER_NEWS_CACHE_TTL > 0
+            and cache.exists()
+            and (time.time() - cache.stat().st_mtime) < PLAYER_NEWS_CACHE_TTL
+        ):
             cached = json.loads(cache.read_text(encoding="utf-8"))
-            if cached.get("news"):
+            if isinstance(cached.get("news"), list):
                 return cached
     except Exception:
         pass
 
     target = _pr_norm(player_name)
     news = []
+    seen = set()
     warnings = []
+
+    def add_news(item):
+        if not isinstance(item, dict):
+            return
+        source = str(item.get("source") or "Player news").strip()
+        title = _clean_news_title(item.get("title") or "Player update", source)
+        key = _pr_norm(title)
+        if not key or key in seen:
+            return
+        seen.add(key)
+        news.append({
+            "title": title,
+            "summary": _summarize_news_item(title, item.get("summary")),
+            "analysis": _clean_news_text(item.get("analysis")),
+            "published": item.get("published") or "",
+            "source": source,
+            "category": item.get("category") or "NFL",
+            "url": str(item.get("url") or "").strip(),
+        })
+
+    for article in indexed:
+        add_news(article)
 
     try:
         response = requests.get(
@@ -3936,7 +4007,7 @@ def _player_research_news(player_name):
             if target and target not in _pr_norm(combined):
                 continue
             web_link = ((article.get("links") or {}).get("web") or {})
-            news.append({
+            add_news({
                 "title": article.get("headline") or "Player update",
                 "summary": article.get("description") or "",
                 "analysis": "",
@@ -3953,44 +4024,40 @@ def _player_research_news(player_name):
             import xml.etree.ElementTree as ET
             response = requests.get(
                 "https://news.google.com/rss/search",
-                params={"q": f'"{player_name}" NFL', "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                params={"q": f'"{player_name}" NFL when:7d', "hl": "en-US", "gl": "US", "ceid": "US:en"},
                 headers={"User-Agent": "Mozilla/5.0 Gridiron-IQ/2026"},
                 timeout=(5, 10),
             )
             response.raise_for_status()
             rss_root = ET.fromstring(response.content)
-            seen = {item.get("url") for item in news}
             for item in rss_root.findall("./channel/item")[:12]:
                 link = item.findtext("link") or ""
-                if link in seen:
-                    continue
                 source_node = item.find("source")
                 source_name = source_node.text.strip() if source_node is not None and source_node.text else "Google News"
-                news.append({
+                add_news({
                     "title": item.findtext("title") or "Player update",
-                    "summary": re.sub(
-                        r"<[^>]+>",
-                        " ",
-                        html.unescape(item.findtext("description") or ""),
-                    ).replace("&nbsp;", " ").strip(),
+                    "summary": item.findtext("description") or "",
                     "analysis": "",
                     "published": item.findtext("pubDate") or "",
                     "source": source_name,
                     "category": "NFL",
                     "url": link,
                 })
-                seen.add(link)
                 if len(news) >= 10:
                     break
         except Exception as exc:
             warnings.append(f"Google News: {exc}")
 
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).timestamp()
+    recent = [item for item in news if not _news_timestamp(item.get("published")) or _news_timestamp(item.get("published")) >= cutoff]
+    recent.sort(key=lambda item: _news_timestamp(item.get("published")), reverse=True)
     result = {
         "player": player_name,
         "updated_at": datetime.now(timezone.utc).isoformat(),
-        "news": news[:10],
+        "refresh_minutes": PLAYER_NEWS_CACHE_TTL // 60,
+        "news": recent[:10],
         "warnings": warnings[-2:],
-        "source": "ESPN and Google News",
+        "source": "Live ESPN and Google News search plus saved player updates",
     }
     try:
         cache.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -4038,7 +4105,10 @@ def _player_research_injury(player_name):
 
 @app.get("/api/player-research/news/<path:player_name>")
 def player_research_news_api(player_name):
-    return jsonify(ok=True, **_player_research_news(player_name))
+    response = jsonify(ok=True, **_player_research_news(player_name))
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 def _player_research_data_status(platform="ESPN"):
     platform = str(platform or "ESPN").upper()
@@ -7107,7 +7177,8 @@ def player_research_profile_by_name_api(player_name):
     if not profile:
         return jsonify(ok=False, error="Player not found."), 404
     response = jsonify(ok=True, profile=profile)
-    response.headers["Cache-Control"] = "private, max-age=300"
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     return response
 
 
