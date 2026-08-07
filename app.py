@@ -1039,6 +1039,7 @@ def yahoo_callback():
 
 MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
+BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
 _MANUAL_MOCK_MEMORY = None
 _MOCK_CURRENT_PLAYERS_MEMORY = {}
@@ -1048,15 +1049,24 @@ def _manual_mock_public(mock):
     """Return only the mock fields the browser needs, excluding the large pool."""
     return {key: value for key, value in mock.items() if key != "player_pool"}
 
+def _mock_player_cache_read_path():
+    """Prefer persistent refreshed data, then fall back to the bundled cache."""
+    if MOCK_PLAYER_CACHE_FILE.exists():
+        return MOCK_PLAYER_CACHE_FILE
+    if BUNDLED_MOCK_PLAYER_CACHE_FILE.exists():
+        return BUNDLED_MOCK_PLAYER_CACHE_FILE
+    return MOCK_PLAYER_CACHE_FILE
+
 def _mock_current_player_directory():
     """Load current teams once per day and reuse the saved Sleeper directory."""
     cached = {}
+    cache_path = _mock_player_cache_read_path()
     try:
-        if MOCK_PLAYER_CACHE_FILE.exists():
-            cached = json.loads(MOCK_PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+        if cache_path.exists():
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
             if not isinstance(cached, dict):
                 cached = {}
-            age = time.time() - MOCK_PLAYER_CACHE_FILE.stat().st_mtime
+            age = time.time() - cache_path.stat().st_mtime
             if cached and age < MOCK_PLAYER_CACHE_TTL:
                 return cached
     except Exception:
@@ -1086,8 +1096,9 @@ def _mock_current_player_directory():
 
 def _mock_current_players_by_name(refresh=False, allow_network=True):
     global _MOCK_CURRENT_PLAYERS_MEMORY, _MOCK_CURRENT_PLAYERS_MTIME
+    cache_path = _mock_player_cache_read_path()
     try:
-        cache_mtime = MOCK_PLAYER_CACHE_FILE.stat().st_mtime
+        cache_mtime = cache_path.stat().st_mtime
         cache_age = time.time() - cache_mtime
     except Exception:
         cache_mtime = 0.0
@@ -1100,9 +1111,9 @@ def _mock_current_players_by_name(refresh=False, allow_network=True):
     ):
         return _MOCK_CURRENT_PLAYERS_MEMORY
 
-    if not refresh and MOCK_PLAYER_CACHE_FILE.exists():
+    if not refresh and cache_path.exists():
         try:
-            directory = json.loads(MOCK_PLAYER_CACHE_FILE.read_text(encoding="utf-8"))
+            directory = json.loads(cache_path.read_text(encoding="utf-8"))
         except Exception:
             directory = {}
     elif allow_network:
@@ -1123,7 +1134,7 @@ def _mock_current_players_by_name(refresh=False, allow_network=True):
             by_name[_pr_norm(name)] = {"player_id": str(player_id), **row}
     _MOCK_CURRENT_PLAYERS_MEMORY = by_name
     try:
-        _MOCK_CURRENT_PLAYERS_MTIME = MOCK_PLAYER_CACHE_FILE.stat().st_mtime
+        _MOCK_CURRENT_PLAYERS_MTIME = cache_path.stat().st_mtime
     except Exception:
         _MOCK_CURRENT_PLAYERS_MTIME = cache_mtime
     return _MOCK_CURRENT_PLAYERS_MEMORY
@@ -1179,144 +1190,244 @@ def _mock_projection_from_stats(stats, pos):
 
 def _build_dynamic_mock_pool(context):
     """
-    Build the mock pool from the current 2026 master player database whenever
-    available. This prevents stale hard-coded teams and includes rookies.
+    Merge every available player source into one complete draft pool.
+
+    An older implementation returned immediately when the 2026 master file
+    contained *any* players. A partial master file could therefore shrink the
+    entire mock draft to only a few dozen names. The pool now uses union/merge
+    semantics so a partial source can enrich records but can never remove
+    players supplied by another source.
     """
-    master = _master_players_2026()
-    master_players = master.get("players", {})
-    # Current Sleeper teams override any older team saved in the master file.
-    current_players = _mock_current_players_by_name(refresh=True)
-
-    if master_players:
-        players = []
-        for norm, p in master_players.items():
-            name = str(p.get("name") or "").strip()
-            if not name:
-                continue
-            current = current_players.get(_pr_norm(name), {})
-            current_team = (
-                _normalize_team_code(current.get("team")) or "FA"
-                if current
-                else (_normalize_team_code(p.get("team")) or "FA")
-            )
-            pos = str(current.get("position") or p.get("position") or "").upper()
-            if pos == "DST":
-                pos = "DEF"
-            if pos not in {"QB","RB","WR","TE","K","DEF"}:
-                continue
-
-            projection_data = p.get("projection") or {}
-            projection = (
-                projection_data.get("ppr_points")
-                or projection_data.get("fantasy_points")
-                or 0
-            )
-            try:
-                projection = float(projection or 0)
-            except Exception:
-                projection = 0.0
-
-            adp = p.get("adp")
-            try:
-                adp = float(adp)
-            except Exception:
-                adp = 999.0
-
-            stats = p.get("stats_2025") or {}
-            if not projection:
-                projection = _mock_projection_from_stats(stats, pos)
-
-            players.append({
-                "rank": 999,
-                "name": name,
-                "pos": pos,
-                "team": current_team,
-                "tier": 9,
-                "adp": adp,
-                "projection": round(projection, 1),
-                "rookie": bool(p.get("rookie")),
-                "fantasypros_id": p.get("fantasypros_id"),
-                "sleeper_id": p.get("sleeper_id"),
-            })
-
-        def master_sort(p):
-            adp = p.get("adp", 999)
-            return (
-                adp if adp < 999 else 9999,
-                -float(p.get("projection", 0) or 0),
-                p.get("name") or "",
-            )
-
-        players.sort(key=master_sort)
-        for idx, p in enumerate(players, 1):
-            p["rank"] = idx
-            if p.get("adp", 999) >= 999:
-                p["adp"] = round(max(1, idx + 8), 1)
-
-        return players[:300]
-
-    # Fallback to the prior local pool until the first master refresh is run.
     platform = "YAHOO" if "YAHOO" in str(context.get("platform","")).upper() else "ESPN"
-    # Starting a mock draft must never wait on an external ADP refresh. Use
-    # whatever has already been saved locally; the ADP refresh tools can update
-    # these files separately in the background/admin workflow.
     adp_data = _mock_local_adp_data(platform)
-    adp_map = adp_data.get("players", {})
-    stats_map = _stats_2025_snapshot().get("players", {})
-    directory = _pr_players()
-
+    adp_map = adp_data.get("players", {}) or {}
+    stats_map = _stats_2025_snapshot().get("players", {}) or {}
+    master_players = (_master_players_2026().get("players", {}) or {})
+    # Draft startup stays fast and deterministic. The daily refresh populates
+    # this local cache; starting a draft never waits on Sleeper's network API.
+    current_players = _mock_current_players_by_name(
+        refresh=False,
+        allow_network=False,
+    )
+    allowed_positions = {"QB", "RB", "WR", "TE", "K", "DEF"}
     pool = {}
-    for p in MOCK_PLAYER_POOL:
-        item = dict(p)
-        norm = _pr_norm(item["name"])
-        adp_row = adp_map.get(norm, {})
-        try:
-            item["adp"] = float(adp_row.get("adp", item.get("adp", 999)))
-        except Exception:
-            item["adp"] = float(item.get("adp", 999))
-        stats = stats_map.get(norm, {})
-        if not item.get("projection"):
-            item["projection"] = _mock_projection_from_stats(stats, item.get("pos"))
-        pool[norm] = item
 
-    for pid, p in directory.items():
-        name = p.get("full_name") or " ".join(x for x in [p.get("first_name"),p.get("last_name")] if x)
-        pos = str(p.get("position") or ((p.get("fantasy_positions") or [""])[0]) or "").upper()
-        if pos == "DST":
-            pos = "DEF"
-        if not name or pos not in {"QB","RB","WR","TE","K","DEF"}:
-            continue
-        norm = _pr_norm(name)
-        if norm in pool:
-            continue
-        adp_row = adp_map.get(norm, {})
+    def clean_position(value):
+        position = str(value or "").upper().strip()
+        return "DEF" if position in {"DST", "D/ST"} else "RB" if position == "FB" else position
+
+    def clean_number(value, default=0.0):
         try:
-            adp = float(adp_row.get("adp", 999))
-        except Exception:
-            adp = 999.0
-        stats = stats_map.get(norm, {})
-        pool[norm] = {
+            number = float(value)
+            return number if number == number else default
+        except (TypeError, ValueError):
+            return default
+
+    def add_player(name, position, team="", **values):
+        name = str(name or "").strip()
+        position = clean_position(position)
+        if not name or position not in allowed_positions:
+            return None
+        key = _pr_norm(name)
+        if not key:
+            return None
+        item = pool.setdefault(key, {
             "rank": 999,
             "name": name,
-            "pos": pos,
-            "team": p.get("team") or stats.get("team") or "FA",
+            "pos": position,
+            "team": _normalize_team_code(team) or "FA",
             "tier": 9,
-            "adp": adp,
-            "projection": _mock_projection_from_stats(stats, pos),
-            "rookie": bool(p.get("rookie")),
-        }
+            "adp": 999.0,
+            "projection": 0.0,
+        })
+        item["name"] = name or item["name"]
+        item["pos"] = position or item["pos"]
+        normalized_team = _normalize_team_code(team)
+        if normalized_team:
+            item["team"] = normalized_team
+        for field, value in values.items():
+            if value not in (None, ""):
+                item[field] = value
+        return item
 
-    players = list(pool.values())
-    players.sort(key=lambda p: (
-        float(p.get("adp",999)),
-        -float(p.get("projection",0) or 0),
-        p.get("name","")
-    ))
-    for idx, p in enumerate(players, 1):
+    # Guaranteed local baseline.
+    for p in MOCK_PLAYER_POOL:
+        item = add_player(
+            p.get("name"), p.get("pos"), p.get("team"),
+            adp=clean_number(p.get("adp"), 999.0),
+            projection=clean_number(p.get("projection")),
+            tier=p.get("tier", 9),
+        )
+        if item:
+            item["_built_in"] = True
+
+    # Complete prior-season production adds hundreds of relevant players even
+    # if a current-player refresh has not run yet.
+    for key, stats in stats_map.items():
+        if not isinstance(stats, dict):
+            continue
+        name = stats.get("name") or stats.get("player_display_name") or key
+        position = stats.get("position") or stats.get("position_group")
+        item = add_player(name, position, stats.get("team") or stats.get("recent_team"))
+        if not item:
+            continue
+        if clean_number(item.get("projection")) <= 0:
+            item["projection"] = _mock_projection_from_stats(stats, item["pos"])
+        item["stats_2025"] = True
+
+    # Partial or complete 2026 master data enriches the union; it never replaces
+    # the union. This is the key protection against a tiny draft pool.
+    for key, player in master_players.items():
+        if not isinstance(player, dict):
+            continue
+        name = player.get("name") or player.get("full_name") or key
+        position = player.get("position") or ((player.get("fantasy_positions") or [""])[0])
+        item = add_player(
+            name, position, player.get("team"),
+            rookie=bool(player.get("rookie")),
+            fantasypros_id=player.get("fantasypros_id"),
+            sleeper_id=player.get("sleeper_id") or player.get("player_id"),
+            active=player.get("active"),
+            status=player.get("status"),
+        )
+        if not item:
+            continue
+        projection_data = player.get("projection") or player.get("projection_2026") or {}
+        if not isinstance(projection_data, dict):
+            projection_data = {}
+        projection = clean_number(
+            projection_data.get("ppr_points")
+            or projection_data.get("fantasy_points_ppr")
+            or projection_data.get("fantasy_points")
+            or player.get("proj_2026_ppr")
+        )
+        if projection > 0:
+            item["projection"] = projection
+        master_adp = clean_number(player.get("adp"), 999.0)
+        if 0 < master_adp < 999:
+            item["adp"] = master_adp
+        item["_master_seen"] = True
+
+    # Current directory has final authority over NFL team, position and active
+    # status, including rookies who do not have a 2025 stat line.
+    for key, player in current_players.items():
+        if not isinstance(player, dict):
+            continue
+        name = player.get("full_name") or " ".join(
+            value for value in (player.get("first_name"), player.get("last_name")) if value
+        ) or key
+        position = player.get("position") or ((player.get("fantasy_positions") or [""])[0])
+        item = add_player(
+            name, position, player.get("team") or "FA",
+            sleeper_id=player.get("player_id") or player.get("sleeper_id"),
+            rookie=bool(player.get("rookie")) or clean_number(player.get("years_exp"), 1) == 0,
+            active=player.get("active"),
+            status=player.get("status"),
+            search_rank=player.get("search_rank"),
+        )
+        if item:
+            item["_current_seen"] = True
+
+    # Platform ADP is applied last and can also introduce a player omitted from
+    # every roster/stat source when the ADP record contains name and position.
+    for key, adp_row in adp_map.items():
+        if not isinstance(adp_row, dict):
+            continue
+        item = pool.get(_pr_norm(key))
+        if not item:
+            item = add_player(
+                adp_row.get("name") or key,
+                adp_row.get("position") or adp_row.get("pos"),
+                adp_row.get("team"),
+            )
+        if not item:
+            continue
+        adp = clean_number(adp_row.get("adp"), 999.0)
+        if 0 < adp < 999:
+            item["adp"] = adp
+
+    players = []
+    for key, item in pool.items():
+        # Exclude only players explicitly confirmed inactive by the current
+        # directory. Unknown status is retained so data-source outages cannot
+        # erase most of the board.
+        if item.get("_current_seen") and item.get("active") is False:
+            continue
+        if clean_number(item.get("projection")) <= 0:
+            item["projection"] = _mock_projection_from_stats(
+                stats_map.get(key, {}) or {}, item.get("pos")
+            )
+        item["projection"] = round(clean_number(item.get("projection")), 1)
+        item["adp"] = clean_number(item.get("adp"), 999.0)
+        for internal in ("_built_in", "_master_seen", "_current_seen"):
+            item.pop(internal, None)
+        players.append(item)
+
+    def draft_order(player):
+        adp = clean_number(player.get("adp"), 999.0)
+        sleeper_rank = clean_number(player.get("search_rank"), 9999.0)
+        market_rank = adp if 0 < adp < 999 else sleeper_rank
+        # Signed/current-team players sort ahead of free agents when two
+        # records have similar market rank.
+        free_agent_penalty = 1000 if player.get("team") in {"", "FA"} else 0
+        return (
+            market_rank + free_agent_penalty,
+            -clean_number(player.get("projection")),
+            player.get("name", ""),
+        )
+
+    players.sort(key=draft_order)
+
+    # Keep the response quick while guaranteeing a deep board at every fantasy
+    # position. A single global slice used to overfill the pool with QBs/RBs and
+    # leave only a handful of WRs or TEs.
+    position_limits = {
+        "QB": 100,
+        "RB": 180,
+        "WR": 260,
+        "TE": 100,
+        "K": 30,
+        "DEF": 32,
+    }
+    selected = []
+    selected_counts = Counter()
+    for player in players:
+        position = player.get("pos")
+        if selected_counts[position] >= position_limits.get(position, 0):
+            continue
+        selected.append(player)
+        selected_counts[position] += 1
+
+    selected.sort(key=draft_order)
+    for idx, p in enumerate(selected, 1):
         p["rank"] = idx
-        if p.get("adp", 999) >= 999:
+        if not 0 < p.get("adp", 999) < 999:
             p["adp"] = round(max(1, idx + 8), 1)
-    return players[:300]
+        try:
+            p["tier"] = int(p.get("tier") or max(1, min(12, (idx - 1) // 24 + 1)))
+        except (TypeError, ValueError):
+            p["tier"] = max(1, min(12, (idx - 1) // 24 + 1))
+
+    return selected
+
+def _manual_ensure_complete_pool(mock):
+    """Upgrade saved drafts created by the old partial-pool implementation."""
+    existing = mock.get("player_pool") or []
+    if len(existing) >= 300:
+        return False
+
+    context = dict(CONTEXTS.get(mock.get("league_key"), CONTEXTS["espn-gramps"]))
+    complete = _build_dynamic_mock_pool(context)
+    merged = {_pr_norm(player.get("name")): dict(player) for player in complete}
+    # Preserve any values already displayed or drafted in the saved mock.
+    for player in existing:
+        key = _pr_norm(player.get("name"))
+        if key:
+            merged[key] = {**merged.get(key, {}), **player}
+    mock["player_pool"] = list(merged.values())
+    mock["pool_version"] = "complete-v2"
+    mock["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return True
 
 def _manual_player_lookup(mock=None):
     pool = (mock or {}).get("player_pool") if mock else None
@@ -1330,7 +1441,9 @@ def _manual_available(mock):
 
 def _manual_refresh_pool_teams(mock):
     """Correct teams in new and previously saved mocks from the local daily cache."""
-    current = _mock_current_players_by_name(refresh=False)
+    # Never make a live HTTP request in the pick/render loop. The bundled cache
+    # is refreshed daily by GitHub Actions.
+    current = _mock_current_players_by_name(refresh=False, allow_network=False)
     if not current:
         return mock
 
@@ -1923,6 +2036,7 @@ def manual_mock_start():
         "status": "starting",
         "picks": [],
         "player_pool": _build_dynamic_mock_pool(context),
+        "pool_version": "complete-v2",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1935,6 +2049,7 @@ def manual_mock_start():
         ok=True,
         mock=_manual_mock_public(mock),
         player_pool_count=len(mock.get("player_pool", [])),
+        pool_version=mock.get("pool_version"),
     )
 
 
@@ -1967,6 +2082,8 @@ def manual_mock_state(mock_id):
     mock = _manual_mock_get(mock_id)
     if not mock:
         return jsonify(ok=False, error="Mock draft not found."), 404
+    if _manual_ensure_complete_pool(mock):
+        _manual_mock_save(mock)
     _manual_refresh_pool_teams(mock)
 
     row = _manual_current_order_row(mock)
@@ -2001,6 +2118,7 @@ def manual_mock_state(mock_id):
     # Draft board is ranked by ADP (lowest/best ADP first).
     # Pick Score remains visible as Gridiron IQ's roster-aware recommendation.
     scored.sort(key=lambda x: (float(x.get("adp", 9999)), int(x.get("rank", 9999))))
+    position_counts = dict(Counter(player.get("pos") for player in scored))
 
     return jsonify(
         ok=True,
@@ -2010,6 +2128,10 @@ def manual_mock_state(mock_id):
         available=scored,
         grade=mock.get("grade") or _manual_grade(mock),
         teams=_manual_board_teams(mock),
+        player_pool_count=len(mock.get("player_pool", [])),
+        available_count=len(scored),
+        position_counts=position_counts,
+        pool_version=mock.get("pool_version") or "complete-v2",
     )
 
 @app.post("/api/mock-draft/manual/<mock_id>/pick")
