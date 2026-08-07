@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block title %}AI Mock Draft Simulator | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+.ms{--p:#5d3df5;--t:#132033;--m:#68778e;--l:#dfe5ef;--g:#16a34a;color:var(--t)}
+.ms-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.ms-k{color:var(--p);font-size:11px;font-weight:900;letter-spacing:.09em}.ms h1{font-size:36px;margin:5px 0}.ms p{color:var(--m)}
+.ms-grid{display:grid;grid-template-columns:.7fr 1.3fr;gap:16px}.ms-card{background:#fff;border:1px solid var(--l);border-radius:16px;padding:18px}.ms-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ms-form label{font-size:10px;color:var(--m);font-weight:800}.ms-form input,.ms-form select{width:100%;box-sizing:border-box;border:1px solid var(--l);border-radius:9px;padding:10px;background:#fff;margin-top:5px}
+.ms-btn{border:1px solid var(--l);border-radius:10px;padding:10px 13px;background:#fff;font-weight:900;cursor:pointer}.ms-btn.primary{border:0;background:linear-gradient(90deg,#2d70f4,#6038f3);color:#fff}.ms-full{width:100%;margin-top:12px}
+.ms-live{display:none;grid-template-columns:1.45fr .75fr;gap:16px;margin-top:16px}.ms-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}.ms-search{flex:1;min-width:180px;border:1px solid var(--l);border-radius:9px;padding:9px}.ms-tabs{display:flex;gap:6px;flex-wrap:wrap}.ms-tabs button{border:0;border-radius:999px;padding:7px 10px;background:#f0f3f8;font-weight:800;cursor:pointer}.ms-tabs button small{font-size:8px;opacity:.72;margin-left:3px}.ms-tabs button.active{background:var(--p);color:#fff}
+.ms-pool-summary{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 9px;color:var(--m);font-size:10px}.ms-pool-summary b{color:var(--t)}.ms-empty{text-align:center!important;color:var(--m);padding:28px 8px!important}
+.ms-table-wrap{overflow:auto;max-height:610px}.ms-table{width:100%;border-collapse:collapse;min-width:700px}.ms-table th,.ms-table td{padding:9px 7px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:10px}.ms-table th{font-size:8px;color:var(--m);position:sticky;top:0;background:#fff}.ms-pick{border:0;border-radius:8px;background:var(--p);color:#fff;padding:7px 9px;font-weight:900}
+.ms-stat{background:#f7f8fc;border-radius:11px;padding:11px;margin-bottom:10px}.ms-stat span,.ms-stat strong{display:block}.ms-stat span{font-size:9px;color:var(--m)}.ms-stat strong{font-size:22px;margin-top:3px}.ms-roster{width:100%;border-collapse:collapse}.ms-roster td,.ms-roster th{padding:7px 4px;border-bottom:1px solid #e8ebf1;font-size:10px;text-align:left}
+.ms-saved{margin-top:16px}.ms-saved-row{display:grid;grid-template-columns:1fr 130px 80px;gap:10px;padding:10px;border-bottom:1px solid #e7eaf1;font-size:11px}.ms-link{color:#4637e5;font-weight:900;text-decoration:none}
+
+.ms-board-card{margin-top:16px;background:#fff;border:1px solid var(--l);border-radius:16px;padding:16px}
+.ms-board-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;margin-bottom:12px}
+.ms-board-head h2{margin:4px 0 0;font-size:21px}
+.ms-board-scroll{overflow:auto;border:1px solid #e7eaf1;border-radius:12px}
+.ms-board{display:grid;gap:0;min-width:1500px}
+.ms-team-col{border-right:1px solid #e7eaf1;background:#fff;min-width:118px}
+.ms-team-col.you{background:#f7f4ff}
+.ms-team-head{position:sticky;top:0;z-index:2;background:#f7f8fb;border-bottom:1px solid #e3e7ee;padding:9px 8px;min-height:58px}
+.ms-team-col.you .ms-team-head{background:#eee9ff}
+.ms-team-head b,.ms-team-head span{display:block}
+.ms-team-head b{font-size:10px}
+.ms-team-head span{font-size:8px;color:var(--m);margin-top:2px;text-transform:uppercase}
+.ms-board-pick{padding:8px;border-bottom:1px solid #edf0f5;min-height:58px}
+.ms-board-pick.current{outline:2px solid var(--p);outline-offset:-2px;background:#f8f6ff}
+.ms-board-pick .rd{font-size:8px;color:var(--m)}
+.ms-board-pick .pn{font-size:10px;font-weight:900;margin-top:3px;line-height:1.2}
+.ms-board-pick .pp{font-size:8px;color:var(--m);margin-top:2px}
+.ms-board-empty{padding:8px;min-height:58px;border-bottom:1px solid #edf0f5;color:#b0bac7;font-size:9px}
+.ms-board-legend{font-size:10px;color:var(--m)}
+.ms-status{display:none;margin-top:12px;padding:11px 12px;border-radius:10px;font-size:11px;font-weight:800}
+.ms-status.show{display:block}.ms-status.busy{color:#264a88;background:#edf4ff;border:1px solid #cfe0ff}.ms-status.error{color:#991b1b;background:#fff1f2;border:1px solid #fecdd3}.ms-status.good{color:#166534;background:#f0fdf4;border:1px solid #bbf7d0}
+.ms-build-check{margin:0 0 14px}.ms-rank-source{display:block;color:var(--m);font-size:8px;margin-top:2px;max-width:125px;line-height:1.25}
+
+@media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
+</style>
+<div class="ms">
+<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · SMART DRAFT FORMULA V4</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
+<div id="build-status" class="ms-status ms-build-check show busy" role="status" aria-live="polite">Checking the deployed server and complete player database…</div>
+
+<div id="setup" class="ms-grid">
+<div class="ms-card"><div class="ms-k">DRAFT SETTINGS</div><h2>Start a Mock Draft</h2>
+<div class="ms-form">
+<label>League<select id="league">{% for item in draft_leagues %}<option value="{{ item.key }}" {% if item.key == active_league_key %}selected{% endif %}>{{ item.name }} — {{ item.platform }}</option>{% endfor %}</select></label>
+<label>Draft Position<input id="slot" type="number" min="1" max="{{ mock_context.teams }}" value="{{ mock_context.draft_slot }}"></label>
+<label>Teams<input id="teams" value="{{ mock_context.teams }}" disabled></label>
+<label>Rounds<select id="rounds"><option>10</option><option selected>12</option><option>15</option></select></label>
+</div>
+<button id="start" class="ms-btn primary ms-full">Start AI Mock Draft</button>
+<div id="start-status" class="ms-status" role="status" aria-live="polite"></div>
+</div>
+<div class="ms-card"><div class="ms-k">AI OPPONENTS</div><h2>11 Different Draft Personalities</h2><p>Opponent teams use balanced, RB-heavy, WR-heavy, Zero-RB, Hero-RB, early-QB, late-QB and best-player approaches. Market rank remains the strongest input, so strategy changes a team’s preference without causing unrealistic reaches.</p><p>Teams react to position runs and tier cliffs, build legal rosters, avoid early kicker and defense picks, and use only mild randomness so repeated mocks feel different but credible.</p></div>
+</div>
+
+<div id="live" class="ms-live">
+<div class="ms-card">
+<div class="ms-tools"><input id="search" class="ms-search" placeholder="Search available players..."><div id="tabs" class="ms-tabs"><button class="active" data-pos="" data-label="All">All <small></small></button><button data-pos="QB" data-label="QB">QB <small></small></button><button data-pos="RB" data-label="RB">RB <small></small></button><button data-pos="WR" data-label="WR">WR <small></small></button><button data-pos="TE" data-label="TE">TE <small></small></button><button data-pos="K" data-label="K">K <small></small></button><button data-pos="DEF" data-label="D/ST">D/ST <small></small></button></div></div>
+<div id="pool-summary" class="ms-pool-summary"><span>Loading the complete player pool…</span></div>
+<div class="ms-table-wrap"><table class="ms-table"><thead><tr><th>Player</th><th>Pos</th><th>NFL</th><th id="rank-heading">Draft Rank</th><th>Proj</th><th>Pick Score</th><th></th></tr></thead><tbody id="players"></tbody></table></div>
+</div>
+<div class="ms-card">
+<div class="ms-stat"><span>ON THE CLOCK</span><strong id="pick">—</strong></div>
+<div class="ms-stat"><span>LIVE GRADE</span><strong id="grade">—</strong></div>
+<button id="auto-rest" class="ms-btn ms-full">AI Auto-Draft My Remaining Picks</button>
+<h3>Your Roster</h3><table class="ms-roster"><tbody id="roster"></tbody></table>
+<div id="complete" style="display:none"><a id="review" class="ms-btn primary ms-full" href="#">Review Completed Draft</a></div>
+</div>
+</div>
+
+
+<div id="draft-board-card" class="ms-board-card" style="display:none">
+  <div class="ms-board-head">
+    <div>
+      <div class="ms-k">LIVE DRAFT BOARD</div>
+      <h2>All Teams Picking Beside You</h2>
+    </div>
+    <div class="ms-board-legend">Your team is highlighted. Each column is one draft slot.</div>
+  </div>
+  <div class="ms-board-scroll">
+    <div id="draft-board" class="ms-board"></div>
+  </div>
+</div>
+
+<div class="ms-card ms-saved"><div class="ms-k">SAVED MOCKS</div><h2>Previous Drafts</h2>
+{% for m in manual_mocks %}<div class="ms-saved-row"><span>{{ m.league_name }} · Slot {{ m.draft_slot }} · {{ m.status }}</span><span>Grade {{ (m.grade or {}).get('overall','—') }}</span><a class="ms-link" href="/mock-draft/review/{{ m.id }}">Review →</a></div>{% else %}<p>No saved drafts yet.</p>{% endfor %}
+</div>
+</div>
+<script>
+(()=>{
+  const $ = id => document.getElementById(id);
+  const expectedBuild="mock-draft-v4-cache-guard";
+  let id = null, available = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="";
+
+  async function api(url,opt={}){
+    const r=await fetch(url,{headers:{"Content-Type":"application/json"},...opt});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.detail||d.error||`Request failed (${r.status})`);
+    return d;
+  }
+
+  function formatCounts(counts={}){
+    return ["QB","RB","WR","TE","K","DEF"]
+      .map(position=>`${position==="DEF"?"D/ST":position} ${Number(counts[position]||0)}`)
+      .join(" · ");
+  }
+
+  async function verifyBuild(){
+    const status=$("build-status");
+    const button=$("start");
+    status.className="ms-status ms-build-check show busy";
+    status.textContent="Checking the deployed server and complete player database…";
+    button.disabled=true;
+    try{
+      const d=await api(`/api/diagnostics/mock-draft?league=${encodeURIComponent($("league").value)}`);
+      if(d.build_id!==expectedBuild){
+        throw new Error("Render is running an older app.py. Upload every V4 replacement file together, redeploy, then refresh this page.");
+      }
+      if(!d.player_pool_complete){
+        throw new Error(`The deployed player database is incomplete (${formatCounts(d.position_counts)}). The draft has been disabled so it cannot make incorrect picks.`);
+      }
+      const source=d.platform_adp_valid
+        ? `${d.ranking_label} loaded`
+        : "Consensus Rank active; verified platform ADP has not been loaded";
+      status.className="ms-status ms-build-check show good";
+      status.textContent=`Player database verified: ${d.player_pool_count} players · ${formatCounts(d.position_counts)} · ${source}`;
+      button.disabled=false;
+      button.textContent="Start AI Mock Draft";
+    }catch(e){
+      status.className="ms-status ms-build-check show error";
+      status.textContent=`Mock Draft unavailable: ${e.message}`;
+      button.disabled=true;
+      button.textContent="Mock Draft Disabled Until Data Is Fixed";
+    }
+  }
+
+  $("start").onclick=async()=>{
+    const button=$("start");
+    const status=$("start-status");
+    button.disabled=true;
+    button.textContent="Starting Draft…";
+    status.className="ms-status show busy";
+    status.textContent="Gridiron IQ is preparing the player pool and AI opponents…";
+
+    try{
+      const d=await api("/api/mock-draft/manual/start",{
+        method:"POST",
+        body:JSON.stringify({
+          league_key:$("league").value,
+          draft_slot:+$("slot").value,
+          rounds:+$("rounds").value
+        })
+      });
+      if(!d.mock||!d.mock.id) throw new Error("The server did not create a mock draft.");
+      id=d.mock.id;
+      $("setup").style.display="none";
+      $("live").style.display="grid";
+      $("draft-board-card").style.display="block";
+      await refresh();
+    }catch(e){
+      status.className="ms-status show error";
+      status.textContent=`Mock Draft could not start: ${e.message}`;
+      button.disabled=false;
+      button.textContent="Try Starting Mock Draft Again";
+    }
+  };
+
+  async function refresh(){
+    const d=await api(`/api/mock-draft/manual/${id}`);
+    available=d.available||[];
+    poolTotal=Number(d.player_pool_count||available.length);
+    positionCounts=d.position_counts||available.reduce((counts,player)=>{
+      counts[player.pos]=(counts[player.pos]||0)+1;
+      return counts;
+    },{});
+    rankingLabel=d.ranking_label||"Draft Rank";
+    rankingSource=d.ranking_source||"";
+    $("rank-heading").textContent=rankingLabel;
+    renderPlayers();
+
+    $("grade").textContent=(d.grade||{}).overall||"—";
+    $("pick").textContent=d.current_pick
+      ? `Round ${d.current_pick.round} · Pick #${d.current_pick.overall}`
+      : "Draft Complete";
+
+    $("roster").innerHTML=(d.roster||[]).map(p=>`
+      <tr><td>${p.round}</td><td><b>${p.name}</b></td><td>${p.pos}</td></tr>
+    `).join("");
+
+    if(d.mock.status==="complete"){
+      $("complete").style.display="block";
+      $("review").href=`/mock-draft/review/${id}`;
+    }
+
+    renderBoard(d.current_pick,d.teams,d.mock);
+  }
+
+  async function renderBoard(currentPick,teams=null,mockData=null){
+    if(!id) return;
+    if(!teams){
+      const d=await api(`/api/mock-draft/manual/${id}/board`);
+      teams=d.teams||[];
+      mockData=d.mock||{};
+    }
+    const rounds=Number((mockData||{}).rounds||12);
+
+    const bySlot={};
+    teams.forEach(t=>{
+      bySlot[t.slot]=t;
+      t.pickByRound={};
+      (t.roster||[]).forEach(p=>{t.pickByRound[p.round]=p;});
+    });
+
+    $("draft-board").style.gridTemplateColumns=`repeat(${teams.length}, minmax(118px,1fr))`;
+    $("draft-board").innerHTML=teams.map(team=>{
+      let cells="";
+      for(let round=1;round<=rounds;round++){
+        const pick=team.pickByRound[round];
+        const isCurrent=currentPick &&
+          Number(currentPick.slot)===Number(team.slot) &&
+          Number(currentPick.round)===round;
+
+        if(pick){
+          cells+=`
+            <div class="ms-board-pick ${isCurrent?"current":""}">
+              <div class="rd">R${pick.round} · #${pick.overall}</div>
+              <div class="pn">${pick.player}</div>
+              <div class="pp">${pick.pos} · ${pick.team}</div>
+            </div>`;
+        }else{
+          cells+=`
+            <div class="ms-board-empty ${isCurrent?"current":""}">
+              R${round}${isCurrent?" · ON CLOCK":""}
+            </div>`;
+        }
+      }
+
+      return `
+        <div class="ms-team-col ${team.label==="Your Team"?"you":""}">
+          <div class="ms-team-head">
+            <b>${team.label}</b>
+            <span>Slot ${team.slot}${team.strategy && team.strategy!=="you" ? " · "+team.strategy : ""}</span>
+          </div>
+          ${cells}
+        </div>`;
+    }).join("");
+  }
+
+  function renderPlayers(){
+    const q=$("search").value.toLowerCase();
+    const filtered=available.filter(p=>(!q||p.name.toLowerCase().includes(q))&&(!pos||p.pos===pos));
+    const availableTotal=available.length;
+    $("pool-summary").innerHTML=`<span><b>${filtered.length}</b> shown · <b>${availableTotal}</b> available · ${poolTotal} total players</span><span>${rankingLabel}${rankingSource?` · ${rankingSource}`:""}</span>`;
+
+    document.querySelectorAll("#tabs button").forEach(button=>{
+      const tabPos=button.dataset.pos;
+      const count=tabPos ? Number(positionCounts[tabPos]||0) : availableTotal;
+      button.querySelector("small").textContent=`${count}`;
+    });
+
+    $("players").innerHTML=filtered.length ? filtered.map(p=>`
+        <tr>
+          <td><b>${p.name}</b></td>
+          <td>${p.pos}</td>
+          <td>${p.team}</td>
+          <td><b>${p.adp}</b><small class="ms-rank-source">${p.is_platform_adp?"Verified platform ADP":"Gridiron IQ consensus"}</small></td>
+          <td>${p.projection}</td>
+          <td>${p.pick_score}</td>
+          <td><button class="ms-pick" data-p="${p.name.replace(/"/g,'&quot;')}">Draft</button></td>
+        </tr>`).join("") : `<tr><td class="ms-empty" colspan="7">No available players match this search and position.</td></tr>`;
+
+    document.querySelectorAll(".ms-pick").forEach(b=>b.onclick=async()=>{
+      b.disabled=true;
+      const priorClock=$("pick").textContent;
+      $("pick").textContent="AI teams are picking…";
+      try{
+        await api(`/api/mock-draft/manual/${id}/pick`,{
+          method:"POST",
+          body:JSON.stringify({player:b.dataset.p})
+        });
+        await refresh();
+      }catch(e){
+        alert(e.message);
+        $("pick").textContent=priorClock;
+        b.disabled=false;
+      }
+    });
+  }
+
+  $("search").oninput=renderPlayers;
+
+  $("league").onchange=verifyBuild;
+
+  document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{
+    document.querySelectorAll("#tabs button").forEach(x=>x.classList.remove("active"));
+    b.classList.add("active");
+    pos=b.dataset.pos;
+    renderPlayers();
+  });
+
+  $("auto-rest").onclick=async()=>{
+    if(!confirm("Let Gridiron IQ AI make all of your remaining picks?")) return;
+    await api("/api/mock-draft/manual/autodraft-rest",{
+      method:"POST",
+      body:JSON.stringify({mock_id:id})
+    });
+    await refresh();
+  };
+
+  verifyBuild();
+})();
+</script>
+{% endblock %}
