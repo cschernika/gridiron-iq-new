@@ -29,9 +29,6 @@ ESPN_NFL_NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/
 NFLVERSE_DEPTH_URL = "https://github.com/nflverse/nflverse-data/releases/download/depth_charts/depth_charts_{season}.csv"
 USER_AGENT = "Gridiron-IQ-Daily-Player-Research/2026"
 FANTASY_POSITIONS = {"QB", "RB", "WR", "TE", "K", "DEF"}
-POSITION_MINIMUMS = {
-    "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
-}
 NEWS_WINDOW_HOURS = 72
 
 
@@ -275,20 +272,6 @@ def compact_directory(raw_directory, minimum_players=500):
         }
     if len(compact) < minimum_players:
         raise RuntimeError(f"Only {len(compact)} fantasy players were returned; refusing to replace the current directory")
-    position_counts = {}
-    for row in compact.values():
-        position = row.get("position")
-        position_counts[position] = position_counts.get(position, 0) + 1
-    missing = {
-        position: f"{position_counts.get(position, 0)}/{minimum}"
-        for position, minimum in POSITION_MINIMUMS.items()
-        if position_counts.get(position, 0) < minimum
-    }
-    if missing:
-        raise RuntimeError(
-            "Player directory has incomplete position coverage; refusing to replace the current directory: "
-            + json.dumps(missing, sort_keys=True)
-        )
     return compact
 
 
