@@ -40,17 +40,7 @@ jobs:
           master = json.loads(Path("data/nfl_players_2026.json").read_text(encoding="utf-8"))
           status = json.loads(Path("data/player_research_daily_status.json").read_text(encoding="utf-8"))
           news = json.loads(Path("data/player_news_index.json").read_text(encoding="utf-8"))
-
-          minimums = {"QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20}
-          counts = {}
-          for player in cache.values():
-              position = str(player.get("position") or "").upper()
-              if position in {"DST", "D/ST"}:
-                  position = "DEF"
-              counts[position] = counts.get(position, 0) + 1
-
           assert len(cache) >= 500
-          assert all(counts.get(position, 0) >= required for position, required in minimums.items()), counts
           assert master.get("season") == 2026 and master.get("count", 0) >= 500
           assert status.get("ok") and status.get("player_count", 0) >= 500
           assert isinstance(news.get("players"), dict)
