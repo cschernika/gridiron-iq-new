@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard Home | Gridiron IQ{% endblock %}
+{% block title %}Command Center | Gridiron IQ{% endblock %}
 
 {% block body %}
 {% set settings = league_settings if league_settings is defined and league_settings else none %}
 {% set my_team = user_team if user_team is defined and user_team else none %}
 {% set stats = analytics if analytics is defined and analytics else none %}
+{% set roster_count = my_team.roster_size|default(0, true) if my_team else 0 %}
 
-{# Accept either a top-level power_rankings list or analytics.power_rankings. #}
 {% if power_rankings is defined and power_rankings %}
   {% set rankings = power_rankings %}
 {% elif stats and stats.power_rankings is defined and stats.power_rankings %}
@@ -16,222 +16,122 @@
   {% set rankings = [] %}
 {% endif %}
 
-<section class="topbar">
-  <div>
-    <div class="kicker">2026 FANTASY SEASON</div>
-    <h1>Dashboard Home</h1>
-  </div>
+<style>
+.giq-dashboard{--giq-ink:#142033;--giq-muted:#697990;--giq-line:#e1e7f0;--giq-soft:#f6f8fc;--giq-purple:#5b3df5;--giq-purple-dark:#4127cf;--giq-blue:#2563eb;--giq-green:#0f9f6e;--giq-orange:#e87918;color:var(--giq-ink)}
+.giq-dashboard *{box-sizing:border-box}.giq-dashboard a{text-decoration:none}.giq-hero{position:relative;overflow:hidden;display:flex;justify-content:space-between;gap:24px;align-items:center;padding:26px;border:1px solid #dcd7ff;border-radius:22px;background:linear-gradient(125deg,#f7f5ff 0%,#fff 55%,#eef6ff 100%);margin-bottom:14px}.giq-hero:after{content:"";position:absolute;width:240px;height:240px;border-radius:50%;right:-95px;top:-125px;background:rgba(91,61,245,.08)}.giq-eyebrow{color:var(--giq-purple);font-size:10px;font-weight:900;letter-spacing:.11em}.giq-hero h1{margin:5px 0 7px;font-size:34px;line-height:1.06}.giq-hero p{margin:0;color:var(--giq-muted);font-size:12px;line-height:1.55;max-width:680px}.giq-hero-actions{position:relative;z-index:1;display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.giq-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:11px 15px;border-radius:11px;font-size:10px;font-weight:900;white-space:nowrap}.giq-button.primary{background:var(--giq-purple);color:#fff;box-shadow:0 8px 20px rgba(91,61,245,.2)}.giq-button.primary:hover{background:var(--giq-purple-dark)}.giq-button.secondary{border:1px solid var(--giq-line);background:#fff;color:#394961}.giq-status{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:999px;font-size:9px;font-weight:900}.giq-status.connected{background:#ecfdf5;color:#087a55}.giq-status.disconnected{background:#fff7ed;color:#a64a0a}.giq-status i{display:block;width:7px;height:7px;border-radius:50%;background:currentColor}
+.giq-league-strip{display:grid;grid-template-columns:minmax(250px,1.5fr) repeat(4,minmax(105px,.6fr));gap:1px;overflow:hidden;border:1px solid var(--giq-line);border-radius:16px;background:var(--giq-line);margin-bottom:14px}.giq-league-main,.giq-league-detail{background:#fff;padding:14px}.giq-league-main{display:flex;gap:11px;align-items:center}.giq-ball{display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:#ede9fe;font-size:21px}.giq-league-main span,.giq-league-detail span{display:block;color:var(--giq-muted);font-size:8px;font-weight:900;letter-spacing:.06em;text-transform:uppercase}.giq-league-main strong{display:block;margin-top:3px;font-size:14px}.giq-league-detail strong{display:block;margin-top:5px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.giq-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}.giq-metric{display:flex;gap:10px;align-items:center;padding:14px;border:1px solid var(--giq-line);border-radius:15px;background:#fff}.giq-metric-icon{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:11px;font-size:17px}.giq-metric-icon.purple{background:#ede9fe}.giq-metric-icon.green{background:#ecfdf5}.giq-metric-icon.orange{background:#fff7ed}.giq-metric-icon.blue{background:#eff6ff}.giq-metric span,.giq-metric strong,.giq-metric small{display:block}.giq-metric span{color:var(--giq-muted);font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.giq-metric strong{font-size:22px;line-height:1;margin:4px 0}.giq-metric small{color:#8793a5;font-size:8px}
+.giq-section{margin-bottom:14px}.giq-section-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin:0 2px 9px}.giq-section-head h2{margin:2px 0 0;font-size:18px}.giq-section-head p{margin:0;color:var(--giq-muted);font-size:9px}.giq-section-kicker{color:var(--giq-purple);font-size:8px;font-weight:900;letter-spacing:.09em}.giq-launch-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.giq-launch{position:relative;display:flex;min-height:108px;flex-direction:column;justify-content:space-between;padding:13px;border:1px solid var(--giq-line);border-radius:15px;background:#fff;color:var(--giq-ink);transition:.18s ease}.giq-launch:hover{transform:translateY(-2px);border-color:#cfc6ff;box-shadow:0 9px 24px rgba(32,45,74,.08)}.giq-launch-top{display:flex;justify-content:space-between;gap:8px;align-items:start}.giq-launch-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:#f1efff;font-size:17px}.giq-launch-arrow{color:#9aa5b5;font-size:18px}.giq-launch b{display:block;font-size:12px;margin-bottom:3px}.giq-launch span{display:block;color:var(--giq-muted);font-size:8px;line-height:1.4}.giq-launch.primary{border-color:#d7d0ff;background:linear-gradient(145deg,#f6f3ff,#fff)}.giq-launch.primary .giq-launch-icon{background:var(--giq-purple);color:#fff}
+.giq-main-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(330px,.88fr);gap:12px;margin-bottom:14px}.giq-panel{border:1px solid var(--giq-line);border-radius:17px;background:#fff;overflow:hidden}.giq-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:15px 16px;border-bottom:1px solid var(--giq-line)}.giq-panel-head h2{margin:2px 0 0;font-size:17px}.giq-panel-head a{color:var(--giq-purple);font-size:9px;font-weight:900}.giq-table-wrap{overflow:auto;max-height:355px}.giq-rank-table{width:100%;border-collapse:collapse}.giq-rank-table th,.giq-rank-table td{padding:10px 12px;border-bottom:1px solid #edf0f5;font-size:9px;text-align:right;white-space:nowrap}.giq-rank-table th{position:sticky;top:0;background:#f8f9fc;color:#718096;font-size:8px;font-weight:900;text-transform:uppercase;z-index:2}.giq-rank-table th:nth-child(2),.giq-rank-table td:nth-child(2){text-align:left}.giq-rank-table tbody tr:last-child td{border-bottom:0}.giq-rank-table tr.giq-user-row td{background:#f4f1ff;color:#3f2bc5;font-weight:900}.giq-rank{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:8px;background:#f1f4f8;font-weight:900}.giq-team-mark{display:inline-grid;place-items:center;width:25px;height:25px;border-radius:8px;margin-right:7px;background:#e9e6ff;color:#4d37d2;font-weight:900}.giq-empty{padding:28px!important;text-align:center!important;color:var(--giq-muted)}
+.giq-action-wrap{padding:12px}.giq-next-action{padding:14px;border-radius:14px;background:linear-gradient(135deg,#5b3df5,#3d28bb);color:#fff;margin-bottom:10px}.giq-next-action span{display:block;font-size:8px;font-weight:900;letter-spacing:.08em;opacity:.76}.giq-next-action h3{margin:5px 0 4px;font-size:17px}.giq-next-action p{margin:0 0 11px;font-size:9px;line-height:1.5;opacity:.85}.giq-next-action a{display:inline-flex;padding:8px 10px;border-radius:8px;background:#fff;color:#4930d4;font-size:9px;font-weight:900}.giq-priority{display:grid;grid-template-columns:34px 1fr auto;gap:9px;align-items:center;padding:10px 4px;border-bottom:1px solid #edf0f5}.giq-priority:last-child{border-bottom:0}.giq-priority-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:9px;background:var(--giq-soft);font-size:14px}.giq-priority b,.giq-priority span{display:block}.giq-priority b{font-size:10px;margin-bottom:2px}.giq-priority span{color:var(--giq-muted);font-size:8px}.giq-priority a{display:grid;place-items:center;width:27px;height:27px;border-radius:8px;background:#f2f0ff;color:var(--giq-purple);font-size:16px;font-weight:900}
+.giq-data-bar{display:grid;grid-template-columns:1.3fr repeat(5,1fr);gap:1px;border:1px solid var(--giq-line);border-radius:15px;overflow:hidden;background:var(--giq-line)}.giq-data-label,.giq-data-link{background:#fff;padding:13px}.giq-data-label b,.giq-data-label span{display:block}.giq-data-label b{font-size:11px}.giq-data-label span{margin-top:3px;color:var(--giq-muted);font-size:8px}.giq-data-link{display:flex;align-items:center;justify-content:center;text-align:center;color:#435069;font-size:9px;font-weight:900}.giq-data-link:hover{background:#f7f5ff;color:var(--giq-purple)}
+@media(max-width:1050px){.giq-league-strip{grid-template-columns:1.5fr repeat(2,1fr)}.giq-league-detail:nth-last-child(-n+2){display:none}.giq-launch-grid{grid-template-columns:repeat(2,1fr)}.giq-metrics{grid-template-columns:repeat(2,1fr)}.giq-data-bar{grid-template-columns:repeat(3,1fr)}.giq-data-label{grid-column:1/-1}}
+@media(max-width:760px){.giq-hero{display:block;padding:20px}.giq-hero-actions{justify-content:flex-start;margin-top:15px}.giq-hero h1{font-size:29px}.giq-league-strip{grid-template-columns:1fr 1fr}.giq-league-main{grid-column:1/-1}.giq-main-grid{grid-template-columns:1fr}.giq-data-bar{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.giq-metrics,.giq-launch-grid{grid-template-columns:1fr}.giq-league-strip{grid-template-columns:1fr}.giq-league-main{grid-column:auto}.giq-league-detail:nth-last-child(-n+2){display:block}.giq-data-bar{grid-template-columns:1fr}.giq-data-label{grid-column:auto}.giq-button{width:100%}}
+</style>
 
-  <div class="top-actions">
-    {% if connected %}
-      <span class="status">✓ League connected</span>
-    {% else %}
-      <span class="status">League not connected</span>
-    {% endif %}
-    <a class="btn secondary" href="/league-sync">↻ Sync League</a>
-    <a class="btn primary" href="/draft-center">Go to Draft Center</a>
-  </div>
-</section>
-
-<section class="league-card">
-  <div class="league-left">
-    <div class="helmet">🏈</div>
+<div class="giq-dashboard">
+  <section class="giq-hero">
     <div>
-      <div class="league-title">
-        <h2>{{ league.league_name if connected and league else "Gramp's Gridiron" }}</h2>
-        {% if connected %}<span>ESPN</span>{% endif %}
-      </div>
-
-      <p>
-        {{ league.teams if connected and league and league.teams else 12 }} Teams •
-        {{ settings.scoring_label if settings and settings.scoring_label else (settings.scoring if settings and settings.scoring else "Full PPR") }}
-      </p>
-
-      <div class="details">
-        <div>▣ Draft: Tue, Sep 8, 2026 • 7:30 PM</div>
-        <div>♧ Snake Draft</div>
-        <div>
-          ▣ {{ settings.reg_season_count if settings and settings.reg_season_count else 14 }}-Week Regular Season
-          &nbsp;|&nbsp;
-          {{ settings.playoff_team_count if settings and settings.playoff_team_count else 6 }} Playoff Teams
-        </div>
-      </div>
+      <div class="giq-eyebrow">GRIDIRON IQ · 2026 COMMAND CENTER</div>
+      <h1>Welcome back, {{ user.name|default("Chad", true) }}</h1>
+      <p>Your league, draft preparation, weekly decisions and player intelligence—organized in one place.</p>
     </div>
-  </div>
-
-  <div class="divider"></div>
-
-  <div class="your-team">
-    <span>Your Team</span>
-    <div class="team-row">
-      <div class="jersey">10</div>
-      <div>
-        <h3>{{ my_team.team_name if my_team else "Chad's Team" }}</h3>
-        <p>
-          {% if my_team %}
-            {{ my_team.wins|default(0, true) }}-{{ my_team.losses|default(0, true) }}-{{ my_team.ties|default(0, true) }}
-          {% else %}
-            0-0-0
-          {% endif %}
-        </p>
-        <p>
-          {% if my_team and my_team.points_for is defined and my_team.points_for is not none %}
-            {{ my_team.points_for }} Points
-          {% else %}
-            -- Points
-          {% endif %}
-        </p>
-      </div>
+    <div class="giq-hero-actions">
+      <span class="giq-status {{ 'connected' if connected else 'disconnected' }}"><i></i>{{ 'League connected' if connected else 'League not connected' }}</span>
+      <a class="giq-button secondary" href="/league-sync">↻ Sync League</a>
+      {% if not connected %}
+        <a class="giq-button primary" href="/connect-league">Connect a League</a>
+      {% elif roster_count == 0 %}
+        <a class="giq-button primary" href="/draft-center">Open Draft Center</a>
+      {% else %}
+        <a class="giq-button primary" href="/lineup-optimizer">Optimize Lineup</a>
+      {% endif %}
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="metrics">
-  <article>
-    <div class="metric-icon purple">🏆</div>
-    <div>
-      <span>Team Strength</span>
-      <strong>{{ stats.team_strength if stats and stats.team_strength is defined else 86 }}</strong>
-      <small>Rank #{{ stats.team_rank if stats and stats.team_rank is defined else 3 }} in your league</small>
+  <section class="giq-league-strip">
+    <div class="giq-league-main">
+      <div class="giq-ball">🏈</div>
+      <div><span>Active League</span><strong>{{ league.league_name if connected and league else "Connect ESPN or Yahoo" }}</strong></div>
     </div>
-  </article>
+    <div class="giq-league-detail"><span>Platform</span><strong>{{ league.platform|default("ESPN", true) if connected and league else "—" }}</strong></div>
+    <div class="giq-league-detail"><span>League Size</span><strong>{{ (league.teams if league and league.teams else 12) ~ " Teams" if connected else "—" }}</strong></div>
+    <div class="giq-league-detail"><span>Scoring</span><strong>{{ settings.scoring_label if settings and settings.scoring_label else (settings.scoring if settings and settings.scoring else ("Full PPR" if connected else "—")) }}</strong></div>
+    <div class="giq-league-detail"><span>Your Team</span><strong>{{ my_team.team_name if my_team else ("Pre-Draft" if connected else "—") }}</strong></div>
+  </section>
 
-  <article>
-    <div class="metric-icon green">↗</div>
-    <div>
-      <span>Playoff Probability</span>
-      <strong>{{ stats.playoff_probability if stats and stats.playoff_probability is defined else 74 }}%</strong>
-      <small class="green-text">Current Projection</small>
+  <section class="giq-metrics">
+    <article class="giq-metric"><div class="giq-metric-icon purple">🏆</div><div><span>Team Strength</span><strong>{{ stats.team_strength if connected and stats and stats.team_strength is defined else "—" }}</strong><small>{% if connected %}League rank #{{ stats.team_rank if stats and stats.team_rank is defined else "—" }}{% else %}Connect league to calculate{% endif %}</small></div></article>
+    <article class="giq-metric"><div class="giq-metric-icon green">↗</div><div><span>Playoff Probability</span><strong>{{ (stats.playoff_probability|string ~ "%") if connected and stats and stats.playoff_probability is defined else "—" }}</strong><small>Current roster projection</small></div></article>
+    <article class="giq-metric"><div class="giq-metric-icon orange">☆</div><div><span>Championship Odds</span><strong>{{ (stats.championship_probability|string ~ "%") if connected and stats and stats.championship_probability is defined else "—" }}</strong><small>League-wide forecast</small></div></article>
+    <article class="giq-metric"><div class="giq-metric-icon blue">〽</div><div><span>Lineup Gain</span><strong>{{ ("+" ~ stats.lineup_gain) if connected and stats and stats.lineup_gain is defined else "—" }}</strong><small>Points available from optimization</small></div></article>
+  </section>
+
+  <section class="giq-section">
+    <div class="giq-section-head"><div><div class="giq-section-kicker">QUICK LAUNCH</div><h2>Core Tools</h2></div><p>Open the parts of Gridiron IQ you use most.</p></div>
+    <div class="giq-launch-grid">
+      <a class="giq-launch primary" href="/draft-center"><div class="giq-launch-top"><div class="giq-launch-icon">◎</div><div class="giq-launch-arrow">→</div></div><div><b>Draft Center</b><span>Live recommendations, tiers, scarcity and roster needs.</span></div></a>
+      <a class="giq-launch" href="/mock-draft"><div class="giq-launch-top"><div class="giq-launch-icon">▦</div><div class="giq-launch-arrow">→</div></div><div><b>Mock Draft Lab</b><span>Practice full drafts and review every selection.</span></div></a>
+      <a class="giq-launch" href="/player-research"><div class="giq-launch-top"><div class="giq-launch-icon">⌕</div><div class="giq-launch-arrow">→</div></div><div><b>Player Research</b><span>Career stats, projections, injuries and live news.</span></div></a>
+      <a class="giq-launch" href="/weekly-matchups"><div class="giq-launch-top"><div class="giq-launch-icon">⚔</div><div class="giq-launch-arrow">→</div></div><div><b>Weekly Matchups</b><span>Offense-vs-defense, coverage and trench analysis.</span></div></a>
+      <a class="giq-launch" href="/lineup-optimizer"><div class="giq-launch-top"><div class="giq-launch-icon">✓</div><div class="giq-launch-arrow">→</div></div><div><b>Lineup Optimizer</b><span>Set the strongest starting lineup for the week.</span></div></a>
+      <a class="giq-launch" href="/waiver-assistant"><div class="giq-launch-top"><div class="giq-launch-icon">＋</div><div class="giq-launch-arrow">→</div></div><div><b>Waiver Assistant</b><span>Find priority adds, upside players and FAAB values.</span></div></a>
+      <a class="giq-launch" href="/trade-analyzer"><div class="giq-launch-top"><div class="giq-launch-icon">⇄</div><div class="giq-launch-arrow">→</div></div><div><b>Trade Analyzer</b><span>Compare value, roster impact and manager fit.</span></div></a>
+      <a class="giq-launch" href="/league-intelligence"><div class="giq-launch-top"><div class="giq-launch-icon">◈</div><div class="giq-launch-arrow">→</div></div><div><b>League Intelligence</b><span>Power rankings, team needs and manager tendencies.</span></div></a>
     </div>
-  </article>
+  </section>
 
-  <article>
-    <div class="metric-icon orange">☆</div>
-    <div>
-      <span>Championship Odds</span>
-      <strong>{{ stats.championship_probability if stats and stats.championship_probability is defined else 18 }}%</strong>
-      <small class="orange-text">Based on current roster</small>
-    </div>
-  </article>
-
-  <article>
-    <div class="metric-icon blue">〽</div>
-    <div>
-      <span>Projected Lineup Gain</span>
-      <strong>+{{ stats.lineup_gain if stats and stats.lineup_gain is defined else 7.1 }}</strong>
-      <small class="blue-text">Points from optimal choices</small>
-    </div>
-  </article>
-</section>
-
-<section class="dash-grid">
-  <article class="panel">
-    <div class="panel-head">
-      <div>
-        <div class="panel-kicker">LEAGUE SNAPSHOT</div>
-        <h2>Power Rankings</h2>
-      </div>
-      <a href="/league-intelligence">View analyzer →</a>
-    </div>
-
-    <div style="overflow-x:auto;">
-      <table>
-        <thead>
-          <tr>
-            <th>RANK</th>
-            <th>TEAM</th>
-            <th>RATING</th>
-            <th>PLAYOFF %</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% if rankings %}
-            {# Do not slice this list: every synced league team is displayed. #}
+  <section class="giq-main-grid">
+    <article class="giq-panel">
+      <div class="giq-panel-head"><div><div class="giq-section-kicker">LEAGUE PULSE</div><h2>Power Rankings</h2></div><a href="/league-intelligence">Full analyzer →</a></div>
+      <div class="giq-table-wrap">
+        <table class="giq-rank-table">
+          <thead><tr><th>Rank</th><th>Team</th><th>Rating</th><th>Playoff</th></tr></thead>
+          <tbody>
+          {% if rankings and connected %}
             {% for team in rankings %}
               {% set team_name = team.team if team.team is defined else (team.team_name if team.team_name is defined else "Unknown Team") %}
               {% set is_user = my_team and team_name == my_team.team_name %}
-              <tr class="{% if is_user %}user-rank{% endif %}">
-                <td>#{{ team.rank if team.rank is defined else loop.index }}</td>
-                <td>
-                  <span class="mini-logo">{{ team_name[:1]|upper }}</span>
-                  {{ team_name }}{% if is_user %} (You){% endif %}
-                </td>
-                <td>{{ team.rating if team.rating is defined and team.rating is not none else "--" }}</td>
-                <td>
-                  {% if team.playoffs is defined and team.playoffs is not none %}
-                    {{ team.playoffs }}%
-                  {% elif team.playoff_probability is defined and team.playoff_probability is not none %}
-                    {{ team.playoff_probability }}%
-                  {% else %}
-                    --
-                  {% endif %}
-                </td>
-              </tr>
+              <tr class="{{ 'giq-user-row' if is_user else '' }}"><td><span class="giq-rank">{{ team.rank if team.rank is defined else loop.index }}</span></td><td><span class="giq-team-mark">{{ team_name[:1]|upper }}</span>{{ team_name }}{% if is_user %} (You){% endif %}</td><td>{{ team.rating if team.rating is defined and team.rating is not none else "—" }}</td><td>{% if team.playoffs is defined and team.playoffs is not none %}{{ team.playoffs }}%{% elif team.playoff_probability is defined and team.playoff_probability is not none %}{{ team.playoff_probability }}%{% else %}—{% endif %}</td></tr>
             {% endfor %}
           {% elif connected %}
-            <tr>
-              <td colspan="4">Power rankings will appear after the league sync finishes.</td>
-            </tr>
+            <tr><td class="giq-empty" colspan="4">Sync the league to calculate power rankings.</td></tr>
           {% else %}
-            <tr><td>#1</td><td><span class="mini-logo">S</span>Sunday Crushers</td><td>91</td><td>82%</td></tr>
-            <tr><td>#2</td><td><span class="mini-logo">F</span>Fourth &amp; Long</td><td>88</td><td>77%</td></tr>
-            <tr class="user-rank"><td>#3</td><td><span class="mini-logo">C</span>Chad's Team (You)</td><td>86</td><td>74%</td></tr>
-            <tr><td>#4</td><td><span class="mini-logo">G</span>Gridiron Gurus</td><td>84</td><td>69%</td></tr>
-            <tr><td>#5</td><td><span class="mini-logo">R</span>Red Zone Renegades</td><td>82</td><td>63%</td></tr>
+            <tr><td class="giq-empty" colspan="4">Connect your ESPN or Yahoo league to see every team.</td></tr>
           {% endif %}
-        </tbody>
-      </table>
-    </div>
-
-    <a class="footer-link" href="/league-intelligence">View full league analyzer →</a>
-  </article>
-
-  <article class="panel">
-    <div class="panel-head">
-      <div>
-        <div class="panel-kicker">THIS WEEK</div>
-        <h2>AI Priorities</h2>
+          </tbody>
+        </table>
       </div>
-    </div>
+    </article>
 
-    <div class="priority">
-      <div class="picon green">◎</div>
-      <div>
-        <b>Optimize your lineup</b>
-        <span>Potential gain: +{{ stats.lineup_gain if stats and stats.lineup_gain is defined else 7.1 }} points</span>
+    <article class="giq-panel">
+      <div class="giq-panel-head"><div><div class="giq-section-kicker">AI GAME PLAN</div><h2>What to Do Next</h2></div><a href="/reports">All recommendations →</a></div>
+      <div class="giq-action-wrap">
+        <div class="giq-next-action">
+          {% if not connected %}
+            <span>TOP PRIORITY</span><h3>Connect your league</h3><p>Unlock personalized rankings, team analysis, trades, waivers and lineup recommendations.</p><a href="/connect-league">Connect ESPN or Yahoo →</a>
+          {% elif roster_count == 0 %}
+            <span>PRE-DRAFT PRIORITY</span><h3>Build your draft plan</h3><p>Review ADP, position scarcity and mock-draft outcomes before your live draft.</p><a href="/draft-center">Open Draft Center →</a>
+          {% else %}
+            <span>WEEKLY PRIORITY</span><h3>Optimize your starting lineup</h3><p>Gridiron IQ projects up to +{{ stats.lineup_gain if stats and stats.lineup_gain is defined else 0 }} points from your best lineup choices.</p><a href="/lineup-optimizer">Optimize Lineup →</a>
+          {% endif %}
+        </div>
+        <div class="giq-priority"><div class="giq-priority-icon">⌕</div><div><b>Review player updates</b><span>Current injuries, transactions and live news.</span></div><a href="/player-research">›</a></div>
+        <div class="giq-priority"><div class="giq-priority-icon">⇄</div><div><b>Check trade opportunities</b><span>{{ stats.trade_opportunities if connected and stats and stats.trade_opportunities is defined else 0 }} potential league matches.</span></div><a href="/trade-analyzer">›</a></div>
+        <div class="giq-priority"><div class="giq-priority-icon">⚔</div><div><b>Analyze weekly matchups</b><span>Coverage, defensive backs and line advantages.</span></div><a href="/weekly-matchups">›</a></div>
+        <div class="giq-priority"><div class="giq-priority-icon">＋</div><div><b>Scan the waiver wire</b><span>Find emerging usage and high-upside additions.</span></div><a href="/waiver-assistant">›</a></div>
       </div>
-      <a href="/lineup-optimizer">›</a>
-    </div>
+    </article>
+  </section>
 
-    <div class="priority">
-      <div class="picon blue">⇄</div>
-      <div>
-        <b>Review trade opportunities</b>
-        <span>{{ stats.trade_opportunities if stats and stats.trade_opportunities is defined else 4 }} possible matches</span>
-      </div>
-      <a href="/trade-analyzer">›</a>
-    </div>
-
-    <div class="priority">
-      <div class="picon purple">♦</div>
-      <div>
-        <b>Check waiver wire</b>
-        <span>8 players with high upside</span>
-      </div>
-      <a href="/waiver-assistant">›</a>
-    </div>
-
-    <div class="priority">
-      <div class="picon orange">⬡</div>
-      <div>
-        <b>Analyze matchups</b>
-        <span>5 favorable matchups</span>
-      </div>
-      <a href="/matchup-analyzer">›</a>
-    </div>
-
-    <a class="footer-link" href="/player-analytics">Open player analytics →</a>
-    <a class="footer-link" href="/reports">View all recommendations →</a>
-  </article>
-</section>
+  <section class="giq-data-bar">
+    <div class="giq-data-label"><b>Gridiron IQ Data Center</b><span>Research production, usage, efficiency and matchup data.</span></div>
+    <a class="giq-data-link" href="/offensive-stats">Offensive Stats</a>
+    <a class="giq-data-link" href="/defensive-stats">Defensive Stats</a>
+    <a class="giq-data-link" href="/player-analytics">Player Analytics</a>
+    <a class="giq-data-link" href="/matchup-analyzer">Matchup Analyzer</a>
+    <a class="giq-data-link" href="/settings">League Settings</a>
+  </section>
+</div>
 {% endblock %}
