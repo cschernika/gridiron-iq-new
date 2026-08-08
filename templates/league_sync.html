@@ -1,7 +1,106 @@
 {% extends "base.html" %}
 {% block title %}League Sync | Gridiron IQ{% endblock %}
 {% block body %}
-<div class="app-shell">
+
+<style>
+/* v41: League Sync is deliberately self-contained so mixed app.css versions cannot break it. */
+#sync-page-shell{min-height:100vh;display:grid;grid-template-columns:272px minmax(0,1fr);background:#030d17;color:#f7fbff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+#sync-page-shell *{box-sizing:border-box}
+#sync-page-shell a{text-decoration:none;color:inherit}
+#sync-page-shell button,#sync-page-shell input,#sync-page-shell select{font:inherit}
+#sync-page-shell .hidden{display:none!important}
+#sync-page-shell .sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:20px 14px;border-right:1px solid #183247;background:linear-gradient(180deg,#061321,#03101b);overflow-y:auto}
+#sync-page-shell .sidebar-brand{padding:0 10px 18px;border-bottom:1px solid #11283b}
+#sync-page-shell .brand-link{display:flex;align-items:center;gap:12px;color:#fff}
+#sync-page-shell .brand-mark{display:grid;place-items:center;width:46px;height:52px;flex:0 0 46px;border:2px solid #24a8ff;clip-path:polygon(50% 0,100% 15%,93% 75%,50% 100%,7% 75%,0 15%);font-size:15px;font-weight:950}
+#sync-page-shell .brand-copy{display:flex;flex-direction:column;min-width:0}
+#sync-page-shell .brand-copy strong{font-size:19px;line-height:1.1}
+#sync-page-shell .brand-copy small{margin-top:4px;color:#9fb0c4;font-size:12px}
+#sync-page-shell .sidebar-nav{display:flex;flex-direction:column;gap:3px;padding:11px 0 18px}
+#sync-page-shell .nav-label{margin:14px 10px 5px;color:#71869a;font-size:10px;font-weight:900;letter-spacing:.11em;text-transform:uppercase}
+#sync-page-shell .nav-item{display:flex;align-items:center;width:100%;padding:10px 12px;border-radius:8px;color:#d9e4ee;font-size:14px;font-weight:650;line-height:1.2}
+#sync-page-shell .nav-item:hover{background:#0d2a43;color:#fff}
+#sync-page-shell .nav-item.active{background:linear-gradient(90deg,#0f3e80,#1556b7);color:#fff;font-weight:850}
+#sync-page-shell .sidebar-user{margin-top:auto;display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;align-items:center;padding:15px 10px 4px;border-top:1px solid #183247}
+#sync-page-shell .user-avatar{display:grid;place-items:center;width:38px;height:38px;border-radius:50%;background:#5120b8;font-weight:900}
+#sync-page-shell .sidebar-user strong,#sync-page-shell .sidebar-user small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#sync-page-shell .sidebar-user small{margin-top:2px;color:#8fa3b6;font-size:11px}
+#sync-page-shell .main{min-width:0;padding:0 28px 42px}
+#sync-page-shell .topbar{display:flex;justify-content:space-between;align-items:center;padding:17px 4px 18px;border-bottom:1px solid #122b3d}
+#sync-page-shell .topbar h1{margin:2px 0;font-size:34px}
+#sync-page-shell .topbar-subtitle{margin:0;color:#b9c7d4}
+#sync-page-shell .eyebrow{margin:0;color:#18b8ff;font-size:13px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
+#sync-page-shell .user-chip{display:flex;align-items:center;gap:12px}
+#sync-page-shell .user-chip>span:first-child{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:#5120b8;font-weight:850}
+#sync-page-shell .user-chip small{display:block;color:#b8c5d3}
+#sync-page-shell .sync-summary{display:flex;justify-content:space-between;gap:24px;align-items:center;margin:18px 0;padding:22px 24px;border:1px solid #1d405a;border-radius:12px;background:linear-gradient(135deg,#0b2136,#071522)}
+#sync-page-shell .sync-kicker{color:#20adff;text-transform:uppercase;font-size:12px;font-weight:900;letter-spacing:.1em}
+#sync-page-shell .sync-summary h2{font-size:26px;margin:5px 0 7px}
+#sync-page-shell .sync-summary p{margin:0;color:#aebdca;line-height:1.55}
+#sync-page-shell .sync-security{display:flex;gap:12px;align-items:center;min-width:300px;padding:14px;border:1px solid #1d405a;border-radius:10px;background:#061522}
+#sync-page-shell .sync-security>span{font-size:24px}
+#sync-page-shell .sync-security b,#sync-page-shell .sync-security small{display:block}
+#sync-page-shell .sync-security small{color:#91a5b8;margin-top:3px;line-height:1.4}
+#sync-page-shell .connector-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+#sync-page-shell .connector-card{overflow:hidden;border:1px solid #1c405a;border-radius:12px;background:linear-gradient(180deg,#0a1c2d,#061521);box-shadow:0 18px 45px rgba(0,0,0,.16)}
+#sync-page-shell .connector-heading{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid #18384e;background:rgba(5,17,29,.52)}
+#sync-page-shell .platform-lockup{display:flex;align-items:center;gap:13px}
+#sync-page-shell .platform-lockup h2{font-size:18px;margin:2px 0 0}
+#sync-page-shell .platform-name{font-size:11px;letter-spacing:.11em;font-weight:900;color:#9db2c5}
+#sync-page-shell .platform-logo{display:grid;place-items:center;width:46px;height:46px;border-radius:9px;font-size:19px;font-weight:950;color:#fff}
+#sync-page-shell .espn-logo{background:linear-gradient(135deg,#f12230,#b60013)}
+#sync-page-shell .yahoo-logo{background:linear-gradient(135deg,#7d28e9,#4c0bbd)}
+#sync-page-shell .connection-badge{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid #344b60;border-radius:999px;color:#a8b8c7;font-size:12px;font-weight:800;white-space:nowrap}
+#sync-page-shell .connection-badge i{width:8px;height:8px;border-radius:50%;background:#8292a2}
+#sync-page-shell .connection-badge.connected{color:#36e68a;border-color:#12633e;background:#07311f}
+#sync-page-shell .connection-badge.connected i{background:#27e27c}
+#sync-page-shell .connection-badge.ready{color:#f3c84c;border-color:#6b5817;background:#332b0a}
+#sync-page-shell .connection-badge.ready i{background:#f3c84c}
+#sync-page-shell .connector-body{padding:20px}
+#sync-page-shell .step-label{display:flex;align-items:center;gap:9px;margin:1px 0 12px;color:#dce7f0;font-size:13px;font-weight:850}
+#sync-page-shell .step-label>span{display:grid;place-items:center;width:23px;height:23px;border-radius:50%;background:#0d4a79;color:#65c9ff;font-size:12px}
+#sync-page-shell .sync-form{display:grid;gap:13px;margin-bottom:19px}
+#sync-page-shell .sync-form.two{grid-template-columns:1fr 150px}
+#sync-page-shell .sync-form label,#sync-page-shell .league-select-row label{display:grid;gap:7px;color:#dbe5ed;font-size:13px;font-weight:750}
+#sync-page-shell .sync-form input,#sync-page-shell .league-select-row select{width:100%;min-height:44px;padding:10px 12px;border:1px solid #244861;border-radius:8px;background:#04121e;color:#f7fbff;outline:none}
+#sync-page-shell .sync-form input:focus,#sync-page-shell .league-select-row select:focus{border-color:#168ee0;box-shadow:0 0 0 3px rgba(24,142,224,.1)}
+#sync-page-shell .sync-form label small{color:#7790a6;font-weight:500;line-height:1.35}
+#sync-page-shell .connector-help{margin:-2px 0 15px;color:#91a6b9;font-size:13px;line-height:1.5}
+#sync-page-shell .connector-actions{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-top:7px}
+#sync-page-shell .button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 17px;border-radius:8px;border:1px solid #284f6b;color:#fff;font-weight:800;cursor:pointer}
+#sync-page-shell .button.primary{background:linear-gradient(135deg,#0b8cff,#245fdc);border:0}
+#sync-page-shell .button.outline{background:#0a2032;border:1px solid #2b526d}
+#sync-page-shell .button.success{background:linear-gradient(135deg,#087f48,#0a9c58);border:1px solid #18ba70}
+#sync-page-shell .button.yahoo-connect{background:linear-gradient(135deg,#6d20d7,#5711b9);border:1px solid #8c54eb}
+#sync-page-shell .button:disabled{opacity:.55;cursor:not-allowed}
+#sync-page-shell .text-button{padding:9px 7px;border:0;background:transparent;cursor:pointer;font-weight:750}
+#sync-page-shell .danger-text{color:#ff7b8d}
+#sync-page-shell .sync-message{margin-top:14px;padding:11px 13px;border-left:3px solid #1b9fff;border-radius:5px;background:#071c2d;color:#cbdbe8;font-size:13px;line-height:1.45}
+#sync-page-shell .sync-message.error{border-left-color:#ff5570;background:#29101a;color:#ffd6de}
+#sync-page-shell .sync-message.success{border-left-color:#25de78;background:#082a1a;color:#c9f8dc}
+#sync-page-shell .sync-result{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:13px}
+#sync-page-shell .sync-result>div{padding:10px;border:1px solid #193b53;border-radius:8px;background:#051421}
+#sync-page-shell .sync-result small,#sync-page-shell .sync-result strong{display:block}
+#sync-page-shell .sync-result small{color:#7790a6;font-size:11px;text-transform:uppercase}
+#sync-page-shell .sync-result strong{margin-top:3px;font-size:14px}
+#sync-page-shell .output{max-height:220px;overflow:auto;margin-top:12px;padding:12px;border:1px solid #1f4058;border-radius:8px;background:#020b12;color:#9fc1da;font-size:11px}
+#sync-page-shell .copy-field{display:grid;grid-template-columns:1fr auto}
+#sync-page-shell .copy-field input{border-radius:8px 0 0 8px}
+#sync-page-shell .copy-button{padding:0 14px;border:1px solid #244861;border-left:0;border-radius:0 8px 8px 0;background:#0d2a40;color:#25aaff;cursor:pointer;font-weight:800}
+#sync-page-shell .yahoo-divider{display:flex;align-items:center;gap:10px;margin:20px 0 16px;color:#698399;font-size:11px;text-transform:uppercase;font-weight:850;letter-spacing:.08em}
+#sync-page-shell .yahoo-divider:before,#sync-page-shell .yahoo-divider:after{content:"";height:1px;flex:1;background:#17364b}
+#sync-page-shell .league-select-row{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end}
+#sync-page-shell .league-select-row .button{min-height:44px}
+#sync-page-shell .panel{border:1px solid #1c3a51;border-radius:10px;background:linear-gradient(180deg,#091c2c,#071521);padding:18px}
+#sync-page-shell .sync-help{display:grid;grid-template-columns:auto 1fr;gap:14px;margin-top:16px;align-items:center}
+#sync-page-shell .sync-help h3{margin:0 0 5px}
+#sync-page-shell .sync-help p{margin:0;color:#98abba;line-height:1.5}
+#sync-page-shell .help-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;border:1px solid #246489;color:#28b5ff;font-weight:900}
+@media(max-width:1150px){#sync-page-shell .connector-grid{grid-template-columns:1fr}#sync-page-shell .sync-summary{align-items:flex-start}#sync-page-shell .sync-security{min-width:260px}}
+@media(max-width:820px){#sync-page-shell{display:block}#sync-page-shell .sidebar{position:relative;height:auto;max-height:none;border-right:0;border-bottom:1px solid #183247}#sync-page-shell .sidebar-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}#sync-page-shell .nav-label{grid-column:1/-1;margin-top:9px}#sync-page-shell .sidebar-user{margin-top:8px}#sync-page-shell .main{padding:0 16px 30px}#sync-page-shell .topbar{align-items:flex-start}#sync-page-shell .user-chip{display:none}#sync-page-shell .sync-summary{display:block}#sync-page-shell .sync-security{margin-top:16px;min-width:0}#sync-page-shell .sync-form.two,#sync-page-shell .league-select-row{grid-template-columns:1fr}#sync-page-shell .connector-heading{align-items:flex-start}#sync-page-shell .connector-actions .button,#sync-page-shell .connector-actions .text-button{width:100%}#sync-page-shell .copy-field{grid-template-columns:1fr}#sync-page-shell .copy-field input{border-radius:8px 8px 0 0}#sync-page-shell .copy-button{min-height:38px;border-left:1px solid #244861;border-top:0;border-radius:0 0 8px 8px}}
+</style>
+
+<div id="sync-page-shell" class="sync-page-shell">
   {# v39: League Sync sidebar is embedded so this page never depends on _sidebar.html. #}
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
@@ -9,7 +108,6 @@
         <span class="brand-mark">GIQ</span>
         <span class="brand-copy"><strong>Gridiron IQ</strong><small>Fantasy Intelligence</small></span>
       </a>
-      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
     </div>
 
     <nav class="sidebar-nav" aria-label="Main navigation">
@@ -173,7 +271,7 @@
       </div>
     </section>
 
-    <section class="sync-help panel"><div><span class="help-icon">✓</span></div><div><h3>Connection build</h3><p><b>Gridiron IQ v39 Sync No-Partial Repair</b> — Yahoo Sync and Mock Draft are packaged together so frontend/backend versions stay matched.</p></div></section>
+    <section class="sync-help panel"><div><span class="help-icon">✓</span></div><div><h3>Connection build</h3><p><b>Gridiron IQ v41 Self-Contained Sync Layout</b> — Yahoo Sync and Mock Draft are packaged together so frontend/backend versions stay matched.</p></div></section>
   </main>
 </div>
 <script>
