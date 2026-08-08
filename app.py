@@ -82,12 +82,12 @@ def hide_legacy_connect_league_navigation(response):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
-            response.headers["X-Gridiron-Build"] = "v34-unified"
+            response.headers["X-Gridiron-Build"] = "v35-sync-stability"
     except Exception:
         pass
     return response
 
-USER = {"id": 1, "name": "Chad"}
+USER = {"id": 1, "name": "Chad", "email": ""}
 
 DEMO = {
     "team_strength": 86, "team_rank": 3, "playoff_probability": 74,
@@ -210,9 +210,14 @@ CONTEXTS = {
 }
 
 def load_snapshot():
+    """Load the saved league snapshot without allowing malformed data to crash pages."""
     try:
-        return json.loads(ESPN_SNAPSHOT.read_text()) if ESPN_SNAPSHOT.exists() else None
+        if not ESPN_SNAPSHOT.exists():
+            return None
+        payload = json.loads(ESPN_SNAPSHOT.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
     except Exception:
+        app.logger.exception("Unable to read saved league snapshot")
         return None
 
 def save_snapshot(data):
@@ -373,10 +378,12 @@ def dashboard_analytics_with_actual_teams(
 
 def page(template, **ctx):
     snap = load_snapshot()
-    connected = bool(snap)
-    league = snap.get("league") if snap else None
-    settings = snap.get("settings") if snap else None
-    teams = snap.get("teams", []) if snap else []
+    snap = snap if isinstance(snap, dict) else {}
+    league = snap.get("league") if isinstance(snap.get("league"), dict) else None
+    settings = snap.get("settings") if isinstance(snap.get("settings"), dict) else None
+    raw_teams = snap.get("teams")
+    teams = raw_teams if isinstance(raw_teams, list) else []
+    connected = bool(league or teams)
 
     # This helper cannot take down the dashboard. It preserves the exact
     # original analytics structure expected by the existing template.
@@ -720,7 +727,62 @@ def draft_center():
 
 @app.get("/league-sync")
 def league_sync():
-    return page("league_sync.html",yahoo_configured=bool(os.getenv("YAHOO_CLIENT_ID") and os.getenv("YAHOO_CLIENT_SECRET")),yahoo_redirect=os.getenv("YAHOO_REDIRECT_URI",""))
+    """Render League Sync independently from dashboard analytics/snapshot shape."""
+    yahoo_configured = bool(
+        str(os.getenv("YAHOO_CLIENT_ID", "")).strip()
+        and str(os.getenv("YAHOO_CLIENT_SECRET", "")).strip()
+    )
+    yahoo_redirect = str(os.getenv("YAHOO_REDIRECT_URI", "")).strip()
+    try:
+        return render_template(
+            "league_sync.html",
+            user=USER,
+            connected=bool(load_snapshot()),
+            league=None,
+            league_settings=None,
+            teams=[],
+            user_team=None,
+            analytics=DEMO,
+            yahoo_configured=yahoo_configured,
+            yahoo_redirect=yahoo_redirect,
+            gridiron_build="v35-sync-stability",
+        )
+    except Exception as exc:
+        app.logger.exception("League Sync page failed to render")
+        # Never strand the user behind a generic 500. Return a small diagnostic
+        # page that identifies the exact template problem without exposing secrets.
+        safe_error = f"{type(exc).__name__}: {exc}"
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'><title>League Sync Diagnostic</title>"
+            "<style>body{font-family:Arial,sans-serif;background:#07111f;color:#e5edf7;padding:40px}"
+            ".card{max-width:850px;margin:auto;background:#0d1b2d;border:1px solid #24364c;border-radius:16px;padding:28px}"
+            "a{color:#6dd5ff}.err{white-space:pre-wrap;background:#111827;padding:14px;border-radius:10px}</style></head><body>"
+            "<div class='card'><h1>League Sync diagnostic</h1>"
+            "<p>Gridiron IQ v35 prevented the League Sync crash. The normal template could not render.</p>"
+            f"<div class='err'>{safe_error}</div>"
+            "<p><a href='/api/diagnostics/league-sync'>Open League Sync diagnostics</a> · "
+            "<a href='/app'>Return to Command Center</a></p></div></body></html>",
+            200,
+            {"X-Gridiron-Build": "v35-sync-stability", "Cache-Control": "no-store"},
+        )
+
+
+@app.get("/api/diagnostics/league-sync")
+def league_sync_diagnostics():
+    template_dir = BASE_DIR / "templates"
+    snapshot = load_snapshot()
+    return jsonify(
+        ok=True,
+        build="v35-sync-stability",
+        league_sync_template=(template_dir / "league_sync.html").exists(),
+        base_template=(template_dir / "base.html").exists(),
+        sidebar_template=(template_dir / "_sidebar.html").exists(),
+        yahoo_client_id_configured=bool(str(os.getenv("YAHOO_CLIENT_ID", "")).strip()),
+        yahoo_client_secret_configured=bool(str(os.getenv("YAHOO_CLIENT_SECRET", "")).strip()),
+        yahoo_redirect_uri=str(os.getenv("YAHOO_REDIRECT_URI", "")).strip(),
+        snapshot_present=bool(snapshot),
+        snapshot_type=type(snapshot).__name__ if snapshot is not None else None,
+    )
 
 
 @app.get("/connect-league")
@@ -934,7 +996,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v34-unified",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v35-sync-stability",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -1352,7 +1414,7 @@ def yahoo_diagnostics():
 
     return jsonify(
         ok=not issues,
-        build="v34-unified",
+        build="v35-sync-stability",
         issues=issues,
         redirect_uri=creds["redirect_uri"] or f"{request.url_root.rstrip('/')}/auth/yahoo/callback",
         connected=bool(token.get("access_token") or token.get("refresh_token")),
@@ -1437,7 +1499,7 @@ def yahoo_leagues():
             leagues=leagues,
             selected_league=_yahoo_selected_league(),
             connected=True,
-            build="v34-unified",
+            build="v35-sync-stability",
         )
     except Exception as exc:
         app.logger.exception("Yahoo league discovery failed")
@@ -1546,7 +1608,7 @@ def yahoo_sync():
             "league_name": league_name,
             "teams": payload["settings"]["team_count"],
         })
-        return jsonify(ok=True, build="v34-unified", **payload)
+        return jsonify(ok=True, build="v35-sync-stability", **payload)
     except Exception as exc:
         app.logger.exception("Yahoo league sync failed")
         return jsonify(
@@ -9361,8 +9423,8 @@ def not_found(_): return page("error.html",code=404,message="Page not found."),4
 
 @app.errorhandler(500)
 def server_error(error):
+    original = getattr(error, "original_exception", None)
     if request.path.startswith("/api/"):
-        original = getattr(error, "original_exception", None)
         app.logger.exception("Unhandled API error on %s", request.path)
         return jsonify(
             ok=False,
@@ -9370,6 +9432,7 @@ def server_error(error):
             message="The server could not complete this request.",
             path=request.path,
         ), 500
+    app.logger.exception("Unhandled page error on %s: %s", request.path, original or error)
     return page("error.html", code=500, message="Something went wrong. Check Render logs."), 500
 
 if __name__=="__main__":
