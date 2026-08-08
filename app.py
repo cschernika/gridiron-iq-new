@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json, os, re, uuid
+import json, os, re, uuid, time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -1067,25 +1067,402 @@ def sleeper_sync():
     except Exception as exc:
         return jsonify(ok=False,error="Sleeper sync failed.",detail=str(exc)),400
 
+YAHOO_AUTH_URL = "https://api.login.yahoo.com/oauth2/request_auth"
+YAHOO_TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
+YAHOO_FANTASY_URL = "https://fantasysports.yahooapis.com/fantasy/v2"
+YAHOO_TOKEN_FILE = DATA_DIR / "yahoo_oauth_token.json"
+YAHOO_PREF_FILE = DATA_DIR / "yahoo_league_preference.json"
+YAHOO_SNAPSHOT_FILE = DATA_DIR / "yahoo_snapshot.json"
+
+
+def _yahoo_credentials():
+    return {
+        "client_id": str(os.getenv("YAHOO_CLIENT_ID", "") or "").strip(),
+        "client_secret": str(os.getenv("YAHOO_CLIENT_SECRET", "") or "").strip(),
+        "redirect_uri": str(os.getenv("YAHOO_REDIRECT_URI", "") or "").strip(),
+    }
+
+
+def _yahoo_read_json(path):
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        app.logger.exception("Unable to read Yahoo state file %s", path)
+    return {}
+
+
+def _yahoo_write_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(path)
+    try:
+        os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
+def _yahoo_token():
+    return _yahoo_read_json(YAHOO_TOKEN_FILE)
+
+
+def _yahoo_store_token(token):
+    current = _yahoo_token()
+    refresh = token.get("refresh_token") or current.get("refresh_token")
+    if not token.get("access_token"):
+        raise RuntimeError("Yahoo did not return an access token.")
+    payload = {
+        "access_token": token.get("access_token"),
+        "refresh_token": refresh or "",
+        "token_type": token.get("token_type", "bearer"),
+        "expires_at": int(time.time()) + int(token.get("expires_in", 3600) or 3600) - 90,
+        "xoauth_yahoo_guid": token.get("xoauth_yahoo_guid") or current.get("xoauth_yahoo_guid") or "",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _yahoo_write_json(YAHOO_TOKEN_FILE, payload)
+    return payload
+
+
+def _yahoo_access_token():
+    token = _yahoo_token()
+    if not token:
+        raise RuntimeError("Yahoo is not connected. Click Connect Yahoo first.")
+    if token.get("access_token") and int(token.get("expires_at", 0) or 0) > int(time.time()):
+        return token["access_token"]
+
+    creds = _yahoo_credentials()
+    if not creds["client_id"] or not creds["client_secret"]:
+        raise RuntimeError("Yahoo Client ID or Client Secret is missing in Render.")
+    if not token.get("refresh_token"):
+        raise RuntimeError("Yahoo session expired and no refresh token is available. Reconnect Yahoo.")
+
+    response = requests.post(
+        YAHOO_TOKEN_URL,
+        auth=(creds["client_id"], creds["client_secret"]),
+        data={
+            "grant_type": "refresh_token",
+            "redirect_uri": creds["redirect_uri"],
+            "refresh_token": token["refresh_token"],
+        },
+        timeout=25,
+    )
+    if not response.ok:
+        raise RuntimeError(f"Yahoo token refresh failed ({response.status_code}): {response.text[:300]}")
+    refreshed = _yahoo_store_token(response.json())
+    return refreshed["access_token"]
+
+
+def _yahoo_api_get(path):
+    response = requests.get(
+        f"{YAHOO_FANTASY_URL}/{path}",
+        headers={"Authorization": f"Bearer {_yahoo_access_token()}"},
+        params={"format": "json"},
+        timeout=30,
+    )
+    if not response.ok:
+        raise RuntimeError(f"Yahoo API error {response.status_code}: {response.text[:400]}")
+    return response.json()
+
+
+def _yahoo_collect_leagues(value, found):
+    if isinstance(value, dict):
+        if value.get("league_key") and value.get("name"):
+            key = str(value.get("league_key"))
+            if not any(x.get("league_key") == key for x in found):
+                found.append({
+                    "league_key": key,
+                    "league_id": str(value.get("league_id") or ""),
+                    "name": str(value.get("name") or "Yahoo League"),
+                    "season": value.get("season"),
+                    "num_teams": value.get("num_teams"),
+                    "current_week": value.get("current_week"),
+                    "url": value.get("url") or "",
+                })
+        for child in value.values():
+            _yahoo_collect_leagues(child, found)
+    elif isinstance(value, list):
+        for child in value:
+            _yahoo_collect_leagues(child, found)
+
+
+def _yahoo_collect_strings(value, key, found):
+    if isinstance(value, dict):
+        if key in value and isinstance(value[key], (str, int, float)):
+            item = str(value[key])
+            if item and item not in found:
+                found.append(item)
+        for child in value.values():
+            _yahoo_collect_strings(child, key, found)
+    elif isinstance(value, list):
+        for child in value:
+            _yahoo_collect_strings(child, key, found)
+
+
+def _yahoo_collect_teams(value, found):
+    if isinstance(value, dict):
+        if value.get("team_key") and value.get("name"):
+            key = str(value.get("team_key"))
+            if not any(x.get("team_key") == key for x in found):
+                managers = []
+                _yahoo_collect_strings(value.get("managers"), "nickname", managers)
+                found.append({
+                    "team_key": key,
+                    "team_id": str(value.get("team_id") or ""),
+                    "team_name": str(value.get("name") or "Yahoo Team"),
+                    "name": str(value.get("name") or "Yahoo Team"),
+                    "owner": managers[0] if managers else "",
+                    "managers": managers,
+                    "wins": 0,
+                    "losses": 0,
+                    "ties": 0,
+                    "points_for": 0.0,
+                    "roster_size": 0,
+                    "roster": [],
+                    "url": value.get("url") or "",
+                })
+        for child in value.values():
+            _yahoo_collect_teams(child, found)
+    elif isinstance(value, list):
+        for child in value:
+            _yahoo_collect_teams(child, found)
+
+
+def _yahoo_collect_players(value, found):
+    if isinstance(value, dict):
+        if value.get("player_key") and value.get("name"):
+            key = str(value.get("player_key"))
+            if not any(x.get("player_key") == key for x in found):
+                name = value.get("name")
+                if isinstance(name, dict):
+                    name = name.get("full") or name.get("ascii_first") or "Yahoo Player"
+                found.append({
+                    "player_key": key,
+                    "player_id": str(value.get("player_id") or ""),
+                    "name": str(name or "Yahoo Player"),
+                    "position": str(value.get("display_position") or ""),
+                    "pro_team": str(value.get("editorial_team_abbr") or ""),
+                    "lineup_slot": "",
+                    "projected_points": 0.0,
+                    "total_points": 0.0,
+                    "injury_status": str(value.get("status") or ""),
+                })
+        for child in value.values():
+            _yahoo_collect_players(child, found)
+    elif isinstance(value, list):
+        for child in value:
+            _yahoo_collect_players(child, found)
+
+
+def _yahoo_selected_league():
+    data = _yahoo_read_json(YAHOO_PREF_FILE)
+    return data or None
+
+
+@app.get("/api/yahoo/status")
+def yahoo_status():
+    creds = _yahoo_credentials()
+    token = _yahoo_token()
+    selected = _yahoo_selected_league()
+    return jsonify(
+        ok=True,
+        app_configured=bool(creds["client_id"] and creds["client_secret"] and creds["redirect_uri"]),
+        redirect_uri=creds["redirect_uri"] or f"{request.url_root.rstrip('/')}/auth/yahoo/callback",
+        connected=bool(token.get("access_token") or token.get("refresh_token")),
+        selected_league=selected,
+        credentials_source="Render environment variables",
+    )
+
+
+@app.get("/api/yahoo/diagnostics")
+def yahoo_diagnostics():
+    creds = _yahoo_credentials()
+    issues = []
+    if not creds["client_id"]:
+        issues.append("YAHOO_CLIENT_ID is missing in Render.")
+    if not creds["client_secret"]:
+        issues.append("YAHOO_CLIENT_SECRET is missing in Render.")
+    if not creds["redirect_uri"]:
+        issues.append("YAHOO_REDIRECT_URI is missing in Render.")
+    elif not creds["redirect_uri"].startswith("https://"):
+        issues.append("YAHOO_REDIRECT_URI must use HTTPS.")
+    elif not creds["redirect_uri"].rstrip("/").endswith("/auth/yahoo/callback"):
+        issues.append("YAHOO_REDIRECT_URI must end with /auth/yahoo/callback.")
+    return jsonify(
+        ok=not issues,
+        issues=issues,
+        redirect_uri=creds["redirect_uri"],
+        connected=bool(_yahoo_token()),
+        next_step=("Click Connect Yahoo." if not issues else "Correct the listed Render setting, then redeploy."),
+    )
+
+
+@app.post("/api/yahoo/app-credentials")
+def yahoo_app_credentials_info():
+    # v33 deliberately keeps Yahoo app secrets in Render instead of writing them
+    # into the repository, browser session, or an unencrypted app database.
+    creds = _yahoo_credentials()
+    if creds["client_id"] and creds["client_secret"] and creds["redirect_uri"]:
+        return jsonify(ok=True, message="Yahoo credentials are already configured securely in Render.")
+    return jsonify(ok=False, error="Configure YAHOO_CLIENT_ID, YAHOO_CLIENT_SECRET and YAHOO_REDIRECT_URI in Render."), 400
+
+
+@app.get("/auth/yahoo")
 @app.get("/auth/yahoo/start")
 def yahoo_start():
-    cid=os.getenv("YAHOO_CLIENT_ID","").strip(); uri=os.getenv("YAHOO_REDIRECT_URI","").strip()
-    if not cid or not uri: return page("error.html",code=400,message="Yahoo is not configured in Render."),400
-    state=os.urandom(18).hex(); session["yahoo_state"]=state
-    return redirect("https://api.login.yahoo.com/oauth2/request_auth?"+urlencode({"client_id":cid,"redirect_uri":uri,"response_type":"code","language":"en-us","state":state}))
+    creds = _yahoo_credentials()
+    if not creds["client_id"] or not creds["client_secret"] or not creds["redirect_uri"]:
+        return page("error.html", code=400, message="Yahoo is not fully configured in Render."), 400
+    state = os.urandom(24).hex()
+    session["yahoo_state"] = state
+    params = {
+        "client_id": creds["client_id"],
+        "redirect_uri": creds["redirect_uri"],
+        "response_type": "code",
+        "language": "en-us",
+        "state": state,
+    }
+    return redirect(f"{YAHOO_AUTH_URL}?{urlencode(params)}")
+
 
 @app.get("/auth/yahoo/callback")
 def yahoo_callback():
-    if request.args.get("state") != session.get("yahoo_state"): return page("error.html",code=400,message="Yahoo authorization state did not match."),400
-    code=request.args.get("code","")
-    if not code: return page("error.html",code=400,message="Yahoo did not return an authorization code."),400
+    if request.args.get("error"):
+        return page("error.html", code=400, message=f"Yahoo authorization was declined: {request.args.get('error_description') or request.args.get('error')}."), 400
+    if request.args.get("state") != session.get("yahoo_state"):
+        return page("error.html", code=400, message="Yahoo authorization state did not match. Start the Yahoo connection again from League Sync."), 400
+    code = str(request.args.get("code") or "").strip()
+    if not code:
+        return page("error.html", code=400, message="Yahoo did not return an authorization code."), 400
+    creds = _yahoo_credentials()
     try:
-        r=requests.post("https://api.login.yahoo.com/oauth2/get_token",auth=(os.getenv("YAHOO_CLIENT_ID",""),os.getenv("YAHOO_CLIENT_SECRET","")),data={"grant_type":"authorization_code","redirect_uri":os.getenv("YAHOO_REDIRECT_URI",""),"code":code},timeout=25); r.raise_for_status()
-        tok=r.json(); session["yahoo_access_token"]=tok.get("access_token"); session["yahoo_refresh_token"]=tok.get("refresh_token")
-        return redirect(url_for("league_sync",yahoo="connected"))
+        response = requests.post(
+            YAHOO_TOKEN_URL,
+            auth=(creds["client_id"], creds["client_secret"]),
+            data={"grant_type": "authorization_code", "redirect_uri": creds["redirect_uri"], "code": code},
+            timeout=25,
+        )
+        if not response.ok:
+            return page("error.html", code=502, message=f"Yahoo token exchange failed ({response.status_code}): {response.text[:250]}"), 502
+        _yahoo_store_token(response.json())
+        session.pop("yahoo_state", None)
+        return redirect(url_for("league_sync", yahoo="connected"))
     except Exception as exc:
-        return page("error.html",code=502,message=f"Yahoo authorization failed: {exc}"),502
+        app.logger.exception("Yahoo authorization failed")
+        return page("error.html", code=502, message=f"Yahoo authorization failed: {exc}"), 502
 
+
+@app.post("/api/yahoo/disconnect")
+def yahoo_disconnect():
+    for path in (YAHOO_TOKEN_FILE, YAHOO_PREF_FILE):
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception:
+            app.logger.exception("Unable to remove Yahoo state file %s", path)
+    return jsonify(ok=True, message="Yahoo was disconnected from Gridiron IQ.")
+
+
+@app.get("/api/yahoo/leagues")
+def yahoo_leagues():
+    try:
+        raw = _yahoo_api_get("users;use_login=1/games;game_keys=nfl/leagues")
+        leagues = []
+        _yahoo_collect_leagues(raw, leagues)
+        leagues.sort(key=lambda item: int(item.get("season") or 0), reverse=True)
+        return jsonify(ok=True, leagues=leagues, selected_league=_yahoo_selected_league())
+    except Exception as exc:
+        app.logger.exception("Yahoo league discovery failed")
+        return jsonify(ok=False, error="Unable to load Yahoo leagues.", detail=str(exc)), 400
+
+
+@app.post("/api/yahoo/select-league")
+def yahoo_select_league():
+    payload = request.get_json(silent=True) or {}
+    league_key = str(payload.get("league_key") or "").strip()
+    league_name = str(payload.get("name") or payload.get("league_name") or "").strip()
+    if not league_key or not league_name:
+        return jsonify(ok=False, error="Choose a Yahoo league first."), 400
+    selected = {
+        "league_key": league_key,
+        "league_name": league_name,
+        "name": league_name,
+        "season": payload.get("season"),
+        "num_teams": payload.get("num_teams"),
+        "current_week": payload.get("current_week"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _yahoo_write_json(YAHOO_PREF_FILE, selected)
+    CONTEXTS["yahoo-westrockers"].update({
+        "league_name": league_name,
+        "teams": int(payload.get("num_teams") or CONTEXTS["yahoo-westrockers"].get("teams", 12)),
+    })
+    return jsonify(ok=True, message=f"{league_name} selected.", selected_league=selected)
+
+
+@app.post("/api/yahoo/sync")
+def yahoo_sync():
+    selected = _yahoo_selected_league()
+    if not selected:
+        return jsonify(ok=False, error="Select a Yahoo league before syncing."), 400
+    try:
+        league_key = selected["league_key"]
+        raw = _yahoo_api_get(f"league/{league_key}/teams")
+        teams = []
+        _yahoo_collect_teams(raw, teams)
+
+        # Before the fantasy draft Yahoo rosters are normally empty. After the
+        # draft, fetch each team's roster so weekly tools receive real players.
+        for team in teams:
+            team_key = team.get("team_key")
+            if not team_key:
+                continue
+            try:
+                roster_raw = _yahoo_api_get(f"team/{team_key}/roster")
+                roster = []
+                _yahoo_collect_players(roster_raw, roster)
+                team["roster"] = roster
+                team["roster_size"] = len(roster)
+            except Exception as roster_exc:
+                team["roster_error"] = str(roster_exc)
+
+        league_name = selected.get("league_name") or selected.get("name") or "Yahoo League"
+        season = int(selected.get("season") or 2026)
+        payload = {
+            "league": {
+                "id": league_key,
+                "league_id": league_key,
+                "name": league_name,
+                "league_name": league_name,
+                "season": season,
+                "teams": int(selected.get("num_teams") or len(teams) or 12),
+                "team_count": len(teams),
+                "platform": "Yahoo",
+                "current_week": selected.get("current_week"),
+            },
+            "settings": {
+                "scoring": CONTEXTS["yahoo-westrockers"].get("scoring", "Half PPR"),
+                "scoring_label": CONTEXTS["yahoo-westrockers"].get("scoring", "Half PPR"),
+                "team_count": int(selected.get("num_teams") or len(teams) or 12),
+            },
+            "teams": teams,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _yahoo_write_json(YAHOO_SNAPSHOT_FILE, payload)
+        CONTEXTS["yahoo-westrockers"].update({
+            "league_name": league_name,
+            "teams": payload["settings"]["team_count"],
+        })
+        return jsonify(ok=True, **payload)
+    except Exception as exc:
+        app.logger.exception("Yahoo league sync failed")
+        return jsonify(
+            ok=False,
+            error="Unable to sync the Yahoo league.",
+            detail=str(exc),
+            suggestion="Reconnect Yahoo and confirm the Redirect URI and Fantasy Sports permission in the Yahoo developer app.",
+        ), 400
 
 
 # ============================================================
