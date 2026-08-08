@@ -1083,7 +1083,7 @@ MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
 BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
-MOCK_DRAFT_BUILD = "mock-draft-v5-grade-calibration"
+MOCK_DRAFT_BUILD = "mock-draft-v6-current-team-resolution"
 MOCK_DIRECTORY_MINIMUMS = {
     "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
 }
@@ -1209,6 +1209,11 @@ def _mock_current_players_by_name(refresh=False, allow_network=True):
 
     if not _mock_directory_is_complete(directory):
         directory = {}
+
+    # A Render persistent disk can contain an older complete directory. Merge
+    # it with the bundled daily snapshot so a stale FA/blank value cannot
+    # replace a confirmed NFL roster assignment.
+    directory = _reconcile_current_player_directory(directory)
 
     by_name = {}
     for player_id, row in (directory or {}).items():
@@ -1347,14 +1352,14 @@ def _build_dynamic_mock_pool(context):
             "rank": 999,
             "name": name,
             "pos": position,
-            "team": _normalize_team_code(team) or "FA",
+            "team": _rostered_team_code(team) or "FA",
             "tier": 9,
             "adp": 999.0,
             "projection": 0.0,
         })
         item["name"] = name or item["name"]
         item["pos"] = position or item["pos"]
-        normalized_team = _normalize_team_code(team)
+        normalized_team = _rostered_team_code(team)
         if normalized_team:
             item["team"] = normalized_team
         for field, value in values.items():
@@ -1431,7 +1436,7 @@ def _build_dynamic_mock_pool(context):
         ) or key
         position = player.get("position") or ((player.get("fantasy_positions") or [""])[0])
         item = add_player(
-            name, position, player.get("team") or "FA",
+            name, position, player.get("team"),
             sleeper_id=player.get("player_id") or player.get("sleeper_id"),
             rookie=bool(player.get("rookie")) or clean_number(player.get("years_exp"), 1) == 0,
             active=player.get("active"),
@@ -1578,7 +1583,7 @@ def _manual_ensure_complete_pool(mock):
         changed = True
     needs_pool_upgrade = (
         not _mock_pool_is_complete(existing)
-        or mock.get("pool_version") != "complete-v4"
+        or mock.get("pool_version") != "complete-v5"
     )
     if not needs_pool_upgrade:
         return changed
@@ -1600,7 +1605,7 @@ def _manual_ensure_complete_pool(mock):
         if key in drafted and key not in merged:
             merged[key] = dict(player)
     mock["player_pool"] = list(merged.values())
-    mock["pool_version"] = "complete-v4"
+    mock["pool_version"] = "complete-v5"
     mock["formula_version"] = "smart-draft-v5"
     mock["updated_at"] = datetime.now(timezone.utc).isoformat()
     return True
@@ -1631,7 +1636,9 @@ def _manual_refresh_pool_teams(mock):
             or current.get(_mock_identity_key(player.get("name")), {})
         )
         if row:
-            player["team"] = _normalize_team_code(row.get("team")) or "FA"
+            player["team"] = _resolve_rostered_team(
+                row.get("team"), player.get("team")
+            )
 
     for pick in mock.get("picks", []):
         row = (
@@ -1639,7 +1646,9 @@ def _manual_refresh_pool_teams(mock):
             or current.get(_mock_identity_key(pick.get("player")), {})
         )
         if row:
-            pick["team"] = _normalize_team_code(row.get("team")) or "FA"
+            pick["team"] = _resolve_rostered_team(
+                row.get("team"), pick.get("team")
+            )
     return mock
 
 def _manual_order(mock):
@@ -2630,7 +2639,7 @@ def manual_mock_start():
         "status": "starting",
         "picks": [],
         "player_pool": player_pool,
-        "pool_version": "complete-v4",
+        "pool_version": "complete-v5",
         "formula_version": "smart-draft-v5",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -2757,7 +2766,7 @@ def manual_mock_state(mock_id):
         player_pool_count=len(mock.get("player_pool", [])),
         available_count=len(scored),
         position_counts=position_counts,
-        pool_version=mock.get("pool_version") or "complete-v4",
+        pool_version=mock.get("pool_version") or "complete-v5",
         formula_version=mock.get("formula_version") or "smart-draft-v5",
         server_build=MOCK_DRAFT_BUILD,
         ranking_label=ranking_label,
@@ -2947,7 +2956,9 @@ def _draft_player_enrichment(player, context, overall_pick):
 
     current_master = _current_master_player(player["name"])
     return {
-        "current_team": current_master.get("team") or player.get("team") or "FA",
+        "current_team": _resolve_rostered_team(
+            current_master.get("team"), player.get("team")
+        ),
         "platform_adp": round(platform_adp, 1) if platform_adp < 999 else 999,
         "projection_2026": round(projection, 1),
         "points_2025": round(prior_points, 1),
@@ -3288,7 +3299,7 @@ def _pr_players():
         ):
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
             if isinstance(cached, dict) and cached:
-                return cached
+                return _reconcile_current_player_directory(cached)
     except Exception:
         pass
 
@@ -3308,7 +3319,7 @@ def _pr_players():
                 )
             except Exception:
                 pass
-            return data
+            return _reconcile_current_player_directory(data)
     except Exception as exc:
         app.logger.warning("Current player directory refresh failed: %s", exc)
 
@@ -3316,7 +3327,7 @@ def _pr_players():
         if cache_path.exists():
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
             if isinstance(cached, dict) and cached:
-                return cached
+                return _reconcile_current_player_directory(cached)
     except Exception:
         pass
 
@@ -3998,10 +4009,14 @@ MASTER_PLAYERS_2026_FILE = DATA_DIR / "nfl_players_2026.json"
 BUNDLED_MASTER_PLAYERS_2026_FILE = BASE_DIR / "data" / "nfl_players_2026.json"
 
 def _master_players_2026():
-    best_payload = {}
-    best_score = (-1, -1)
+    payloads = []
+    seen_paths = set()
     for path in (MASTER_PLAYERS_2026_FILE, BUNDLED_MASTER_PLAYERS_2026_FILE):
         try:
+            resolved_path = str(path.resolve())
+            if resolved_path in seen_paths:
+                continue
+            seen_paths.add(resolved_path)
             if not path.exists():
                 continue
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -4016,13 +4031,51 @@ def _master_players_2026():
                 ),
                 len(rows) if isinstance(rows, dict) else 0,
             )
-            if score > best_score:
-                best_payload, best_score = payload, score
-            if _mock_directory_is_complete(payload):
-                return payload
+            payloads.append((payload, score))
         except Exception:
             continue
-    return best_payload or {
+
+    if not payloads:
+        return {
+            "season": 2026,
+            "updated_at": "",
+            "count": 0,
+            "sources": [],
+            "players": {},
+        }
+
+    # The persistent file is first and remains authoritative for current
+    # metadata. Bundled records fill gaps and repair stale FA/blank team values.
+    primary_payload = payloads[0][0]
+    merged_payload = dict(max(payloads, key=lambda item: item[1])[0])
+    merged_players = {}
+    for payload, _score in reversed(payloads[1:]):
+        for norm, row in (payload.get("players", {}) or {}).items():
+            if isinstance(row, dict):
+                merged_players[norm] = dict(row)
+    for norm, row in (primary_payload.get("players", {}) or {}).items():
+        if not isinstance(row, dict):
+            continue
+        fallback = merged_players.get(norm, {})
+        combined = {**fallback, **row}
+        combined["team"] = _resolve_rostered_team(
+            row.get("team"), fallback.get("team")
+        )
+        for field in (
+            "depth_chart_position", "depth_chart_order", "depth_chart_source",
+        ):
+            if combined.get(field) in (None, "") and fallback.get(field) not in (None, ""):
+                combined[field] = fallback[field]
+        merged_players[norm] = combined
+
+    merged_payload.update({
+        "season": 2026,
+        "updated_at": primary_payload.get("updated_at")
+            or merged_payload.get("updated_at", ""),
+        "count": len(merged_players),
+        "players": merged_players,
+    })
+    return merged_payload or {
         "season": 2026,
         "updated_at": "",
         "count": 0,
@@ -4207,14 +4260,75 @@ def _normalize_team_code(team):
     }
     return aliases.get(team, team)
 
+
+_FREE_AGENT_TEAM_CODES = {
+    "", "FA", "FREE AGENT", "FREEAGENT", "N/A", "NA", "NONE", "NULL",
+    "UNKNOWN", "UNK",
+}
+
+
+def _rostered_team_code(team):
+    """Return a normalized NFL team only when it is a roster assignment."""
+    normalized = _normalize_team_code(team)
+    return "" if normalized in _FREE_AGENT_TEAM_CODES else normalized
+
+
+def _resolve_rostered_team(*teams):
+    """Use the first confirmed roster team and treat FA/blank as fallback data."""
+    for team in teams:
+        normalized = _rostered_team_code(team)
+        if normalized:
+            return normalized
+    return "FA"
+
+
+def _reconcile_current_player_directory(primary, fallback=None):
+    """Merge player directories by name while preserving confirmed teams."""
+    primary = primary if isinstance(primary, dict) else {}
+    if fallback is None:
+        fallback = _mock_read_directory(BUNDLED_PLAYER_CACHE_FILE)
+    fallback = fallback if isinstance(fallback, dict) else {}
+
+    def by_name(directory):
+        indexed = {}
+        for player_id, row in directory.items():
+            if not isinstance(row, dict):
+                continue
+            name = str(
+                row.get("full_name")
+                or " ".join(
+                    value for value in (row.get("first_name"), row.get("last_name"))
+                    if value
+                )
+                or ""
+            ).strip()
+            if name:
+                indexed[_pr_norm(name)] = (str(player_id), row)
+        return indexed
+
+    primary_rows = by_name(primary)
+    fallback_rows = by_name(fallback)
+    reconciled = {}
+    for norm in set(primary_rows) | set(fallback_rows):
+        primary_id, primary_row = primary_rows.get(norm, ("", {}))
+        fallback_id, fallback_row = fallback_rows.get(norm, ("", {}))
+        combined = {**fallback_row, **primary_row}
+        combined["team"] = _resolve_rostered_team(
+            primary_row.get("team"), fallback_row.get("team")
+        )
+        for field in (
+            "depth_chart_position", "depth_chart_order", "depth_chart_source",
+        ):
+            if combined.get(field) in (None, "") and fallback_row.get(field) not in (None, ""):
+                combined[field] = fallback_row[field]
+        reconciled[primary_id or fallback_id or norm] = combined
+    return reconciled
+
 def _current_team_from_sleeper(row):
-    team = _normalize_team_code(row.get("team"))
-    if team:
-        return team
-    return ""
+    return _rostered_team_code(row.get("team"))
 
 def _current_team_from_fantasypros(row):
-    return _normalize_team_code(
+    return _rostered_team_code(
         row.get("team")
         or row.get("team_id")
         or row.get("player_team")
@@ -4239,7 +4353,7 @@ def _resolve_current_team(sleeper_row=None, fp_row=None, projection_row=None):
     for candidate in (
         _current_team_from_sleeper(sleeper_row),
         _current_team_from_fantasypros(fp_row),
-        _normalize_team_code(projection_row.get("projection_team")),
+        _rostered_team_code(projection_row.get("projection_team")),
     ):
         if candidate:
             return candidate
@@ -6426,7 +6540,15 @@ def _offensive_season_source(season):
         # cache second. They never wait on a live player-directory request.
         bundled_current = (_defensive_stats_snapshot().get("current_players", {}) or {})
         cached_current = _mock_current_players_by_name(refresh=False, allow_network=False)
-        current_players = {**bundled_current, **cached_current}
+        current_players = {}
+        for norm in set(bundled_current) | set(cached_current):
+            bundled_row = dict(bundled_current.get(norm) or {})
+            cached_row = dict(cached_current.get(norm) or {})
+            combined = {**bundled_row, **cached_row}
+            combined["team"] = _resolve_rostered_team(
+                cached_row.get("team"), bundled_row.get("team")
+            )
+            current_players[norm] = combined
         fallback_players = {_pr_norm(player["name"]): player for player in MOCK_PLAYER_POOL}
         all_keys = set(prior_players) | set(master_players) | set(current_players) | set(fallback_players)
         rows = {}
@@ -6447,15 +6569,11 @@ def _offensive_season_source(season):
             if position not in OFFENSIVE_POSITIONS:
                 continue
 
-            current_team = _normalize_team_code(current.get("team"))
-            if current and not current_team:
-                current_team = "FA"
-            team = (
-                current_team
-                or _normalize_team_code(master.get("team"))
-                or _normalize_team_code(prior.get("team"))
-                or _normalize_team_code(fallback.get("team"))
-                or "FA"
+            team = _resolve_rostered_team(
+                current.get("team"),
+                master.get("team"),
+                prior.get("team"),
+                fallback.get("team"),
             )
             # Exclude inactive historical records that are absent from every
             # current/projection signal.
@@ -6562,9 +6680,9 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
         if imported_expected not in (None, ""):
             expected_points = _off_round(imported_expected, 1)
 
-        team = _normalize_team_code(raw.get("team")) or "FA"
+        team = _resolve_rostered_team(raw.get("team"))
         if season == 2026 and str(raw.get("data_type") or "").lower() != "actual":
-            team = _normalize_team_code(master.get("team") or team) or "FA"
+            team = _resolve_rostered_team(master.get("team"), team)
 
         row = {
             "player_key": norm,
@@ -7576,14 +7694,11 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
         if not pos:
             continue
 
-        team = str(
-            current.get("team")
-            or adp_row.get("team")
-            or stats.get("team")
-            or ""
-        ).upper()
+        team = _resolve_rostered_team(
+            current.get("team"), adp_row.get("team"), stats.get("team")
+        )
 
-        has_current_team = bool(team and team not in {"FA", "N/A", "NONE"})
+        has_current_team = bool(_rostered_team_code(team))
         has_stats = meaningful_stats(stats)
         has_adp = valid_adp(adp_row)
 
@@ -7594,7 +7709,7 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
             "player_id": str(player_id),
             "name": name,
             "position": pos,
-            "team": team or "FA",
+            "team": _rostered_team_code(team),
             "age": current.get("age"),
             "college": current.get("college"),
             "years_exp": current.get("years_exp"),
@@ -7620,8 +7735,9 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
             "name": stats.get("name") or master.get("name")
                 or adp_row.get("name") or norm,
             "position": pos,
-            "team": master.get("team") or adp_row.get("team")
-                or stats.get("team") or "FA",
+            "team": _resolve_rostered_team(
+                master.get("team"), adp_row.get("team"), stats.get("team")
+            ),
         }, "stats")
 
     # Add ranked 2026 players such as rookies who have no 2025 production.
@@ -7642,7 +7758,9 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
             "name": adp_row.get("name") or adp_row.get("player_name")
                 or master.get("name") or norm,
             "position": pos,
-            "team": master.get("team") or adp_row.get("team") or "FA",
+            "team": _resolve_rostered_team(
+                master.get("team"), adp_row.get("team")
+            ),
             "rookie": bool(master.get("rookie")),
         }, "adp")
 
@@ -7716,9 +7834,9 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
         recent_news = news_row.get("news", []) if isinstance(news_row, dict) else []
         recent_news = [item for item in recent_news if isinstance(item, dict)]
         latest_news = recent_news[0] if recent_news else {}
-        current_team = (
-            master.get("team") or player.get("team")
-            or adp_row.get("team") or stats.get("team") or "FA"
+        current_team = _resolve_rostered_team(
+            player.get("team"), master.get("team"),
+            adp_row.get("team"), stats.get("team")
         )
         sos = _player_strength_of_schedule(current_team, pos) or {}
 
@@ -8100,7 +8218,9 @@ def _pr_profile(player_id):
         "player_id": str(player_id),
         "name": name,
         "position": master.get("position") or position,
-        "team": master.get("team") or p.get("team") or "FA",
+        "team": _resolve_rostered_team(
+            p.get("team"), master.get("team"), stats_2025.get("team")
+        ),
         "number": master.get("number") or p.get("number"),
         "age": master.get("age") if master.get("age") is not None else p.get("age"),
         "college": master.get("college") or p.get("college"),

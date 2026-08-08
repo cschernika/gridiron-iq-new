@@ -5,20 +5,21 @@ SMALLEST UPDATE
 
 1. Extract gridiron_iq_player_research_sos.zip.
 2. Upload app.py to the ROOT of your GitHub repository and replace the existing app.py.
-3. Upload templates/player_research.html to the templates folder and replace the existing file.
-4. Commit both files to the main branch.
-5. In Render, choose Manual Deploy > Deploy latest commit.
-6. When deployment finishes, hard-refresh the browser:
+3. Upload templates/player_research.html to your repository's templates folder and replace the existing file.
+4. Upload data/nfl_defensive_stats_2025.json to your repository's data folder and replace the existing file.
+5. Preserve the folder names exactly.
+6. Commit the changes to the main branch.
+7. In Render, choose Manual Deploy > Deploy latest commit.
+8. After deployment, hard-refresh the browser:
    Windows: Ctrl + F5
    Mac: Command + Shift + R
 
 EXPECTED RESULT
 
-- Player Research has an SOS column after Depth.
-- Clicking SOS sorts players by the position-adjusted schedule score.
-- #1 represents the easiest schedule among 32 teams.
+- Player Research contains a sortable SOS column after Depth.
+- SOS displays #1–#32 plus Easy, Average or Hard.
 - Clicking a player opens a 2026 Strength of Schedule section.
-- The profile shows the easiest weeks, toughest weeks and every weekly opponent.
+- The profile lists all 18 weeks, the bye, opponent defensive rankings and weekly matchup ratings.
+- Weeks 15–17 are highlighted and have a separate playoff SOS rank.
 
-Both app.py and templates/player_research.html are required. Do not upload app.py
-inside the templates folder.
+Rank #1 means the easiest fantasy schedule for that position.

@@ -5,8 +5,11 @@ The package includes three GitHub Actions workflows:
 - **Daily Player Research refresh** runs every day at **6:37 AM Eastern**. It
   refreshes player teams, new signings, free agents, active status, injuries,
   practice status and depth-chart fields from Sleeper's current NFL directory.
-- **Weekly NFL statistics refresh** runs every Tuesday morning. It refreshes
-  current-season offensive and defensive production.
+- **Weekly NFL statistics refresh** runs every Tuesday afternoon after the
+  Monday night game and the normal statistics publishing window. A Wednesday
+  safety run captures delayed corrections. It refreshes current-season
+  offensive production, defensive production, offensive-line/defensive-front
+  grades, coverage tendencies and weekly matchup calculations.
 - **Complete player career history** runs every January 15. It adds the newly
   completed season to every offensive player's year-by-year profile. The
   package already includes all available regular seasons from 1999 through
@@ -81,6 +84,11 @@ Weekly statistics:
 
 - `data/nfl_player_stats_2026.json`
 - `data/nfl_defensive_stats_current.json`
+
+The Wednesday safety run does not create a duplicate deployment when the data
+is unchanged. If a source is temporarily unavailable, the scripts retain the
+last complete snapshot instead of replacing the Data Center with blank or
+partial results.
 
 Annual career history:
 
