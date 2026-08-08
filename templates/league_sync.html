@@ -2,7 +2,54 @@
 {% block title %}League Sync | Gridiron IQ{% endblock %}
 {% block body %}
 <div class="app-shell">
-  {% set active='sync' %}{% include "_sidebar.html" %}
+  {# v39: League Sync sidebar is embedded so this page never depends on _sidebar.html. #}
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <a href="/app" class="brand-link" aria-label="Gridiron IQ Command Center">
+        <span class="brand-mark">GIQ</span>
+        <span class="brand-copy"><strong>Gridiron IQ</strong><small>Fantasy Intelligence</small></span>
+      </a>
+      <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    </div>
+
+    <nav class="sidebar-nav" aria-label="Main navigation">
+      <p class="nav-label">Overview</p>
+      <a class="nav-item nav-link" href="/app">Command Center</a>
+
+      <p class="nav-label">Draft</p>
+      <a class="nav-item nav-link" href="/draft-center">Draft Center</a>
+      <a class="nav-item nav-link" href="/mock-draft">Mock Draft</a>
+      <a class="nav-item nav-link" href="/player-research">Player Research</a>
+
+      <p class="nav-label">Weekly Tools</p>
+      <a class="nav-item nav-link" href="/weekly-matchups">Weekly Matchups</a>
+      <a class="nav-item nav-link" href="/matchup-analyzer">Matchup Analyzer</a>
+      <a class="nav-item nav-link" href="/lineup-optimizer">Lineup Optimizer</a>
+      <a class="nav-item nav-link" href="/waiver-assistant">Waiver Assistant</a>
+      <a class="nav-item nav-link" href="/trade-analyzer">Trade Analyzer</a>
+
+      <p class="nav-label">League</p>
+      <a class="nav-item nav-link" href="/league-intelligence">League Intelligence</a>
+      <a class="nav-item nav-link active" href="/league-sync" aria-current="page">Sync League</a>
+
+      <p class="nav-label">Data Center</p>
+      <a class="nav-item nav-link" href="/offensive-stats">Offensive Stats</a>
+      <a class="nav-item nav-link" href="/defensive-stats">Defensive Stats</a>
+      <a class="nav-item nav-link" href="/player-analytics">Player Analytics</a>
+
+      <p class="nav-label">Account</p>
+      <a class="nav-item nav-link" href="/settings">Settings</a>
+      <a class="nav-item nav-link" href="/help">Help</a>
+    </nav>
+
+    <div class="sidebar-user">
+      <div class="user-avatar">{{ (user.name|default('C', true))[0]|upper if user is defined else 'C' }}</div>
+      <div>
+        <strong>{{ user.name|default('Gridiron IQ', true) if user is defined else 'Gridiron IQ' }}</strong>
+        <small>{{ user.email|default('', true) if user is defined else '' }}</small>
+      </div>
+    </div>
+  </aside>
   <main class="main sync-main">
     <header class="topbar">
       <div>
@@ -126,7 +173,7 @@
       </div>
     </section>
 
-    <section class="sync-help panel"><div><span class="help-icon">✓</span></div><div><h3>Connection build</h3><p><b>Gridiron IQ v35 Sync Stability</b> — Yahoo Sync and Mock Draft are packaged together so frontend/backend versions stay matched.</p></div></section>
+    <section class="sync-help panel"><div><span class="help-icon">✓</span></div><div><h3>Connection build</h3><p><b>Gridiron IQ v39 Sync No-Partial Repair</b> — Yahoo Sync and Mock Draft are packaged together so frontend/backend versions stay matched.</p></div></section>
   </main>
 </div>
 <script>
