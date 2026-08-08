@@ -176,6 +176,7 @@
   }
 
   function depthChartLabel(row){
+    if(String(row.team||"").toUpperCase()==="FA")return "N/A";
     const order=Number(row.depth_display_order);
     if(Number.isFinite(order)&&order>0)return `${String(row.position||row.depth_chart_position||"").toUpperCase()}${Math.round(order)}`;
     const slot=String(row.depth_chart_position||"").trim().toUpperCase();
@@ -184,7 +185,7 @@
 
   function sosClass(label){return String(label||"").toLowerCase()==="easy"?"easy":String(label||"").toLowerCase()==="hard"?"hard":"average";}
   function sosPill(row){
-    if(!number(row.sos_rank))return '<span class="pr-sos" title="Strength of schedule is currently available for QB, RB, WR and TE players on an NFL team.">—</span>';
+    if(!number(row.sos_rank)){const note=row.data_availability_note||"Strength of schedule is currently available for QB, RB, WR and TE players on an NFL team.";return `<span class="pr-sos" title="${esc(note)}">N/A</span>`;}
     const title=[row.sos_summary,number(row.sos_playoff_rank)?`Weeks 15–17: #${Math.round(Number(row.sos_playoff_rank))} ${row.sos_playoff_label}`:"",number(row.sos_bye_week)?`Bye: Week ${Math.round(Number(row.sos_bye_week))}`:""].filter(Boolean).join(" · ");
     return `<span class="pr-sos ${sosClass(row.sos_label)}" title="${esc(title)}">#${Math.round(Number(row.sos_rank))} ${esc(row.sos_label)}</span>`;
   }
@@ -198,9 +199,10 @@
       const injuryTitle=[row.injury_status,row.injury_body_part,row.practice_participation].filter(Boolean).join(" · ");
       const newsTitle=row.latest_news_title||`${row.news_count||1} new player update`;
       const icons=`<span class="pr-icons">${row.has_injury?`<button class="pr-icon injury" data-action="injury" data-key="${esc(row.player_key)}" title="${esc(injuryTitle)}" aria-label="Injury update for ${esc(row.name)}">✚</button>`:""}${row.has_news?`<button class="pr-icon news" data-action="news" data-key="${esc(row.player_key)}" title="${esc(newsTitle)}" aria-label="New player news for ${esc(row.name)}">📰</button>`:""}</span>`;
-      const status=row.has_injury?`<span class="pr-injury-text">${esc(row.injury_status)}</span>`:'<span class="pr-healthy">Active</span>';
+      const status=row.has_injury?`<span class="pr-injury-text">${esc(row.injury_status)}</span>`:String(row.team||"").toUpperCase()==="FA"?`<span class="pr-na" title="${esc(row.data_availability_note||"Not currently assigned to an NFL team")}">Free Agent</span>`:`<span class="pr-healthy">${esc(row.status||"Active")}</span>`;
       const depth=depthChartLabel(row),depthOrder=Number(row.depth_display_order),depthClass=row.depth_is_projected?"projected":(depthOrder===1?"starter":""),depthTitle=[row.depth_display_source,Number.isFinite(depthOrder)&&depthOrder>0?`Team ${row.position}${Math.round(depthOrder)}`:""].filter(Boolean).join(" · ");
-      return `<tr><td><div class="pr-player-line"><button class="pr-player" data-action="profile" data-key="${esc(row.player_key)}">${esc(row.name)}</button>${icons}</div></td><td class="pr-team">${esc(row.team||"FA")}</td><td><span class="pr-pos">${esc(row.position)}</span></td><td><span class="pr-depth ${depthClass}" title="${esc(depthTitle||"Depth chart not published")}">${esc(depth)}</span></td><td>${sosPill(row)}</td><td>${status}</td><td>${Number(row.adp)<999?fmt(row.adp):"—"}</td><td>${esc(row.position_adp||"—")}</td><td>${number(row.games)?Math.round(Number(row.games)):"—"}</td><td>${fmt(row.fantasy_points_ppr)}</td><td>${fmt(row.proj_2026_ppr)}</td></tr>`;
+      const availability=row.data_availability_note||"";
+      return `<tr><td><div class="pr-player-line"><button class="pr-player" data-action="profile" data-key="${esc(row.player_key)}">${esc(row.name)}</button>${icons}</div></td><td class="pr-team" title="${esc(availability)}">${esc(row.team||"FA")}</td><td><span class="pr-pos">${esc(row.position)}</span></td><td><span class="pr-depth ${depthClass}" title="${esc(depthTitle||availability||"Depth chart not published")}">${esc(depth)}</span></td><td>${sosPill(row)}</td><td>${status}</td><td>${Number(row.adp)<999?fmt(row.adp):"—"}</td><td>${esc(row.position_adp||"—")}</td><td>${row.has_2025_stats&&number(row.games)?Math.round(Number(row.games)):"—"}</td><td>${row.has_2025_stats?fmt(row.fantasy_points_ppr):"—"}</td><td>${fmt(row.proj_2026_ppr)}</td></tr>`;
     }).join("");
   }
 
