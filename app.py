@@ -78,6 +78,11 @@ def hide_legacy_connect_league_navigation(response):
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
             response.headers["X-Gridiron-Player-Research-Build"] = "v31"
+        if request.path in {"/mock-draft", "/league-sync"} or request.path.startswith("/api/mock-draft/") or request.path == "/api/diagnostics/mock-draft" or request.path.startswith("/api/yahoo/") or request.path.startswith("/auth/yahoo"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            response.headers["X-Gridiron-Build"] = "v34-unified"
     except Exception:
         pass
     return response
@@ -929,7 +934,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v34-unified",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -1260,6 +1265,35 @@ def _yahoo_selected_league():
     return data or None
 
 
+def _yahoo_discover_leagues():
+    """Return Yahoo NFL leagues using multiple supported collection paths.
+
+    Yahoo's Fantasy API can resolve the current NFL game by game code, but
+    older integrations commonly use game_keys=nfl. Trying both keeps the
+    connection resilient across Yahoo API behavior changes and seasons.
+    """
+    attempts = [
+        "users;use_login=1/games;game_codes=nfl/leagues",
+        "users;use_login=1/games;game_keys=nfl/leagues",
+    ]
+    errors = []
+    found = []
+    for api_path in attempts:
+        try:
+            raw = _yahoo_api_get(api_path)
+            _yahoo_collect_leagues(raw, found)
+            if found:
+                break
+        except Exception as exc:
+            errors.append(f"{api_path}: {exc}")
+
+    # Prefer the current fantasy season, but do not discard older leagues.
+    found.sort(key=lambda item: int(item.get("season") or 0), reverse=True)
+    if not found and errors:
+        raise RuntimeError(" | ".join(errors))
+    return found
+
+
 @app.get("/api/yahoo/status")
 def yahoo_status():
     creds = _yahoo_credentials()
@@ -1278,7 +1312,12 @@ def yahoo_status():
 @app.get("/api/yahoo/diagnostics")
 def yahoo_diagnostics():
     creds = _yahoo_credentials()
+    token = _yahoo_token()
     issues = []
+    api_ok = None
+    api_detail = ""
+    league_count = None
+
     if not creds["client_id"]:
         issues.append("YAHOO_CLIENT_ID is missing in Render.")
     if not creds["client_secret"]:
@@ -1289,14 +1328,39 @@ def yahoo_diagnostics():
         issues.append("YAHOO_REDIRECT_URI must use HTTPS.")
     elif not creds["redirect_uri"].rstrip("/").endswith("/auth/yahoo/callback"):
         issues.append("YAHOO_REDIRECT_URI must end with /auth/yahoo/callback.")
+
+    if not issues and token:
+        try:
+            leagues = _yahoo_discover_leagues()
+            api_ok = True
+            league_count = len(leagues)
+            api_detail = f"Yahoo Fantasy API responded successfully and returned {league_count} NFL league(s)."
+        except Exception as exc:
+            api_ok = False
+            api_detail = str(exc)
+            issues.append(
+                "Yahoo OAuth is connected, but the Fantasy Sports API request failed. "
+                "Confirm the Yahoo developer app has Fantasy Sports Read or Read/Write permission and that access has been approved."
+            )
+
+    if issues:
+        next_step = "Correct the listed Yahoo/Render issue, then reconnect Yahoo."
+    elif not token:
+        next_step = "Click Connect Yahoo and approve access, then load your leagues."
+    else:
+        next_step = "Yahoo is ready. Load your leagues, select one, and sync."
+
     return jsonify(
         ok=not issues,
+        build="v34-unified",
         issues=issues,
-        redirect_uri=creds["redirect_uri"],
-        connected=bool(_yahoo_token()),
-        next_step=("Click Connect Yahoo." if not issues else "Correct the listed Render setting, then redeploy."),
+        redirect_uri=creds["redirect_uri"] or f"{request.url_root.rstrip('/')}/auth/yahoo/callback",
+        connected=bool(token.get("access_token") or token.get("refresh_token")),
+        api_ok=api_ok,
+        api_detail=api_detail,
+        league_count=league_count,
+        next_step=next_step,
     )
-
 
 @app.post("/api/yahoo/app-credentials")
 def yahoo_app_credentials_info():
@@ -1367,15 +1431,25 @@ def yahoo_disconnect():
 @app.get("/api/yahoo/leagues")
 def yahoo_leagues():
     try:
-        raw = _yahoo_api_get("users;use_login=1/games;game_keys=nfl/leagues")
-        leagues = []
-        _yahoo_collect_leagues(raw, leagues)
-        leagues.sort(key=lambda item: int(item.get("season") or 0), reverse=True)
-        return jsonify(ok=True, leagues=leagues, selected_league=_yahoo_selected_league())
+        leagues = _yahoo_discover_leagues()
+        return jsonify(
+            ok=True,
+            leagues=leagues,
+            selected_league=_yahoo_selected_league(),
+            connected=True,
+            build="v34-unified",
+        )
     except Exception as exc:
         app.logger.exception("Yahoo league discovery failed")
-        return jsonify(ok=False, error="Unable to load Yahoo leagues.", detail=str(exc)), 400
-
+        return jsonify(
+            ok=False,
+            error="Unable to load Yahoo Fantasy Football leagues.",
+            detail=str(exc),
+            suggestion=(
+                "Click Check Yahoo Setup. If OAuth succeeds but this call is rejected, "
+                "verify that the Yahoo developer application has approved Fantasy Sports access."
+            ),
+        ), 400
 
 @app.post("/api/yahoo/select-league")
 def yahoo_select_league():
@@ -1405,7 +1479,25 @@ def yahoo_select_league():
 def yahoo_sync():
     selected = _yahoo_selected_league()
     if not selected:
-        return jsonify(ok=False, error="Select a Yahoo league before syncing."), 400
+        try:
+            leagues = _yahoo_discover_leagues()
+        except Exception as exc:
+            return jsonify(ok=False, error="Yahoo is connected but Gridiron IQ could not load your leagues.", detail=str(exc)), 400
+        current = [x for x in leagues if str(x.get("season") or "") == "2026"] or leagues
+        if len(current) == 1:
+            one = current[0]
+            selected = {
+                "league_key": one.get("league_key"),
+                "league_name": one.get("name") or "Yahoo League",
+                "name": one.get("name") or "Yahoo League",
+                "season": one.get("season"),
+                "num_teams": one.get("num_teams"),
+                "current_week": one.get("current_week"),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _yahoo_write_json(YAHOO_PREF_FILE, selected)
+        else:
+            return jsonify(ok=False, error="Choose a Yahoo league before syncing.", leagues=current), 400
     try:
         league_key = selected["league_key"]
         raw = _yahoo_api_get(f"league/{league_key}/teams")
@@ -1454,7 +1546,7 @@ def yahoo_sync():
             "league_name": league_name,
             "teams": payload["settings"]["team_count"],
         })
-        return jsonify(ok=True, **payload)
+        return jsonify(ok=True, build="v34-unified", **payload)
     except Exception as exc:
         app.logger.exception("Yahoo league sync failed")
         return jsonify(
@@ -1473,7 +1565,7 @@ MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
 BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
-MOCK_DRAFT_BUILD = "mock-draft-v6-current-team-resolution"
+MOCK_DRAFT_BUILD = "mock-draft-v34-unified"
 MOCK_DIRECTORY_MINIMUMS = {
     "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
 }
