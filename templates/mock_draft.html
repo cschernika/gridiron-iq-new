@@ -9,7 +9,7 @@
 .ms-live{display:none;grid-template-columns:1.45fr .75fr;gap:16px;margin-top:16px}.ms-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}.ms-search{flex:1;min-width:180px;border:1px solid var(--l);border-radius:9px;padding:9px}.ms-tabs{display:flex;gap:6px;flex-wrap:wrap}.ms-tabs button{border:0;border-radius:999px;padding:7px 10px;background:#f0f3f8;font-weight:800;cursor:pointer}.ms-tabs button small{font-size:8px;opacity:.72;margin-left:3px}.ms-tabs button.active{background:var(--p);color:#fff}
 .ms-pool-summary{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 9px;color:var(--m);font-size:10px}.ms-pool-summary b{color:var(--t)}.ms-empty{text-align:center!important;color:var(--m);padding:28px 8px!important}
 .ms-table-wrap{overflow:auto;max-height:610px}.ms-table{width:100%;border-collapse:collapse;min-width:700px}.ms-table th,.ms-table td{padding:9px 7px;border-bottom:1px solid #e7eaf1;text-align:left;font-size:10px}.ms-table th{font-size:8px;color:var(--m);position:sticky;top:0;background:#fff}.ms-pick{border:0;border-radius:8px;background:var(--p);color:#fff;padding:7px 9px;font-weight:900}
-.ms-stat{background:#f7f8fc;border-radius:11px;padding:11px;margin-bottom:10px}.ms-stat span,.ms-stat strong{display:block}.ms-stat span{font-size:9px;color:var(--m)}.ms-stat strong{font-size:22px;margin-top:3px}.ms-roster{width:100%;border-collapse:collapse}.ms-roster td,.ms-roster th{padding:7px 4px;border-bottom:1px solid #e8ebf1;font-size:10px;text-align:left}
+.ms-stat{background:#f7f8fc;border-radius:11px;padding:11px;margin-bottom:10px}.ms-stat span,.ms-stat strong,.ms-stat small{display:block}.ms-stat span{font-size:9px;color:var(--m)}.ms-stat strong{font-size:22px;margin-top:3px}.ms-stat small{font-size:8px;color:var(--m);margin-top:4px;line-height:1.35}.ms-roster{width:100%;border-collapse:collapse}.ms-roster td,.ms-roster th{padding:7px 4px;border-bottom:1px solid #e8ebf1;font-size:10px;text-align:left}
 .ms-saved{margin-top:16px}.ms-saved-row{display:grid;grid-template-columns:1fr 130px 80px;gap:10px;padding:10px;border-bottom:1px solid #e7eaf1;font-size:11px}.ms-link{color:#4637e5;font-weight:900;text-decoration:none}
 
 .ms-board-card{margin-top:16px;background:#fff;border:1px solid var(--l);border-radius:16px;padding:16px}
@@ -38,7 +38,7 @@
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
 </style>
 <div class="ms">
-<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · SMART DRAFT FORMULA V4</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
+<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · STRICT DRAFT GRADING V5</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
 <div id="build-status" class="ms-status ms-build-check show busy" role="status" aria-live="polite">Checking the deployed server and complete player database…</div>
 
 <div id="setup" class="ms-grid">
@@ -63,7 +63,7 @@
 </div>
 <div class="ms-card">
 <div class="ms-stat"><span>ON THE CLOCK</span><strong id="pick">—</strong></div>
-<div class="ms-stat"><span>LIVE GRADE</span><strong id="grade">—</strong></div>
+<div class="ms-stat"><span>LIVE GRADE</span><strong id="grade">—</strong><small id="grade-detail">Your selections will be graded against market rank, projection and roster fit.</small></div>
 <button id="auto-rest" class="ms-btn ms-full">AI Auto-Draft My Remaining Picks</button>
 <h3>Your Roster</h3><table class="ms-roster"><tbody id="roster"></tbody></table>
 <div id="complete" style="display:none"><a id="review" class="ms-btn primary ms-full" href="#">Review Completed Draft</a></div>
@@ -91,7 +91,7 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  const expectedBuild="mock-draft-v4-cache-guard";
+  const expectedBuild="mock-draft-v5-grade-calibration";
   let id = null, available = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="";
 
   async function api(url,opt={}){
@@ -180,7 +180,15 @@
     $("rank-heading").textContent=rankingLabel;
     renderPlayers();
 
-    $("grade").textContent=(d.grade||{}).overall||"—";
+    const grade=d.grade||{};
+    $("grade").textContent=Number.isFinite(Number(grade.overall))&&Number(grade.overall)>0
+      ? `${grade.overall}/100`
+      : "—";
+    const worst=(grade.pick_reports||[]).reduce((current,pick)=>
+      !current||Number(pick.pick_grade)<Number(current.pick_grade)?pick:current,null);
+    $("grade-detail").textContent=worst
+      ? `Selection quality ${grade.pick_quality_score}/100 · Worst pick: ${worst.name} ${worst.pick_grade}/100${grade.severe_reach_count?` · ${grade.severe_reach_count} severe reach${grade.severe_reach_count===1?"":"es"}`:""}`
+      : "Your selections will be graded against market rank, projection and roster fit.";
     $("pick").textContent=d.current_pick
       ? `Round ${d.current_pick.round} · Pick #${d.current_pick.overall}`
       : "Draft Complete";
