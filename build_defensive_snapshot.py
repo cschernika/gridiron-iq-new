@@ -316,10 +316,14 @@ for row in read_csv(PFR_DEFENSE):
 
 
 # Full play-by-play lookup used by the participation/coverage rows.
+# Track the latest represented regular-season week so the UI can tell users
+# exactly how current the weekly model is.
 pbp = {}
+data_through_week = 0
 for row in read_gzip_csv(PLAY_BY_PLAY):
     if row.get("season_type") != "REG":
         continue
+    data_through_week = max(data_through_week, integer(row.get("week")))
     pbp[(row.get("game_id"), str(row.get("play_id")))] = row
 
 
@@ -688,6 +692,7 @@ payload = {
     "season": STATS_SEASON,
     "matchup_season": MATCHUP_SEASON,
     "updated_at": datetime.now(timezone.utc).isoformat(),
+    "data_through_week": data_through_week,
     "source": f"{STATS_SEASON} nflverse player stats, PFR advanced defense, FTN Data participation via nflverse, and nflverse schedules",
     "license_note": "Participation and coverage data: FTN Data via nflverse, CC BY-SA 4.0.",
     "players": {row["player_key"]: row for row in player_rows},

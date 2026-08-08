@@ -1,0 +1,16 @@
+GRIDIRON IQ v32 - WEEKLY MATCHUP ANALYZER
+
+1. Extract this ZIP.
+2. Upload the CONTENTS of gridiron_iq_weekly_matchups_v32 to the ROOT of your existing GitHub repository.
+3. Replace existing files when prompted.
+4. Confirm GitHub Actions -> General -> Workflow permissions is set to Read and write permissions.
+5. Confirm Render Auto-Deploy is enabled for the repository.
+
+WHAT CHANGED
+- Matchup Analyzer automatically opens the active/upcoming NFL week.
+- Tuesday refresh rebuilds current-season offensive, defensive, coverage and trench data.
+- Wednesday refresh catches delayed stat corrections.
+- The matchup snapshot records exactly which NFL week the live data includes.
+- The page displays data-through week and last refresh timestamp.
+- Until 2026 regular-season stats exist, the known-good 2025 baseline remains in place.
+- Once 2026 games begin, the model automatically switches to 2026 current-season results.

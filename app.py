@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime
 from math import exp
 from pathlib import Path
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
@@ -7373,6 +7374,51 @@ def _weekly_schedule_lookup(payload, week):
     return result
 
 
+def _matchup_default_week(payload):
+    """Choose the NFL week that should open by default.
+
+    The first regular-season week with a game on or after today's Eastern date
+    is treated as the active matchup week. This keeps the Matchup Analyzer on
+    the upcoming/current slate automatically without requiring a code change.
+    """
+    schedule = payload.get("schedule_2026", []) or []
+    if not schedule:
+        return 1
+    try:
+        today = datetime.now(ZoneInfo("America/New_York")).date()
+    except Exception:
+        today = datetime.now(timezone.utc).date()
+
+    future = []
+    all_weeks = []
+    for game in schedule:
+        try:
+            week = int(game.get("week") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= week <= 18:
+            continue
+        all_weeks.append(week)
+        raw_day = str(game.get("gameday") or "").strip()
+        try:
+            game_day = datetime.strptime(raw_day, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        if game_day >= today:
+            future.append((game_day, week))
+    if future:
+        return min(future)[1]
+    return max(all_weeks) if all_weeks else 1
+
+
+def _matchup_data_through_week(payload):
+    """Return the latest regular-season week represented by the live snapshot."""
+    try:
+        return max(0, min(18, int(payload.get("data_through_week") or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 _SOS_CACHE = {"signature": None, "data": {}}
 
 
@@ -7835,15 +7881,22 @@ def _weekly_matchup_rows(week=1, position="ALL"):
 
 @app.get("/weekly-matchups")
 def weekly_matchups_page():
-    return page("weekly_matchups.html", matchup_weeks=range(1, 19))
+    payload = _defensive_stats_snapshot()
+    return page(
+        "weekly_matchups.html",
+        matchup_weeks=range(1, 19),
+        default_matchup_week=_matchup_default_week(payload),
+    )
 
 
 @app.get("/api/weekly-matchups")
 def weekly_matchups_api():
+    payload = _defensive_stats_snapshot()
+    default_week = _matchup_default_week(payload)
     try:
-        week = max(1, min(18, int(request.args.get("week") or 1)))
+        week = max(1, min(18, int(request.args.get("week") or default_week)))
     except (TypeError, ValueError):
-        week = 1
+        week = default_week
     position = str(request.args.get("position") or "ALL").upper()
     if position not in {"ALL", "RB", "WR", "TE"}:
         position = "ALL"
@@ -7856,8 +7909,12 @@ def weekly_matchups_api():
         count=len(rows),
         rows=rows,
         metadata={
-            "model_version": "RB Model V2",
+            "model_version": "Weekly Matchup Model V3",
             "season": payload.get("matchup_season", 2026),
+            "active_week": default_week,
+            "data_through_week": _matchup_data_through_week(payload),
+            "updated_at": payload.get("updated_at") or "",
+            "refresh_cadence": "Tuesday primary refresh; Wednesday correction refresh",
             "baseline_season": payload.get("season", 2025),
             "offense_data_type": offense_data_type,
             "source": payload.get("source") or "Gridiron IQ matchup model",
