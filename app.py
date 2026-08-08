@@ -745,7 +745,7 @@ def league_sync():
             analytics=DEMO,
             yahoo_configured=yahoo_configured,
             yahoo_redirect=yahoo_redirect,
-            gridiron_build="v42-balanced-scoring",
+            gridiron_build="v44-role-adjusted-scoring",
         )
     except Exception as exc:
         app.logger.exception("League Sync page failed to render")
@@ -773,7 +773,7 @@ def league_sync_diagnostics():
     snapshot = load_snapshot()
     return jsonify(
         ok=True,
-        build="v42-balanced-scoring",
+        build="v44-role-adjusted-scoring",
         league_sync_template=(template_dir / "league_sync.html").exists(),
         base_template=(template_dir / "base.html").exists(),
         sidebar_template=(template_dir / "_sidebar.html").exists(),
@@ -996,7 +996,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v42-balanced-scoring",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v44-role-adjusted-scoring",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -1414,7 +1414,7 @@ def yahoo_diagnostics():
 
     return jsonify(
         ok=not issues,
-        build="v42-balanced-scoring",
+        build="v44-role-adjusted-scoring",
         issues=issues,
         redirect_uri=creds["redirect_uri"] or f"{request.url_root.rstrip('/')}/auth/yahoo/callback",
         connected=bool(token.get("access_token") or token.get("refresh_token")),
@@ -1499,7 +1499,7 @@ def yahoo_leagues():
             leagues=leagues,
             selected_league=_yahoo_selected_league(),
             connected=True,
-            build="v42-balanced-scoring",
+            build="v44-role-adjusted-scoring",
         )
     except Exception as exc:
         app.logger.exception("Yahoo league discovery failed")
@@ -1608,7 +1608,7 @@ def yahoo_sync():
             "league_name": league_name,
             "teams": payload["settings"]["team_count"],
         })
-        return jsonify(ok=True, build="v42-balanced-scoring", **payload)
+        return jsonify(ok=True, build="v44-role-adjusted-scoring", **payload)
     except Exception as exc:
         app.logger.exception("Yahoo league sync failed")
         return jsonify(
@@ -1627,7 +1627,7 @@ MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
 BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
-MOCK_DRAFT_BUILD = "mock-draft-v42-balanced-scoring"
+MOCK_DRAFT_BUILD = "mock-draft-v44-role-adjusted-scoring"
 MOCK_DIRECTORY_MINIMUMS = {
     "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
 }
@@ -1819,7 +1819,7 @@ def _manual_mock_list(limit=30):
     for mock in store.values():
         if _manual_ensure_complete_pool(mock):
             changed = True
-        if (mock.get("grade") or {}).get("grade_version") != "balanced-v6":
+        if (mock.get("grade") or {}).get("grade_version") != "role-adjusted-v7":
             mock["grade"] = _manual_grade(mock)
             changed = True
     if changed:
@@ -1935,6 +1935,16 @@ def _build_dynamic_mock_pool(context):
             continue
         if clean_number(item.get("projection")) <= 0:
             item["projection"] = _mock_projection_from_stats(stats, item["pos"])
+        # Carry usage/role signals into the draft pool so pick grading can
+        # evaluate a late-round starter or WR2/RB2 on his actual opportunity,
+        # not simply on how early he was drafted.
+        for usage_field in (
+            "games", "snap_share", "target_share", "offense_snaps",
+            "targets", "receptions", "carries", "rushing_attempts",
+            "attempts", "fantasy_points_ppr", "fantasy_points",
+        ):
+            if stats.get(usage_field) not in (None, ""):
+                item[usage_field] = stats.get(usage_field)
         item["stats_2025"] = True
 
     # Partial or complete 2026 master data enriches the union; it never replaces
@@ -2122,8 +2132,8 @@ def _manual_ensure_complete_pool(mock):
     """Upgrade saved drafts created by the old partial-pool implementation."""
     existing = mock.get("player_pool") or []
     changed = False
-    if mock.get("formula_version") != "smart-draft-v6":
-        mock["formula_version"] = "smart-draft-v6"
+    if mock.get("formula_version") != "smart-draft-v7":
+        mock["formula_version"] = "smart-draft-v7"
         changed = True
     needs_pool_upgrade = (
         not _mock_pool_is_complete(existing)
@@ -2150,7 +2160,7 @@ def _manual_ensure_complete_pool(mock):
             merged[key] = dict(player)
     mock["player_pool"] = list(merged.values())
     mock["pool_version"] = "complete-v5"
-    mock["formula_version"] = "smart-draft-v6"
+    mock["formula_version"] = "smart-draft-v7"
     mock["updated_at"] = datetime.now(timezone.utc).isoformat()
     return True
 
@@ -2286,45 +2296,192 @@ def _manual_need_bonus(pos, roster_counts, round_no):
 
     return bonus
 
-def _manual_projection_grade(player):
-    """Position-relative projection grade used only as a secondary signal."""
+def _manual_projection_grade(player, mock=None, overall=None):
+    """Score 2026 point potential relative to players normally available nearby.
+
+    The old absolute position scale made later-round picks drift downward even
+    when they were excellent choices for that part of the draft. v7 compares a
+    player with same-position peers in the surrounding draft window. A strong
+    Round 11 WR2 can therefore earn the same scoring grade as a strong Round 3
+    player if he clearly out-produces the alternatives available around him.
+    """
     position = str(player.get("pos") or "").upper()
     try:
         projection = float(player.get("projection", 0) or 0)
     except (TypeError, ValueError):
         projection = 0.0
+    if projection <= 0:
+        return 20.0
+
+    if isinstance(mock, dict) and overall:
+        peers = []
+        center = max(1.0, float(overall))
+        for peer in (mock.get("player_pool") or []):
+            if str(peer.get("pos") or "").upper() != position:
+                continue
+            try:
+                peer_projection = float(peer.get("projection", 0) or 0)
+                peer_adp = float(peer.get("adp") or peer.get("rank") or 999)
+            except (TypeError, ValueError):
+                continue
+            if peer_projection <= 0 or not 0 < peer_adp < 999:
+                continue
+            # Wider after the current pick than before it because the relevant
+            # question is what scoring upside could reasonably be found here or
+            # shortly afterward.
+            if center - 24 <= peer_adp <= center + 42:
+                peers.append(peer_projection)
+        if len(peers) >= 5:
+            below = sum(1 for value in peers if value < projection)
+            equal = sum(1 for value in peers if value == projection)
+            percentile = (below + 0.5 * equal) / max(1, len(peers))
+            return max(45.0, min(98.0, 48.0 + percentile * 50.0))
+
+    # Fallback only when the player pool cannot provide a useful local window.
     low_high = {
-        "QB": (180.0, 390.0),
-        "RB": (65.0, 330.0),
-        "WR": (65.0, 330.0),
-        "TE": (40.0, 260.0),
-        "K": (75.0, 175.0),
-        "DEF": (70.0, 180.0),
+        "QB": (180.0, 390.0), "RB": (65.0, 330.0), "WR": (65.0, 330.0),
+        "TE": (40.0, 260.0), "K": (75.0, 175.0), "DEF": (70.0, 180.0),
     }
     low, high = low_high.get(position, (60.0, 300.0))
-    grade = 25.0 + ((projection - low) / max(1.0, high - low)) * 70.0
-    return max(5.0, min(98.0, grade))
+    grade = 30.0 + ((projection - low) / max(1.0, high - low)) * 65.0
+    return max(20.0, min(98.0, grade))
 
 
 def _manual_history_grade(position, points):
-    """Small production grade; rookies/unknown history remain neutral."""
+    """Production context; rookies/unknown history remain neutral."""
     try:
         points = float(points or 0)
     except (TypeError, ValueError):
         points = 0.0
     if points <= 0:
-        return 62.0
+        return 65.0
     low_high = {
-        "QB": (140.0, 420.0),
-        "RB": (45.0, 380.0),
-        "WR": (45.0, 380.0),
-        "TE": (25.0, 260.0),
-        "K": (65.0, 185.0),
-        "DEF": (60.0, 190.0),
+        "QB": (140.0, 420.0), "RB": (45.0, 380.0), "WR": (45.0, 380.0),
+        "TE": (25.0, 260.0), "K": (65.0, 185.0), "DEF": (60.0, 190.0),
     }
     low, high = low_high.get(str(position or "").upper(), (40.0, 350.0))
-    grade = 25.0 + ((points - low) / max(1.0, high - low)) * 70.0
-    return max(8.0, min(98.0, grade))
+    grade = 30.0 + ((points - low) / max(1.0, high - low)) * 65.0
+    return max(15.0, min(98.0, grade))
+
+
+def _manual_fraction(value):
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if number > 1.5:
+        number /= 100.0
+    return max(0.0, min(1.0, number))
+
+
+def _manual_usage_role_grade(player):
+    """Return a current-role label and usage grade without any round penalty."""
+    position = str(player.get("pos") or "").upper()
+    try:
+        depth = int(float(player.get("depth_chart_order") or 0))
+    except (TypeError, ValueError):
+        depth = 0
+    try:
+        games = max(1.0, float(player.get("games") or 0))
+    except (TypeError, ValueError):
+        games = 1.0
+    snap_share = _manual_fraction(player.get("snap_share"))
+    target_share = _manual_fraction(player.get("target_share"))
+    try:
+        carries = float(player.get("carries") or player.get("rushing_attempts") or 0)
+    except (TypeError, ValueError):
+        carries = 0.0
+    try:
+        targets = float(player.get("targets") or 0)
+    except (TypeError, ValueError):
+        targets = 0.0
+    touches_per_game = (carries + targets) / games if games > 0 else 0.0
+
+    role = f"{position} depth unknown" if position else "Role unknown"
+    base = 65.0
+
+    if position == "WR":
+        if depth == 1:
+            role, base = "WR1", 95.0
+        elif depth == 2:
+            role, base = "WR2", 87.0
+        elif depth == 3:
+            role, base = "WR3 / slot", 74.0
+        elif depth >= 4:
+            role, base = "WR rotation", 55.0
+        elif target_share >= .22:
+            role, base = "WR1-type usage", 92.0
+        elif target_share >= .15:
+            role, base = "WR2-type usage", 84.0
+        elif target_share >= .10:
+            role, base = "WR3-type usage", 70.0
+    elif position == "RB":
+        if depth == 1:
+            role, base = "RB1", 95.0
+        elif depth == 2:
+            role, base = "RB2 / committee", 84.0
+        elif depth == 3:
+            role, base = "RB3 / change of pace", 67.0
+        elif depth >= 4:
+            role, base = "RB reserve", 48.0
+        elif touches_per_game >= 15:
+            role, base = "RB1-type workload", 92.0
+        elif touches_per_game >= 9:
+            role, base = "RB2-type workload", 82.0
+        elif touches_per_game >= 5:
+            role, base = "Committee workload", 68.0
+    elif position == "TE":
+        if depth == 1:
+            role, base = "TE1", 92.0
+        elif depth == 2:
+            role, base = "TE2", 68.0
+        elif depth >= 3:
+            role, base = "TE reserve", 52.0
+        elif target_share >= .14:
+            role, base = "Starting TE usage", 88.0
+        elif target_share >= .08:
+            role, base = "Rotational TE usage", 68.0
+    elif position == "QB":
+        if depth == 1:
+            role, base = "Starting QB", 97.0
+        elif depth >= 2:
+            role, base = "Backup QB", 28.0
+        else:
+            try:
+                attempts = float(player.get("attempts") or 0)
+            except (TypeError, ValueError):
+                attempts = 0.0
+            if attempts >= 300:
+                role, base = "Starting QB usage", 92.0
+            else:
+                role, base = "QB role unknown", 68.0
+    elif position == "K":
+        role, base = "Starting K", 80.0
+    elif position == "DEF":
+        role, base = "Starting D/ST", 80.0
+
+    adjustment = 0.0
+    if position in {"WR", "TE"}:
+        if target_share >= .22:
+            adjustment += 7
+        elif target_share >= .16:
+            adjustment += 4
+        elif target_share >= .10:
+            adjustment += 2
+        if snap_share >= .75:
+            adjustment += 4
+        elif snap_share >= .60:
+            adjustment += 2
+    elif position == "RB":
+        if touches_per_game >= 18:
+            adjustment += 7
+        elif touches_per_game >= 13:
+            adjustment += 5
+        elif touches_per_game >= 8:
+            adjustment += 2
+        if snap_share >= .60:
+            adjustment += 3
+    return role, max(20.0, min(99.0, base + adjustment))
 
 
 def _manual_pick_score_components(mock, player, counts=None, overall=None, round_no=None):
@@ -2341,12 +2498,7 @@ def _manual_pick_score_components(mock, player, counts=None, overall=None, round
     position = str(player.get("pos") or "").upper()
 
     try:
-        adp = float(
-            player.get("draft_adp")
-            or player.get("adp")
-            or player.get("rank")
-            or 999
-        )
+        adp = float(player.get("draft_adp") or player.get("adp") or player.get("rank") or 999)
     except (TypeError, ValueError):
         adp = 999.0
     if not 0 < adp < 999:
@@ -2355,49 +2507,48 @@ def _manual_pick_score_components(mock, player, counts=None, overall=None, round
         except (TypeError, ValueError):
             adp = 999.0
 
-    # A reach is a player taken earlier than market expectation. Penalties are
-    # intentionally asymmetric and accelerate once the reach exceeds a tier.
     reach = max(0.0, adp - float(overall)) if adp < 999 else 0.0
     value = max(0.0, float(overall) - adp) if adp < 999 else 0.0
-    reach_penalty = (
-        reach * 1.30
-        + max(0.0, reach - 8.0) * 0.80
-        + max(0.0, reach - 20.0) * 0.90
-    )
+    reach_penalty = reach * 1.05 + max(0.0, reach - 10.0) * 0.55 + max(0.0, reach - 24.0) * 0.70
     market_grade = 88.0 + min(10.0, value * 0.40) - reach_penalty
     market_grade = max(0.0, min(99.0, market_grade))
+
     late_round_start = max(8, total_rounds - 2)
     if position in {"K", "DEF"} and round_no >= late_round_start:
-        # Kicker and D/ST market ranks are often intentionally placed beyond
-        # the main player ADP pool. Filling them in the final three rounds is
-        # normal roster construction, not a hundreds-of-picks reach.
         market_grade = max(market_grade, 80.0)
         reach = 0.0
         value = 0.0
 
     roster = [
-        {"pos": position, "team": ""}
-        for position, amount in counts.items()
+        {"pos": roster_position, "team": ""}
+        for roster_position, amount in counts.items()
         for _ in range(int(amount or 0))
     ]
     allowed_positions = _mock_allowed_positions(roster, round_no, total_rounds)
-    need_signal = _mock_position_need_score(
-        position, roster, round_no, total_rounds
-    )
-    # Roster need matters materially in v6. Missing starters grade very well,
-    # useful depth grades positively, and unnecessary positional hoarding is
-    # penalized much more clearly than in the previous formula.
-    roster_fit_grade = max(0.0, min(98.0, 70.0 + need_signal * 2.50))
+    need_signal = _mock_position_need_score(position, roster, round_no, total_rounds)
+    roster_fit_grade = max(0.0, min(98.0, 72.0 + need_signal * 2.30))
     if position not in allowed_positions:
         roster_fit_grade = min(roster_fit_grade, 5.0)
 
-    projection_grade = _manual_projection_grade(player)
-    # Balanced pick score: ADP remains important, but a high-upside player who
-    # fills a real roster need can justify a modest reach.
+    scoring_grade = _manual_projection_grade(player, mock=mock, overall=overall)
+    role_label, usage_grade = _manual_usage_role_grade(player)
+    historical_points = player.get("fantasy_points_ppr") or player.get("fantasy_points") or 0
+    history_grade = _manual_history_grade(position, historical_points)
+    # Player quality is intentionally round-neutral: scoring upside, current
+    # role/usage and proven production. It does not contain pick number.
+    quality_grade = max(20.0, min(99.0,
+        scoring_grade * 0.45 + usage_grade * 0.35 + history_grade * 0.20
+    ))
+
+    # v7 pick score has NO round multiplier. Late-round picks can earn elite
+    # grades when they are high-quality, productive, useful players at a good
+    # market price with a meaningful NFL role.
     score = (
-        market_grade * 0.45
-        + projection_grade * 0.30
-        + roster_fit_grade * 0.25
+        market_grade * 0.20
+        + quality_grade * 0.25
+        + scoring_grade * 0.25
+        + roster_fit_grade * 0.15
+        + usage_grade * 0.15
     )
 
     hard_cap = 99.0
@@ -2419,23 +2570,22 @@ def _manual_pick_score_components(mock, player, counts=None, overall=None, round
     return {
         "score": round(score),
         "market_grade": round(market_grade),
-        "projection_grade": round(projection_grade),
+        "quality_grade": round(quality_grade),
+        "projection_grade": round(scoring_grade),
+        "scoring_grade": round(scoring_grade),
         "roster_fit_grade": round(roster_fit_grade),
+        "usage_grade": round(usage_grade),
+        "role_label": role_label,
         "adp": round(adp, 1) if adp < 999 else 999,
         "reach": round(reach, 1),
         "value": round(value, 1),
-        "severe_reach": bool(reach >= 24),
+        "severe_reach": bool(reach >= 28),
     }
 
 
 def _manual_player_pick_score(mock, player, counts=None, overall=None, round_no=None):
-    return _manual_pick_score_components(
-        mock,
-        player,
-        counts=counts,
-        overall=overall,
-        round_no=round_no,
-    )["score"]
+    return _manual_pick_score_components(mock, player, counts=counts, overall=overall, round_no=round_no)["score"]
+
 
 def _manual_2025_points_map(names):
     # Fast snapshot lookup; never reparse the full CSV during a draft.
@@ -2482,8 +2632,12 @@ def _manual_pick_report(mock):
             "reach": components["reach"],
             "severe_reach": components["severe_reach"],
             "market_grade": components["market_grade"],
+            "quality_grade": components.get("quality_grade", 0),
             "projection_grade": components["projection_grade"],
+            "scoring_grade": components.get("scoring_grade", components["projection_grade"]),
             "roster_fit_grade": components["roster_fit_grade"],
+            "usage_grade": components.get("usage_grade", 0),
+            "role_label": components.get("role_label", "Role unknown"),
             "history_grade": round(history_grade),
             "pick_grade": components["score"],
         })
@@ -2536,22 +2690,14 @@ def _manual_grade(mock):
     roster = _manual_user_roster(mock)
     if not roster:
         return {
-            "grade_version": "balanced-v6",
-            "overall": 0,
-            "projection_score": 0,
-            "stats_score": 0,
-            "value_score": 0,
-            "balance_score": 0,
-            "need_score": 0,
-            "depth_score": 0,
-            "pick_quality_score": 0,
-            "worst_pick_score": 0,
-            "reach_count": 0,
-            "severe_reach_count": 0,
-            "pick_reports": [],
-            "projected_points": 0,
-            "previous_year_points": 0,
-            "summary": "No user picks yet.",
+            "grade_version": "role-adjusted-v7", "overall": 0,
+            "projection_score": 0, "scoring_score": 0, "quality_score": 0,
+            "usage_score": 0, "stats_score": 0, "value_score": 0,
+            "balance_score": 0, "need_score": 0, "depth_score": 0,
+            "pick_quality_score": 0, "worst_pick_score": 0,
+            "reach_count": 0, "severe_reach_count": 0,
+            "pick_reports": [], "projected_points": 0,
+            "previous_year_points": 0, "summary": "No user picks yet.",
         }
 
     counts = Counter(p["pos"] for p in roster)
@@ -2559,32 +2705,20 @@ def _manual_grade(mock):
     projected_points = round(sum(float(p.get("projection", 0) or 0) for p in roster), 1)
     previous_points = round(sum(report["points_2025"] for report in reports), 1)
 
-    weights = [
-        1.0 + 0.5 * (1.0 - (int(report.get("round") or 1) - 1) / max(1, int(mock.get("rounds") or 12)))
-        for report in reports
-    ]
-    weight_total = max(1.0, sum(weights))
-    pick_quality_score = round(
-        sum(report["pick_grade"] * weight for report, weight in zip(reports, weights))
-        / weight_total
-    )
-    # Premium-round decisions count more in each scoring pillar.
-    value_score = round(
-        sum(report["market_grade"] * weight for report, weight in zip(reports, weights))
-        / weight_total
-    )
-    projection_score = round(
-        sum(report["projection_grade"] * weight for report, weight in zip(reports, weights))
-        / weight_total
-    )
-    need_score = round(
-        sum(report["roster_fit_grade"] * weight for report, weight in zip(reports, weights))
-        / weight_total
-    )
-    stats_score = round(
-        sum(report["history_grade"] * weight for report, weight in zip(reports, weights))
-        / weight_total
-    )
+    # Every selection counts equally. There is deliberately NO early-round or
+    # late-round multiplier in v7.
+    report_count = max(1, len(reports))
+    def average(field):
+        return round(sum(float(report.get(field, 0) or 0) for report in reports) / report_count)
+
+    pick_quality_score = average("pick_grade")
+    value_score = average("market_grade")
+    projection_score = average("scoring_grade")
+    scoring_score = projection_score
+    quality_score = average("quality_grade")
+    need_score = average("roster_fit_grade")
+    usage_score = average("usage_grade")
+    stats_score = average("history_grade")
     balance_score = _manual_balance_score(mock, roster)
 
     rbwr = counts.get("RB", 0) + counts.get("WR", 0)
@@ -2593,78 +2727,54 @@ def _manual_grade(mock):
 
     worst_pick = min(reports, key=lambda report: report["pick_grade"])
     worst_pick_score = int(worst_pick["pick_grade"])
-    reach_count = sum(1 for report in reports if report["reach"] >= 9)
+    reach_count = sum(1 for report in reports if report["reach"] >= 10)
     severe_reach_count = sum(1 for report in reports if report["severe_reach"])
-    complete = len(roster) >= int(mock.get("rounds") or 12)
 
-    # Overall v6 draft grade. ADP/value is still the largest single factor,
-    # but projected point potential and roster need now drive 50% of the grade.
-    # Final roster construction supplies the remaining 10%.
+    # Round-neutral overall grade. Late-round picks can improve the grade just
+    # as much as early picks when they add quality, scoring upside and usage.
     overall = (
-        value_score * 0.40
-        + projection_score * 0.30
-        + need_score * 0.20
+        value_score * 0.20
+        + quality_score * 0.20
+        + scoring_score * 0.20
+        + need_score * 0.15
+        + usage_score * 0.15
         + balance_score * 0.10
     )
-    # Keep truly damaging reaches from being completely hidden by a strong
-    # roster elsewhere, without allowing ADP to dominate the entire grade.
-    overall -= max(0, 35 - worst_pick_score) * 0.06
-    overall -= severe_reach_count * 0.75
+    overall -= max(0, 30 - worst_pick_score) * 0.04
+    overall -= severe_reach_count * 0.50
     overall = round(max(0, min(99, overall)))
 
-    strengths = []
-    concerns = []
-    if pick_quality_score >= 85:
-        strengths.append("consistently strong selections")
-    if value_score >= 85:
-        strengths.append("strong ADP value")
-    if projection_score >= 82:
-        strengths.append("high projected point potential")
-    if need_score >= 85:
-        strengths.append("drafted well for roster needs")
-    if balance_score >= 85:
-        strengths.append("balanced final roster construction")
-    if counts.get("RB", 0) < 3:
-        concerns.append("running-back depth")
-    if counts.get("WR", 0) < 4:
-        concerns.append("wide-receiver depth")
-    if counts.get("QB", 0) == 0:
-        concerns.append("quarterback still open")
-    if counts.get("TE", 0) == 0:
-        concerns.append("tight end still open")
-    if projection_score < 68:
-        concerns.append("low projected point potential")
-    if need_score < 68:
-        concerns.append("too many picks that did not address roster needs")
-    if reach_count:
-        concerns.append(f"{reach_count} early pick{'s' if reach_count != 1 else ''} versus market rank")
-    if severe_reach_count:
-        concerns.append(f"{severe_reach_count} severe reach{'es' if severe_reach_count != 1 else ''}")
-    if worst_pick_score < 50:
-        concerns.append(f"{worst_pick['name']} graded {worst_pick_score}/100")
+    strengths, concerns = [], []
+    if value_score >= 85: strengths.append("strong ADP value")
+    if quality_score >= 84: strengths.append("high player quality")
+    if scoring_score >= 84: strengths.append("strong scoring upside for the draft ranges used")
+    if need_score >= 84: strengths.append("drafted well for roster needs")
+    if usage_score >= 84: strengths.append("players with strong NFL roles and usage")
+    if balance_score >= 85: strengths.append("balanced final roster construction")
+    if counts.get("RB", 0) < 3: concerns.append("running-back depth")
+    if counts.get("WR", 0) < 4: concerns.append("wide-receiver depth")
+    if counts.get("QB", 0) == 0: concerns.append("quarterback still open")
+    if counts.get("TE", 0) == 0: concerns.append("tight end still open")
+    if scoring_score < 65: concerns.append("limited scoring upside versus players available in the same ranges")
+    if usage_score < 65: concerns.append("too many low-usage or reserve-role players")
+    if need_score < 65: concerns.append("too many picks that did not address roster needs")
+    if reach_count: concerns.append(f"{reach_count} pick{'s' if reach_count != 1 else ''} taken materially ahead of ADP")
+    if severe_reach_count: concerns.append(f"{severe_reach_count} severe reach{'es' if severe_reach_count != 1 else ''}")
 
-    summary = f"Overall draft grade: {overall}/100."
-    if strengths:
-        summary += " Strengths: " + ", ".join(strengths) + "."
-    if concerns:
-        summary += " Watch: " + ", ".join(concerns) + "."
+    summary = f"Overall draft grade: {overall}/100. Every round is graded on the same scale."
+    if strengths: summary += " Strengths: " + ", ".join(strengths) + "."
+    if concerns: summary += " Watch: " + ", ".join(concerns) + "."
 
     return {
-        "grade_version": "balanced-v6",
-        "overall": overall,
-        "projection_score": projection_score,
-        "stats_score": stats_score,
-        "value_score": value_score,
-        "balance_score": balance_score,
-        "need_score": need_score,
-        "depth_score": depth_score,
-        "pick_quality_score": pick_quality_score,
-        "worst_pick_score": worst_pick_score,
-        "reach_count": reach_count,
-        "severe_reach_count": severe_reach_count,
-        "pick_reports": reports,
-        "projected_points": projected_points,
-        "previous_year_points": previous_points,
+        "grade_version": "role-adjusted-v7", "overall": overall,
+        "projection_score": projection_score, "scoring_score": scoring_score,
+        "quality_score": quality_score, "usage_score": usage_score,
+        "stats_score": stats_score, "value_score": value_score,
+        "balance_score": balance_score, "need_score": need_score,
+        "depth_score": depth_score, "pick_quality_score": pick_quality_score,
+        "worst_pick_score": worst_pick_score, "reach_count": reach_count,
+        "severe_reach_count": severe_reach_count, "pick_reports": reports,
+        "projected_points": projected_points, "previous_year_points": previous_points,
         "summary": summary,
     }
 
@@ -3102,7 +3212,7 @@ def _mock_ai_pick(
         "manager": f"Team {slot}",
         "ai_style": style,
         "ai_score": round(ai_score, 2),
-        "formula_version": "smart-draft-v6",
+        "formula_version": "smart-draft-v7",
     }
 
 def _manual_autopick_until_user(mock):
@@ -3217,7 +3327,7 @@ def manual_mock_start():
         "picks": [],
         "player_pool": player_pool,
         "pool_version": "complete-v5",
-        "formula_version": "smart-draft-v6",
+        "formula_version": "smart-draft-v7",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -3266,7 +3376,7 @@ def manual_mock_state(mock_id):
     if not mock:
         return jsonify(ok=False, error="Mock draft not found."), 404
     changed = _manual_ensure_complete_pool(mock)
-    if (mock.get("grade") or {}).get("grade_version") != "balanced-v6":
+    if (mock.get("grade") or {}).get("grade_version") != "role-adjusted-v7":
         mock["grade"] = _manual_grade(mock)
         changed = True
     if changed:
@@ -3344,7 +3454,7 @@ def manual_mock_state(mock_id):
         available_count=len(scored),
         position_counts=position_counts,
         pool_version=mock.get("pool_version") or "complete-v5",
-        formula_version=mock.get("formula_version") or "smart-draft-v6",
+        formula_version=mock.get("formula_version") or "smart-draft-v7",
         server_build=MOCK_DRAFT_BUILD,
         ranking_label=ranking_label,
         ranking_source=ranking_source,
@@ -3432,7 +3542,7 @@ def manual_mock_review(mock_id):
         return page("error.html", code=404, message="Mock draft not found."), 404
 
     changed = _manual_ensure_complete_pool(mock)
-    if (mock.get("grade") or {}).get("grade_version") != "balanced-v6":
+    if (mock.get("grade") or {}).get("grade_version") != "role-adjusted-v7":
         mock["grade"] = _manual_grade(mock)
         changed = True
     if changed:
