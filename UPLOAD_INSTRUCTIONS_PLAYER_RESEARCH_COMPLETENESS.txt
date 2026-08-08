@@ -1,0 +1,13 @@
+PLAYER RESEARCH COMPLETENESS UPDATE
+
+1. Download gridiron_iq_offensive_stats.zip.
+2. Extract it on your computer.
+3. Open your existing GitHub repository.
+4. Upload the CONTENTS of the extracted gridiron_iq_offensive_stats folder to
+   the root of the repository. Keep the templates and data folders as folders.
+5. Choose "Commit changes" in GitHub.
+6. Render should redeploy automatically. If it does not, choose Manual Deploy
+   -> Deploy latest commit.
+
+Do not create a second project folder inside the repository.
+No new Render environment variable is required for this update.

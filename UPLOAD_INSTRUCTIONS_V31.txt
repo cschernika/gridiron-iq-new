@@ -1,0 +1,13 @@
+GRIDIRON IQ PLAYER RESEARCH v31
+
+1. Extract this ZIP.
+2. Open your EXISTING Gridiron IQ GitHub repository.
+3. Upload/replace the CONTENTS of the extracted gridiron_iq_player_research_v31
+   folder at the repository root.
+4. Be sure app.py, templates/player_research.html, and the data folder are
+   overwritten. Do not place the extracted folder itself inside the repo.
+5. Commit the changes and let Render redeploy the latest commit.
+6. Open Player Research. The top-right area must show "Player Data v31".
+   If it does not, Render is still running an older commit.
+
+No new environment variable is required.

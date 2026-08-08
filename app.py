@@ -67,6 +67,18 @@ def hide_legacy_connect_league_navigation(response):
                 1,
             )
         response.set_data(markup)
+
+    # Player Research changes frequently and older cached HTML/API payloads can
+    # make a successful deploy look broken. Force the browser/CDN to request
+    # the current build and current merged player data every time.
+    try:
+        if request.path == "/player-research" or request.path.startswith("/api/player-research/") or request.path == "/api/diagnostics/player-research":
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            response.headers["X-Gridiron-Player-Research-Build"] = "v31"
+    except Exception:
+        pass
     return response
 
 USER = {"id": 1, "name": "Chad"}
@@ -2925,14 +2937,16 @@ def _draft_platform_for_context(context):
 
 def _current_master_player(player_name):
     try:
-        return _master_players_2026().get("players", {}).get(_pr_norm(player_name), {})
+        return _pr_identity_lookup(
+            _master_players_2026().get("players", {}), player_name
+        )
     except Exception:
         return {}
 
 def _draft_player_enrichment(player, context, overall_pick):
     platform = _draft_platform_for_context(context)
     adp_data = _platform_2026_adp_data(platform)
-    adp_row = adp_data.get("players", {}).get(_pr_norm(player["name"]), {})
+    adp_row = _pr_identity_lookup(adp_data.get("players", {}), player["name"])
     platform_adp = _fp_float(adp_row.get("adp")) if "_fp_float" in globals() else None
     if platform_adp is None or platform_adp >= 999:
         platform_adp = float(player.get("adp", 999))
@@ -3256,7 +3270,7 @@ def _player_news_index():
 
 def _indexed_player_news(player_name):
     payload = _player_news_index()
-    row = payload.get("players", {}).get(_pr_norm(player_name), {})
+    row = _pr_identity_lookup(payload.get("players", {}), player_name)
     news = row.get("news", []) if isinstance(row, dict) else []
     return [item for item in news if isinstance(item, dict)]
 
@@ -3267,6 +3281,146 @@ def _has_active_injury(value):
 
 def _pr_norm(value):
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _pr_identity_key(value):
+    """Match common NFL suffix variants without changing the displayed name."""
+    key = _pr_norm(value)
+    for suffix in ("iii", "ii", "iv", "jr", "sr", "v"):
+        if key.endswith(suffix) and len(key) > len(suffix) + 4:
+            return key[:-len(suffix)]
+    return key
+
+
+_PR_DEFENSE_TEAM_ALIASES = {
+    "ARI": ("arizona cardinals", "cardinals"),
+    "ATL": ("atlanta falcons", "falcons"),
+    "BAL": ("baltimore ravens", "ravens"),
+    "BUF": ("buffalo bills", "bills"),
+    "CAR": ("carolina panthers", "panthers"),
+    "CHI": ("chicago bears", "bears"),
+    "CIN": ("cincinnati bengals", "bengals"),
+    "CLE": ("cleveland browns", "browns"),
+    "DAL": ("dallas cowboys", "cowboys"),
+    "DEN": ("denver broncos", "broncos"),
+    "DET": ("detroit lions", "lions"),
+    "GB": ("green bay packers", "packers"),
+    "HOU": ("houston texans", "texans"),
+    "IND": ("indianapolis colts", "colts"),
+    "JAC": ("jacksonville jaguars", "jaguars"),
+    "KC": ("kansas city chiefs", "chiefs"),
+    "LV": ("las vegas raiders", "raiders"),
+    "LAC": ("los angeles chargers", "chargers"),
+    "LAR": ("los angeles rams", "rams"),
+    "MIA": ("miami dolphins", "dolphins"),
+    "MIN": ("minnesota vikings", "vikings"),
+    "NE": ("new england patriots", "patriots"),
+    "NO": ("new orleans saints", "saints"),
+    "NYG": ("new york giants", "giants"),
+    "NYJ": ("new york jets", "jets"),
+    "PHI": ("philadelphia eagles", "eagles"),
+    "PIT": ("pittsburgh steelers", "steelers"),
+    "SEA": ("seattle seahawks", "seahawks"),
+    "SF": ("san francisco 49ers", "49ers", "niners"),
+    "TB": ("tampa bay buccaneers", "buccaneers", "bucs"),
+    "TEN": ("tennessee titans", "titans"),
+    "WAS": ("washington commanders", "commanders"),
+}
+
+
+def _pr_defense_team_code(name="", row=None):
+    """Resolve both ``Broncos D/ST`` and ``Denver Broncos`` to DEN."""
+    row = row if isinstance(row, dict) else {}
+    team = str(row.get("team") or row.get("recent_team") or "").strip().upper()
+    team = {
+        "JAX": "JAC", "WSH": "WAS", "LA": "LAR", "STL": "LAR",
+        "OAK": "LV", "SD": "LAC", "SDG": "LAC",
+    }.get(team, team)
+    if team in _PR_DEFENSE_TEAM_ALIASES:
+        return team
+
+    normalized = _pr_norm(
+        re.sub(r"\b(?:d\s*/?\s*st|dst|defense)\b", "", str(name or ""), flags=re.I)
+    )
+    for code, aliases in _PR_DEFENSE_TEAM_ALIASES.items():
+        if normalized in {_pr_norm(alias) for alias in aliases}:
+            return code
+    return ""
+
+
+def _pr_source_identity_key(name, row=None):
+    """Use a team identity for D/ST and a suffix-safe identity for players."""
+    row = row if isinstance(row, dict) else {}
+    position = str(
+        row.get("position") or row.get("position_group")
+        or ((row.get("fantasy_positions") or [""])[0])
+        or ""
+    ).upper()
+    if position in {"DEF", "DST", "D/ST"}:
+        team = _pr_defense_team_code(name, row)
+        if team:
+            return f"def{team.lower()}"
+    return _pr_identity_key(name)
+
+
+def _pr_record_quality(row):
+    """Prefer current rostered records when two sources use the same name."""
+    if not isinstance(row, dict):
+        return -1
+    team = _rostered_team_code(row.get("team") or row.get("recent_team"))
+    try:
+        depth = int(float(row.get("depth_chart_order") or 0))
+    except (TypeError, ValueError):
+        depth = 0
+    try:
+        games = float(row.get("games") or 0)
+    except (TypeError, ValueError):
+        games = 0
+    try:
+        adp = float(row.get("adp") or 999)
+    except (TypeError, ValueError):
+        adp = 999
+    return (
+        (100 if team else 0)
+        + (20 if depth > 0 else 0)
+        + (10 if row.get("active") is True else 0)
+        + (5 if games > 0 else 0)
+        + (2 if 0 < adp < 999 else 0)
+    )
+
+
+def _pr_identity_index(rows):
+    """Index a player mapping with Jr./II/III/IV/Sr. aliases consolidated."""
+    indexed = {}
+    for source_key, row in (rows or {}).items():
+        if not isinstance(row, dict):
+            continue
+        name = str(
+            row.get("name") or row.get("full_name")
+            or row.get("player_name") or row.get("player_display_name")
+            or source_key
+        ).strip()
+        identity = _pr_source_identity_key(name, row)
+        if not identity:
+            continue
+        existing = indexed.get(identity)
+        if existing is None or _pr_record_quality(row) > _pr_record_quality(existing):
+            indexed[identity] = row
+    return indexed
+
+
+def _pr_identity_lookup(rows, player_name):
+    if not isinstance(rows, dict):
+        return {}
+    exact = rows.get(_pr_norm(player_name))
+    if isinstance(exact, dict):
+        return exact
+    return _pr_identity_index(rows).get(_pr_identity_key(player_name), {}) or {}
+
+
+def _pr_preferred_name(*values):
+    names = [str(value or "").strip() for value in values if str(value or "").strip()]
+    return max(names, key=lambda value: (len(_pr_norm(value)), len(value))) if names else ""
 
 def _pr_num(value):
     try:
@@ -3475,8 +3629,8 @@ def _pr_row_name(row):
     return ""
 
 def _pr_aggregate(rows, player_name):
-    target = _pr_norm(player_name)
-    matches = [r for r in rows if _pr_norm(_pr_row_name(r)) == target]
+    target = _pr_identity_key(player_name)
+    matches = [r for r in rows if _pr_identity_key(_pr_row_name(r)) == target]
     if not matches:
         matches = [r for r in rows if target and (target in _pr_norm(_pr_row_name(r)) or _pr_norm(_pr_row_name(r)) in target)]
     if not matches:
@@ -3666,22 +3820,36 @@ def _build_career_history_season(season, force=False):
     return payload, len(season_players)
 
 
-def _pr_history(player_name, career_snapshot=None):
-    norm = _pr_norm(player_name)
+def _pr_history(player_name, career_snapshot=None, current_player=None):
     payload = (
         career_snapshot
         if isinstance(career_snapshot, dict)
         else _career_stats_snapshot()
     )
-    season_map = payload.get("players", {}).get(norm, {})
+    season_map = _pr_identity_lookup(payload.get("players", {}), player_name)
     history = []
+
+    current_player = current_player if isinstance(current_player, dict) else {}
+    current_stats = _player_research_stats_2025(player_name)
+    current_player_id = str(current_stats.get("player_id") or "").strip()
+    try:
+        years_exp = int(float(current_player.get("years_exp")))
+    except (TypeError, ValueError):
+        years_exp = None
+    earliest_current_season = 2026 - years_exp if years_exp is not None else None
 
     if isinstance(season_map, dict):
         for season_key, record in season_map.items():
             if not isinstance(record, dict):
                 continue
+            season = int(record.get("season") or season_key)
+            record_player_id = str(record.get("player_id") or "").strip()
+            if current_player_id and record_player_id and record_player_id != current_player_id:
+                continue
+            if earliest_current_season is not None and season < earliest_current_season:
+                continue
             clean = {k: v for k, v in record.items() if k not in {"name", "player_id"}}
-            clean["season"] = int(record.get("season") or season_key)
+            clean["season"] = season
             history.append(clean)
 
     stats_2025 = _stats_2025_for_name(player_name)
@@ -3916,7 +4084,7 @@ def _stats_2025_for_name(player_name):
     triggered Gunicorn WORKER TIMEOUT on Render.
     """
     snapshot = _stats_2025_snapshot()
-    return snapshot.get("players", {}).get(_pr_norm(player_name))
+    return _pr_identity_lookup(snapshot.get("players", {}), player_name)
 
 @app.post("/api/data/build-2025-stats")
 def build_2025_stats_api():
@@ -4303,7 +4471,13 @@ def _reconcile_current_player_directory(primary, fallback=None):
                 or ""
             ).strip()
             if name:
-                indexed[_pr_norm(name)] = (str(player_id), row)
+                key = _pr_norm(name)
+                existing = indexed.get(key)
+                if (
+                    existing is None
+                    or _pr_record_quality(row) > _pr_record_quality(existing[1])
+                ):
+                    indexed[key] = (str(player_id), row)
         return indexed
 
     primary_rows = by_name(primary)
@@ -4518,8 +4692,9 @@ def refresh_2026_players():
 
 @app.get("/api/data/2026-players/team-check/<path:player_name>")
 def team_check_2026_player(player_name):
-    norm = _pr_norm(player_name)
-    master = _master_players_2026().get("players", {}).get(norm, {})
+    master = _pr_identity_lookup(
+        _master_players_2026().get("players", {}), player_name
+    )
     return jsonify(
         ok=bool(master),
         player=player_name,
@@ -4568,9 +4743,14 @@ def list_2026_players():
 # 2026 current team + platform ADP + 2025 stats + 2026 projections
 # ============================================================
 
+PLAYER_RESEARCH_BUILD = "v31"
+
+
 def _player_research_master_row(player_name):
     try:
-        return _master_players_2026().get("players", {}).get(_pr_norm(player_name), {})
+        return _pr_identity_lookup(
+            _master_players_2026().get("players", {}), player_name
+        )
     except Exception:
         return {}
 
@@ -4581,11 +4761,11 @@ def _fp_adp_for_player(player_name, position, scoring="PPR"):
     try:
         payload = _fp_adp_position_data(position, scoring)
         rows = _extract_fp_list(payload, ("players", "rankings", "results", "data"))
-        target = _pr_norm(player_name)
+        target = _pr_identity_key(player_name)
 
         for row in rows:
             name = str(row.get("player_name") or row.get("name") or "").strip()
-            if _pr_norm(name) != target:
+            if _pr_identity_key(name) != target:
                 continue
 
             value = row.get("rank_adp")
@@ -4618,11 +4798,9 @@ def _player_research_adp(player_name, platform="ESPN", position=None):
       3. FantasyPros current ADP by position
     """
     platform = str(platform or "ESPN").upper()
-    norm = _pr_norm(player_name)
-
     try:
         pdata = _platform_2026_adp_data(platform)
-        row = pdata.get("players", {}).get(norm, {})
+        row = _pr_identity_lookup(pdata.get("players", {}), player_name)
         value = row.get("adp")
         if value not in (None, "", 999, 999.0):
             return {
@@ -4671,7 +4849,78 @@ def _player_research_stats_2025(player_name, snapshot=None):
     """
     snapshot = snapshot if isinstance(snapshot, dict) else _stats_2025_snapshot()
     players = snapshot.get("players", {}) if isinstance(snapshot, dict) else {}
-    return players.get(_pr_norm(player_name), {}) or {}
+    return _pr_identity_lookup(players, player_name)
+
+
+def _player_research_repair_actual_stats(row, stats_snapshot=None, stats_index=None):
+    """Self-heal the list/profile row from the saved 2025 statistics database.
+
+    Player Research merges current rosters, ADP, depth charts and historical
+    stats.  If any upstream identity merge drops the historical fields, this
+    final pass restores the authoritative 2025 totals by canonical player
+    identity before the row is sent to the browser.
+    """
+    if not isinstance(row, dict):
+        return row
+
+    stats_snapshot = stats_snapshot if isinstance(stats_snapshot, dict) else _stats_2025_snapshot()
+    raw_players = stats_snapshot.get("players", {}) if isinstance(stats_snapshot, dict) else {}
+    if not isinstance(raw_players, dict) or not raw_players:
+        return row
+
+    if stats_index is None:
+        stats_index = _pr_identity_index(raw_players)
+
+    name = str(row.get("name") or "").strip()
+    player_key = str(row.get("player_key") or "").strip()
+    actual = {}
+
+    # Fast/direct keys first, then the suffix-safe identity index.
+    for key in (player_key, _pr_norm(name), _pr_identity_key(name)):
+        candidate = raw_players.get(key)
+        if isinstance(candidate, dict):
+            actual = candidate
+            break
+    if not actual:
+        actual = stats_index.get(_pr_identity_key(name), {}) or {}
+    if not isinstance(actual, dict) or not actual:
+        return row
+
+    try:
+        games = float(actual.get("games") or 0)
+    except (TypeError, ValueError):
+        games = 0
+
+    # A saved player-season record with a played game is an actual season even
+    # when fantasy points are legitimately zero (special teams/deep reserves).
+    if games <= 0:
+        return row
+
+    repaired = dict(row)
+    repaired["has_2025_stats"] = True
+    repaired["has_nfl_stats"] = True
+    repaired["stats_season"] = 2025
+    repaired["_latest_stats"] = dict(actual)
+
+    actual_fields = (
+        "games", "fantasy_points", "fantasy_points_ppr",
+        "completions", "attempts", "passing_yards", "passing_tds",
+        "interceptions", "sacks_suffered", "passing_first_downs",
+        "passing_epa", "passing_cpoe", "carries", "rushing_yards",
+        "rushing_tds", "rushing_first_downs", "rushing_epa",
+        "targets", "receptions", "receiving_yards", "receiving_tds",
+        "target_share", "receiving_air_yards", "air_yards_share",
+        "wopr", "receiving_yards_after_catch", "red_zone_targets",
+        "end_zone_targets", "red_zone_carries", "goal_line_carries",
+        "yards_after_contact", "drops", "drop_rate",
+        "fg_made", "fg_att", "fg_pct", "fg_long", "fg_made_40_49",
+        "fg_made_50_59", "fg_made_60_", "pat_made", "pat_att", "pat_pct",
+    )
+    for field in actual_fields:
+        if field in actual:
+            repaired[field] = actual.get(field)
+
+    return repaired
 
 
 def _player_research_projection_2026(player_name, position):
@@ -4713,7 +4962,7 @@ def _player_research_projection_2026(player_name, position):
     if live:
         return live
 
-    history = _pr_history(player_name)
+    history = _pr_history(player_name, current_player=master)
     return _pr_projection(history, position)
 
 
@@ -4767,10 +5016,10 @@ def _extract_fp_list(payload, keys):
     return []
 
 def _player_news_matches(row, player_name, player_id=None):
-    target = _pr_norm(player_name)
+    target = _pr_identity_key(player_name)
     for key in ("player_name","name","player","title","headline"):
         text = str(row.get(key) or "")
-        if target and target in _pr_norm(text):
+        if target and target in _pr_identity_key(text):
             return True
 
     if player_id:
@@ -4855,7 +5104,7 @@ def _player_research_news(player_name):
     except Exception:
         pass
 
-    target = _pr_norm(player_name)
+    target = _pr_identity_key(player_name)
     news = []
     seen = set()
     warnings = []
@@ -4893,7 +5142,7 @@ def _player_research_news(player_name):
         payload = response.json()
         for article in payload.get("articles", []) or []:
             combined = " ".join([str(article.get("headline") or ""), str(article.get("description") or "")])
-            if target and target not in _pr_norm(combined):
+            if target and target not in _pr_identity_key(combined):
                 continue
             web_link = ((article.get("links") or {}).get("web") or {})
             add_news({
@@ -5002,7 +5251,7 @@ def player_research_news_api(player_name):
 def _player_research_data_status(platform="ESPN"):
     platform = str(platform or "ESPN").upper()
     master = _master_players_2026()
-    stats = _stats_2025_snapshot()
+    stats = stats_snapshot
     adp = _platform_2026_adp_data(platform)
     daily = _player_daily_refresh_status()
     news_index = _player_news_index()
@@ -5116,6 +5365,16 @@ def player_research_table_api():
 
     all_rows = _pr_position_rows("", limit=5000, platform=platform)
 
+    # Final authoritative actual-stat join.  This deliberately runs after the
+    # current-roster/ADP merge so a missing field can never blank a veteran's
+    # 2025 games or PPR totals in the table.
+    stats_snapshot = _stats_2025_snapshot()
+    stats_index = _pr_identity_index(stats_snapshot.get("players", {}) or {})
+    all_rows = [
+        _player_research_repair_actual_stats(row, stats_snapshot, stats_index)
+        for row in all_rows
+    ]
+
     position_counts = dict(Counter(
         row.get("position")
         for row in all_rows
@@ -5147,6 +5406,7 @@ def player_research_table_api():
         "points_2025": "fantasy_points_ppr",
         "projection_2026": "proj_2026_ppr",
         "games": "games",
+        "stats_season": "stats_season",
     }
     field = sort_fields.get(sort_by, "adp")
     reverse = direction == "desc"
@@ -5167,7 +5427,28 @@ def player_research_table_api():
     total_pages = max(1, (total_count + page_size - 1) // page_size)
     page = min(page, total_pages)
     start_index = (page - 1) * page_size
-    page_rows = rows[start_index:start_index + page_size]
+    # The list view does not need the complete projection, biography and
+    # profile payload for all 1,300+ players. Sending only the fields rendered
+    # by the table keeps the first load and every position/search interaction
+    # fast; the full profile is fetched only after a player is clicked.
+    table_fields = {
+        "player_key", "name", "team", "position", "status",
+        "data_availability_note", "adp", "position_adp",
+        "stats_season", "has_2025_stats", "has_nfl_stats", "games", "fantasy_points_ppr",
+        "proj_2026_ppr", "depth_chart_position", "depth_chart_order",
+        "depth_chart_source", "depth_display_order", "depth_display_source",
+        "depth_is_projected", "depth_sort", "sos_score", "sos_rank",
+        "sos_label", "sos_summary", "sos_playoff_rank",
+        "sos_playoff_label", "sos_bye_week", "has_injury",
+        "injury_status", "injury_body_part", "practice_participation",
+        "has_news", "news_count", "latest_news_title",
+        "latest_news_summary", "latest_news_published",
+        "latest_news_source", "latest_news_url",
+    }
+    page_rows = [
+        {key: row.get(key) for key in table_fields}
+        for row in rows[start_index:start_index + page_size]
+    ]
 
     stats = _stats_2025_snapshot()
     adp = _platform_2026_adp_data(platform)
@@ -5177,6 +5458,7 @@ def player_research_table_api():
 
     return jsonify(
         ok=True,
+        build_id=PLAYER_RESEARCH_BUILD,
         platform=platform,
         selected_position=position or "ALL",
         count=total_count,
@@ -5209,8 +5491,19 @@ def diagnostics_player_research():
     stats = _stats_2025_snapshot()
     adp = _platform_2026_adp_data(platform)
     daily = _player_daily_refresh_status()
+    sample_names = ("Jordan Mason", "Aaron Jones", "Saquon Barkley", "Tank Bigsby", "James Cook")
+    samples = {}
+    for sample_name in sample_names:
+        sample = _player_research_stats_2025(sample_name, stats) or {}
+        samples[sample_name] = {
+            "games": sample.get("games"),
+            "ppr": sample.get("fantasy_points_ppr"),
+            "team_2025": sample.get("team"),
+        }
+
     return jsonify(
         ok=bool(directory),
+        build_id=PLAYER_RESEARCH_BUILD,
         fast_mode=True,
         player_directory_count=len(directory),
         stats_2025_count=len(stats.get("players", {})),
@@ -7598,13 +7891,48 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
     position = str(position or "").upper()
     platform = str(platform or "ESPN").upper()
 
-    stats_players = _stats_2025_snapshot().get("players", {}) or {}
+    stats_players = _pr_identity_index(
+        _stats_2025_snapshot().get("players", {}) or {}
+    )
+
+    # Team defenses live in the defensive data snapshot instead of the
+    # offensive-player file. Add their real team totals to the same index so
+    # the DEF tab is not a second set of blank placeholder rows.
+    defensive_payload = _defensive_stats_snapshot()
+    for defense_team, defense in (defensive_payload.get("teams", {}) or {}).items():
+        if not isinstance(defense, dict):
+            continue
+        team_code = _normalize_team_code(defense.get("team") or defense_team)
+        if team_code not in _PR_DEFENSE_TEAM_ALIASES:
+            continue
+        stats_players[f"def{team_code.lower()}"] = {
+            "name": _PR_DEFENSE_TEAM_ALIASES[team_code][0].title(),
+            "team": team_code,
+            "position": "DEF",
+            "games": 17,
+            "sacks": defense.get("sacks"),
+            "interceptions": defense.get("interceptions"),
+            "qb_hits": defense.get("qb_hits"),
+            "pass_yards_allowed": defense.get("pass_yards"),
+            "pass_tds_allowed": defense.get("pass_tds"),
+            "rush_yards_allowed": defense.get("rush_yards"),
+            "rush_tds_allowed": defense.get("rush_tds"),
+            "secondary_grade": defense.get("secondary_grade"),
+            "pass_rush_grade": defense.get("pass_rush_grade"),
+            "run_defense_grade": defense.get("run_defense_grade"),
+            "overall_grade": defense.get("overall_grade"),
+            "overall_rank": defense.get("overall_rank"),
+            "season": defensive_payload.get("season") or 2025,
+        }
+
+    career_payload = _career_stats_snapshot()
+    career_players = _pr_identity_index(career_payload.get("players", {}) or {})
     adp_payload = _platform_2026_adp_data(platform)
-    adp_players = adp_payload.get("players", {}) or {}
+    adp_players = _pr_identity_index(adp_payload.get("players", {}) or {})
     adp_source = adp_payload.get("source") or platform
 
     master_payload = _master_players_2026()
-    master_players = (
+    master_players = _pr_identity_index(
         master_payload.get("players", {})
         if isinstance(master_payload, dict)
         else {}
@@ -7612,7 +7940,9 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
 
     directory = _pr_players()
     news_index = _player_news_index()
-    news_players = news_index.get("players", {}) if isinstance(news_index, dict) else {}
+    news_players = _pr_identity_index(
+        news_index.get("players", {}) if isinstance(news_index, dict) else {}
+    )
     pool = {}
 
     def valid_position(value):
@@ -7641,10 +7971,70 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
         return (
             positive_number(row.get("games"))
             or positive_number(row.get("fantasy_points_ppr"))
+            or positive_number(row.get("fantasy_points"))
             or positive_number(row.get("passing_yards"))
             or positive_number(row.get("rushing_yards"))
             or positive_number(row.get("receiving_yards"))
+            or positive_number(row.get("sacks"))
         )
+
+    def complete_stats(row, pos):
+        """Fill only values that can be calculated from imported box scores."""
+        completed = dict(row or {})
+        if pos == "K" and not positive_number(
+            completed.get("fantasy_points_ppr") or completed.get("fantasy_points")
+        ):
+            # Common distance scoring: 3 for every FG, +1 for 40–49 and +2
+            # for 50+, plus one per made PAT. No missing attempts are guessed.
+            fg_made = _pr_num(completed.get("fg_made"))
+            fg_40 = _pr_num(completed.get("fg_made_40_49"))
+            fg_50 = (
+                _pr_num(completed.get("fg_made_50_59"))
+                + _pr_num(completed.get("fg_made_60_"))
+            )
+            points = 3 * fg_made + fg_40 + 2 * fg_50 + _pr_num(completed.get("pat_made"))
+            if points > 0:
+                completed["fantasy_points"] = round(points, 1)
+                completed["fantasy_points_ppr"] = round(points, 1)
+        return completed
+
+    def latest_available_stats(norm, player, pos, stats_2025):
+        current = complete_stats(stats_2025, pos)
+        if meaningful_stats(current):
+            current.setdefault("season", 2025)
+            return current, 2025
+
+        season_map = career_players.get(norm, {}) or {}
+        try:
+            years_exp = int(float(player.get("years_exp")))
+        except (TypeError, ValueError):
+            years_exp = None
+        earliest_season = 2026 - years_exp if years_exp is not None else None
+        current_player_id = str(stats_2025.get("player_id") or "").strip()
+        candidates = []
+        if isinstance(season_map, dict):
+            for season_key, record in season_map.items():
+                if not isinstance(record, dict):
+                    continue
+                try:
+                    season = int(record.get("season") or season_key)
+                except (TypeError, ValueError):
+                    continue
+                if season > 2025 or (earliest_season is not None and season < earliest_season):
+                    continue
+                record_position = valid_position(record.get("position"))
+                if record_position and record_position != pos:
+                    continue
+                record_player_id = str(record.get("player_id") or "").strip()
+                if current_player_id and record_player_id and record_player_id != current_player_id:
+                    continue
+                completed = complete_stats(record, pos)
+                if meaningful_stats(completed):
+                    completed["season"] = season
+                    candidates.append((season, completed))
+        if candidates:
+            return max(candidates, key=lambda item: item[0])[1], max(candidates, key=lambda item: item[0])[0]
+        return {}, None
 
     def add_or_update(norm, values, source):
         if not norm or not isinstance(values, dict):
@@ -7681,7 +8071,7 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
         if not name:
             continue
 
-        norm = _pr_norm(name)
+        norm = _pr_source_identity_key(name, current)
         stats = stats_players.get(norm, {}) or {}
         adp_row = adp_players.get(norm, {}) or {}
 
@@ -7710,11 +8100,17 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
             "name": name,
             "position": pos,
             "team": _rostered_team_code(team),
+            "directory_team": _resolve_rostered_team(current.get("team")),
+            "directory_team_confirmed": True,
             "age": current.get("age"),
             "college": current.get("college"),
             "years_exp": current.get("years_exp"),
             "status": current.get("status"),
             "injury_status": current.get("injury_status"),
+            "number": current.get("number"),
+            "depth_chart_position": current.get("depth_chart_position"),
+            "depth_chart_order": current.get("depth_chart_order"),
+            "depth_chart_source": current.get("depth_chart_source"),
             "rookie": bool(current.get("rookie")),
         }, "directory")
 
@@ -7767,20 +8163,24 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
     rows = []
 
     for norm, player in pool.items():
-        stats = stats_players.get(norm, {}) or {}
+        stats_2025 = stats_players.get(norm, {}) or {}
         adp_row = adp_players.get(norm, {}) or {}
         master = master_players.get(norm, {}) or {}
 
         pos = valid_position(
             player.get("position")
             or master.get("position")
-            or stats.get("position")
+            or stats_2025.get("position")
             or adp_row.get("position")
         )
         if not pos:
             continue
         if position and pos != position:
             continue
+
+        stats, stats_season = latest_available_stats(
+            norm, {**master, **player}, pos, stats_2025,
+        )
 
         try:
             adp = float(adp_row.get("adp", 999) or 999)
@@ -7834,19 +8234,44 @@ def _build_pr_position_rows_uncached(position="", limit=1000, platform="ESPN"):
         recent_news = news_row.get("news", []) if isinstance(news_row, dict) else []
         recent_news = [item for item in recent_news if isinstance(item, dict)]
         latest_news = recent_news[0] if recent_news else {}
-        current_team = _resolve_rostered_team(
-            player.get("team"), master.get("team"),
-            adp_row.get("team"), stats.get("team")
-        )
+        if player.get("directory_team_confirmed"):
+            # A current directory assignment is authoritative even when it is
+            # FA; do not resurrect the player's previous team from old stats.
+            current_team = _resolve_rostered_team(player.get("directory_team"))
+        else:
+            current_team = _resolve_rostered_team(
+                player.get("team"), master.get("team"),
+                adp_row.get("team"), stats.get("team")
+            )
         sos = _player_strength_of_schedule(current_team, pos) or {}
 
+        has_2025_stats = stats_season == 2025 and meaningful_stats(stats)
+        has_nfl_stats = meaningful_stats(stats)
         rows.append({
             "player_key": norm,
             "player_id": player.get("player_id") or "",
-            "name": player.get("name") or stats.get("name")
-                or adp_row.get("name") or norm,
+            "name": _pr_preferred_name(
+                player.get("name"), master.get("name"), stats.get("name"),
+                stats.get("player_display_name"), adp_row.get("name"),
+                adp_row.get("player_name"), norm,
+            ),
             "team": current_team,
             "position": pos,
+            "has_2025_stats": has_2025_stats,
+            "has_nfl_stats": has_nfl_stats,
+            "stats_season": stats_season,
+            # Kept only in the server-side cache for the profile modal. The
+            # paged table response strips private fields to stay lightweight.
+            "_latest_stats": stats,
+            "data_availability_note": (
+                "Current free agent: depth chart and strength of schedule will appear after signing."
+                if current_team == "FA"
+                else f"Latest available NFL regular-season statistics: {stats_season}."
+                if has_nfl_stats and stats_season != 2025
+                else "No NFL regular-season history yet; this is a rookie or a player without a recorded NFL appearance."
+                if not has_nfl_stats
+                else ""
+            ),
             "sos_score": sos.get("score"),
             "sos_rank": sos.get("rank"),
             "sos_label": sos.get("label") or "",
@@ -7949,6 +8374,8 @@ def _pr_data_signature(platform):
         BUNDLED_CURRENT_DEFENSIVE_STATS_FILE,
         DEFENSIVE_STATS_FILE,
         BUNDLED_DEFENSIVE_STATS_FILE,
+        CAREER_STATS_FILE,
+        BUNDLED_CAREER_STATS_FILE,
     ]
     signature = []
     for path in paths:
@@ -8210,7 +8637,7 @@ def _pr_profile(player_id):
 
     master = _player_research_master_row(name)
     stats_2025 = _player_research_stats_2025(name)
-    history = _pr_history(name)
+    history = _pr_history(name, current_player={**master, **p})
     projection = _player_research_projection_2026(name, master.get("position") or position)
     adp_info = _player_research_adp(name, _league_platform(), master.get("position") or position)
 
@@ -8264,7 +8691,7 @@ def _pr_profile(player_id):
 
 
 def _player_research_profile_by_name(player_name, platform="ESPN"):
-    norm = _pr_norm(player_name)
+    norm = _pr_identity_key(player_name)
     platform = str(platform or "ESPN").upper()
     if platform not in {"ESPN", "YAHOO"}:
         platform = "ESPN"
@@ -8281,8 +8708,9 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
 
     row = next(
         (
-            item for item in _pr_position_rows("", limit=1000, platform=platform)
+            item for item in _pr_position_rows("", limit=5000, platform=platform)
             if item.get("player_key") == norm
+            or _pr_identity_key(item.get("name")) == norm
         ),
         None,
     )
@@ -8290,11 +8718,16 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
         return None
 
     career = _career_stats_snapshot()
-    history = _pr_history(row["name"], career)
+    master = _player_research_master_row(row["name"])
+    history = _pr_history(row["name"], career, current_player={**master, **row})
     recent_news = _indexed_player_news(row["name"])
     news_index = _player_news_index()
-    master = _player_research_master_row(row["name"])
-    previous_year = dict(_player_research_stats_2025(row["name"]) or {})
+    previous_year = dict(row.get("_latest_stats") or {})
+    actual_stats_season = row.get("stats_season")
+    direct_2025 = _player_research_stats_2025(row["name"])
+    if isinstance(direct_2025, dict) and _pr_num(direct_2025.get("games")) > 0:
+        previous_year = dict(direct_2025)
+        actual_stats_season = 2025
     projection = dict(row.get("projection_2026") or {})
     projection.update({
         "season": 2026,
@@ -8328,6 +8761,7 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
         },
         "adp_source": row.get("adp_source") or platform,
         "previous_year": previous_year,
+        "actual_stats_season": actual_stats_season,
         "history": history,
         "projection": projection,
         "strength_of_schedule": strength_of_schedule,
@@ -8348,7 +8782,11 @@ def _player_research_profile_by_name(player_name, platform="ESPN"):
         "data_notes": [
             "Current team, injury and depth chart refresh daily.",
             f"ADP uses the selected {platform} dataset.",
-            "2025 statistics are actual regular-season totals.",
+            (
+                f"The statistics panel shows the latest available actual regular-season totals ({actual_stats_season})."
+                if actual_stats_season
+                else "No NFL regular-season history exists yet for this player; missing values are not estimated."
+            ),
             "2026 statistics are preseason projections until current-season actuals are published.",
             "Career history displays every imported season available for this player.",
             "Strength of schedule ranks the 2026 opponents for this player's position; rank 1 is the easiest schedule.",
