@@ -35,7 +35,7 @@
 .ms-status.show{display:block}.ms-status.busy{color:#264a88;background:#edf4ff;border:1px solid #cfe0ff}.ms-status.error{color:#991b1b;background:#fff1f2;border:1px solid #fecdd3}.ms-status.good{color:#166534;background:#f0fdf4;border:1px solid #bbf7d0}
 .ms-build-check{margin:0 0 14px}.ms-rank-source{display:block;color:var(--m);font-size:8px;margin-top:2px;max-width:125px;line-height:1.25}
 .ms-grade-guide{margin-top:10px;border:1px solid var(--l);border-radius:11px;background:#fff;overflow:hidden}.ms-grade-guide summary{cursor:pointer;padding:10px 12px;font-size:10px;font-weight:900;color:var(--t);background:#f7f8fc;list-style:none}.ms-grade-guide summary::-webkit-details-marker{display:none}.ms-grade-guide summary:after{content:"+";float:right;color:var(--p);font-size:14px}.ms-grade-guide[open] summary:after{content:"−"}.ms-grade-body{padding:12px}.ms-grade-body h4{margin:0 0 4px;font-size:10px}.ms-grade-body p{font-size:9px;line-height:1.45;margin:0 0 10px}.ms-grade-item{padding:9px 0;border-bottom:1px solid #edf0f5}.ms-grade-item:last-child{border-bottom:0}.ms-grade-weight{display:inline-block;margin-left:5px;border-radius:999px;padding:2px 6px;background:#eee9ff;color:#4c35d8;font-size:8px;font-weight:900}.ms-grade-scale{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}.ms-grade-band{padding:7px 8px;border-radius:8px;background:#f7f8fc;font-size:8px;color:var(--m)}.ms-grade-band b{display:block;color:var(--t);font-size:9px;margin-bottom:2px}
-.ms-grade-components{display:grid;gap:7px;margin-top:10px}.ms-grade-component{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 10px;border:1px solid #edf0f5;border-radius:9px;background:#fafbfe}.ms-grade-component b{font-size:9px;color:var(--t)}.ms-grade-component span{font-size:9px;font-weight:900;color:var(--p)}.ms-grade-component small{grid-column:1/-1;color:var(--m);font-size:8px;line-height:1.4}.ms-grade-visible{margin:12px 0}.ms-grade-visible>h2{margin:3px 0 7px;font-size:16px}.ms-grade-visible>p{margin:0 0 10px;font-size:10px;color:var(--m);line-height:1.5}.ms-grade-formula{padding:9px 10px;border-radius:9px;background:#f1efff;color:#4437a8;font-size:9px;font-weight:800;margin:8px 0 2px}
+.ms-grade-components{display:grid;gap:7px;margin-top:10px}.ms-grade-component{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 10px;border:1px solid #edf0f5;border-radius:9px;background:#fafbfe}.ms-grade-component b{font-size:9px;color:var(--t)}.ms-grade-component span{font-size:9px;font-weight:900;color:var(--p)}.ms-grade-component small{grid-column:1/-1;color:var(--m);font-size:8px;line-height:1.4}.ms-grade-visible{margin:12px 0;padding:0;overflow:hidden}.ms-grade-visible summary{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;list-style:none}.ms-grade-visible summary::-webkit-details-marker{display:none}.ms-grade-visible summary:after{content:"Open +";flex:0 0 auto;color:var(--p);font-size:10px;font-weight:900}.ms-grade-visible[open] summary:after{content:"Close −"}.ms-grade-summary-copy h2{margin:3px 0 3px;font-size:16px}.ms-grade-summary-copy p{margin:0;font-size:9px;color:var(--m)}.ms-grade-visible .ms-grade-expanded{border-top:1px solid var(--l);padding:4px 18px 16px}.ms-grade-visible .ms-grade-expanded>p{margin:10px 0;font-size:10px;color:var(--m);line-height:1.5}.ms-grade-formula{padding:9px 10px;border-radius:9px;background:#f1efff;color:#4437a8;font-size:9px;font-weight:800;margin:8px 0 2px}
 
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
 </style>
@@ -57,29 +57,36 @@
 <div class="ms-card"><div class="ms-k">AI OPPONENTS</div><h2>11 Different Draft Personalities</h2><p>Opponent teams use balanced, RB-heavy, WR-heavy, Zero-RB, Hero-RB, early-QB, late-QB and best-player approaches. Market rank remains the strongest input, so strategy changes a team’s preference without causing unrealistic reaches.</p><p>Teams react to position runs and tier cliffs, build legal rosters, avoid early kicker and defense picks, and use only mild randomness so repeated mocks feel different but credible.</p></div>
 </div>
 
-<div class="ms-card ms-grade-visible">
-  <div class="ms-k">DRAFT GRADE EXPLAINED</div>
-  <h2>What your Draft Grade actually means</h2>
-  <p>The score is not just a projection total. It grades whether you selected the right players at the right prices and built a roster that makes sense for your league.</p>
-  <div class="ms-grade-formula">Completed draft weighting: Pick Quality 62% · Roster Construction 22% · 2026 Projection 9% · 2025 Proven Production 7%</div>
-  <div class="ms-grade-body">
-    <div class="ms-grade-item"><h4>Pick Quality — 62%</h4><p>Grades every selection at the exact spot you made it. Earlier picks are weighted more heavily because mistakes with premium picks cost more. It combines ADP/market timing, projection strength and roster fit.</p></div>
-    <div class="ms-grade-item"><h4>Roster Construction — 22%</h4><p>Checks whether your team can fill required starters, has practical RB/WR depth, avoids excessive QB/TE drafting and does not spend premium picks on K or D/ST.</p></div>
-    <div class="ms-grade-item"><h4>2026 Projected Production — 9%</h4><p>Measures upcoming-season fantasy output relative to the player's own position so quarterbacks do not dominate the grade simply because they score more raw points.</p></div>
-    <div class="ms-grade-item"><h4>2025 Proven Production — 7%</h4><p>Uses actual 2025 fantasy production as evidence of an NFL track record. Rookies and players without meaningful 2025 history receive a neutral treatment rather than an automatic penalty.</p></div>
-    <div class="ms-grade-item"><h4>Market Value / ADP</h4><p>This is a major input inside Pick Quality. Drafting someone after his ADP is value. Drafting him well before ADP is a reach. The farther ahead of market you select a player, the larger the penalty.</p></div>
-    <div class="ms-grade-item"><h4>Depth Score</h4><p>A supporting diagnostic showing how much usable RB/WR depth you created. Depth is also reflected inside Roster Construction, so it is not counted again as a separate final-grade percentage.</p></div>
-    <div class="ms-grade-item"><h4>Grade Scale</h4><div class="ms-grade-scale">
-      <div class="ms-grade-band"><b>90–99 · Elite</b>Outstanding value and roster construction with almost no costly mistakes.</div>
-      <div class="ms-grade-band"><b>85–89 · Excellent</b>Clear draft advantage with only minor weaknesses.</div>
-      <div class="ms-grade-band"><b>80–84 · Very Good</b>Strong team with a few picks or roster spots that could be improved.</div>
-      <div class="ms-grade-band"><b>75–79 · Solid</b>Competitive draft with some opportunity cost or depth concerns.</div>
-      <div class="ms-grade-band"><b>70–74 · Average</b>Playable roster, but several picks were inefficient or the roster is imbalanced.</div>
-      <div class="ms-grade-band"><b>65–69 · Below Average</b>Too many reaches, weak construction or insufficient impact production.</div>
-      <div class="ms-grade-band"><b>Below 65 · Poor</b>Major value losses or roster-building mistakes materially reduced draft quality.</div>
-    </div></div>
+<details class="ms-card ms-grade-visible">
+  <summary>
+    <div class="ms-grade-summary-copy">
+      <div class="ms-k">DRAFT GRADE EXPLANATION</div>
+      <h2>ⓘ How is my Draft Grade calculated?</h2>
+      <p>Click to see the grading weights, definitions and grade scale.</p>
+    </div>
+  </summary>
+  <div class="ms-grade-expanded">
+    <p>The score is not just a projection total. It grades whether you selected the right players at the right prices and built a roster that makes sense for your league.</p>
+    <div class="ms-grade-formula">Completed draft weighting: Pick Quality 62% · Roster Construction 22% · 2026 Projection 9% · 2025 Proven Production 7%</div>
+    <div class="ms-grade-body">
+      <div class="ms-grade-item"><h4>Pick Quality — 62%</h4><p>Grades every selection at the exact spot you made it. Earlier picks are weighted more heavily because mistakes with premium picks cost more. It combines ADP/market timing, projection strength and roster fit.</p></div>
+      <div class="ms-grade-item"><h4>Roster Construction — 22%</h4><p>Checks whether your team can fill required starters, has practical RB/WR depth, avoids excessive QB/TE drafting and does not spend premium picks on K or D/ST.</p></div>
+      <div class="ms-grade-item"><h4>2026 Projected Production — 9%</h4><p>Measures upcoming-season fantasy output relative to the player's own position so quarterbacks do not dominate the grade simply because they score more raw points.</p></div>
+      <div class="ms-grade-item"><h4>2025 Proven Production — 7%</h4><p>Uses actual 2025 fantasy production as evidence of an NFL track record. Rookies and players without meaningful 2025 history receive a neutral treatment rather than an automatic penalty.</p></div>
+      <div class="ms-grade-item"><h4>Market Value / ADP</h4><p>This is a major input inside Pick Quality. Drafting someone after his ADP is value. Drafting him well before ADP is a reach. The farther ahead of market you select a player, the larger the penalty.</p></div>
+      <div class="ms-grade-item"><h4>Depth Score</h4><p>A supporting diagnostic showing how much usable RB/WR depth you created. Depth is also reflected inside Roster Construction, so it is not counted again as a separate final-grade percentage.</p></div>
+      <div class="ms-grade-item"><h4>Grade Scale</h4><div class="ms-grade-scale">
+        <div class="ms-grade-band"><b>90–99 · Elite</b>Outstanding value and roster construction with almost no costly mistakes.</div>
+        <div class="ms-grade-band"><b>85–89 · Excellent</b>Clear draft advantage with only minor weaknesses.</div>
+        <div class="ms-grade-band"><b>80–84 · Very Good</b>Strong team with a few picks or roster spots that could be improved.</div>
+        <div class="ms-grade-band"><b>75–79 · Solid</b>Competitive draft with some opportunity cost or depth concerns.</div>
+        <div class="ms-grade-band"><b>70–74 · Average</b>Playable roster, but several picks were inefficient or the roster is imbalanced.</div>
+        <div class="ms-grade-band"><b>65–69 · Below Average</b>Too many reaches, weak construction or insufficient impact production.</div>
+        <div class="ms-grade-band"><b>Below 65 · Poor</b>Major value losses or roster-building mistakes materially reduced draft quality.</div>
+      </div></div>
+    </div>
   </div>
-</div>
+</details>
 
 <div id="live" class="ms-live">
 <div class="ms-card">
@@ -90,9 +97,9 @@
 <div class="ms-card">
 <div class="ms-stat"><span>ON THE CLOCK</span><strong id="pick">—</strong></div>
 <div class="ms-stat"><span>LIVE DRAFT GRADE</span><strong id="grade">—</strong><small id="grade-detail">Your grade measures the quality of your picks at the spots you made them — not just projected points.</small></div>
-<div class="ms-grade-guide" style="margin-top:10px">
+<details class="ms-grade-guide" style="margin-top:10px">
+  <summary>ⓘ Explain my live Draft Grade</summary>
   <div class="ms-grade-body">
-    <h4 style="font-size:11px;margin-bottom:8px">How your live Draft Grade is built</h4>
     <div class="ms-grade-components">
       <div class="ms-grade-component"><b>Pick Quality · biggest factor</b><span id="grade-pick-quality">—</span><small>How strong each selection was at that exact pick. Earlier picks carry more weight, so a major first-round reach hurts more than a late-round miss.</small></div>
       <div class="ms-grade-component"><b>Roster Construction</b><span id="grade-balance">—</span><small>Whether you are filling starters, building RB/WR depth, avoiding unnecessary QB/TE hoarding, and waiting appropriately on K/D/ST.</small></div>
@@ -101,7 +108,7 @@
       <div class="ms-grade-component"><b>Market Value / ADP</b><span id="grade-market">—</span><small>Supporting value signal showing whether your picks beat or trailed market cost. Large reaches are penalized more aggressively.</small></div>
     </div>
   </div>
-</div>
+</details>
 <button id="auto-rest" class="ms-btn ms-full">AI Auto-Draft My Remaining Picks</button>
 <h3>Your Roster</h3><table class="ms-roster"><tbody id="roster"></tbody></table>
 <div id="complete" style="display:none"><a id="review" class="ms-btn primary ms-full" href="#">Review Completed Draft</a></div>
