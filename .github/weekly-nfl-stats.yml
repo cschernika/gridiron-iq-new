@@ -2,8 +2,12 @@ name: Weekly NFL statistics refresh
 
 on:
   schedule:
-    # Tuesday at 10:17 UTC (6:17 AM Eastern during daylight time).
-    - cron: "17 10 * * 2"
+    # Primary refresh after Monday Night Football and the Tuesday data publish.
+    # 19:17 UTC is 3:17 PM Eastern during daylight time (2:17 PM standard).
+    - cron: "17 19 * * 2"
+    # Wednesday safety run catches any delayed stat corrections or source files.
+    # If nothing changed, the workflow exits without creating another commit.
+    - cron: "17 19 * * 3"
   workflow_dispatch:
 
 permissions:
