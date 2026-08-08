@@ -40,7 +40,7 @@
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
 </style>
 <div class="ms">
-<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · STRICT DRAFT GRADING V5 · CLEAR GRADE GUIDE</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
+<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · BALANCED DRAFT GRADING V6 · COLLAPSIBLE GRADE GUIDE</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
 <div id="build-status" class="ms-status ms-build-check show busy" role="status" aria-live="polite">Checking the deployed server and complete player database…</div>
 
 <div id="setup" class="ms-grid">
@@ -54,7 +54,7 @@
 <button id="start" class="ms-btn primary ms-full">Start AI Mock Draft</button>
 <div id="start-status" class="ms-status" role="status" aria-live="polite"></div>
 </div>
-<div class="ms-card"><div class="ms-k">AI OPPONENTS</div><h2>11 Different Draft Personalities</h2><p>Opponent teams use balanced, RB-heavy, WR-heavy, Zero-RB, Hero-RB, early-QB, late-QB and best-player approaches. Market rank remains the strongest input, so strategy changes a team’s preference without causing unrealistic reaches.</p><p>Teams react to position runs and tier cliffs, build legal rosters, avoid early kicker and defense picks, and use only mild randomness so repeated mocks feel different but credible.</p></div>
+<div class="ms-card"><div class="ms-k">AI OPPONENTS</div><h2>11 Different Draft Personalities</h2><p>Opponent teams use balanced, RB-heavy, WR-heavy, Zero-RB, Hero-RB, early-QB, late-QB and best-player approaches. Market rank remains an important input, while projected points and roster needs also shape every recommendation so AI teams do not draft by ADP alone.</p><p>Teams react to position runs and tier cliffs, build legal rosters, avoid early kicker and defense picks, and use only mild randomness so repeated mocks feel different but credible.</p></div>
 </div>
 
 <details class="ms-card ms-grade-visible">
@@ -66,15 +66,16 @@
     </div>
   </summary>
   <div class="ms-grade-expanded">
-    <p>The score is not just a projection total. It grades whether you selected the right players at the right prices and built a roster that makes sense for your league.</p>
-    <div class="ms-grade-formula">Completed draft weighting: Pick Quality 62% · Roster Construction 22% · 2026 Projection 9% · 2025 Proven Production 7%</div>
+    <p>The v6 score balances market value with what actually helps your fantasy team win. ADP still matters, but it can no longer overpower roster need or projected scoring potential.</p>
+    <div class="ms-grade-formula">Overall draft weighting: ADP / Market Value 40% · Projected Point Potential 30% · Roster Need / Fit 20% · Final Roster Construction 10%</div>
     <div class="ms-grade-body">
-      <div class="ms-grade-item"><h4>Pick Quality — 62%</h4><p>Grades every selection at the exact spot you made it. Earlier picks are weighted more heavily because mistakes with premium picks cost more. It combines ADP/market timing, projection strength and roster fit.</p></div>
-      <div class="ms-grade-item"><h4>Roster Construction — 22%</h4><p>Checks whether your team can fill required starters, has practical RB/WR depth, avoids excessive QB/TE drafting and does not spend premium picks on K or D/ST.</p></div>
-      <div class="ms-grade-item"><h4>2026 Projected Production — 9%</h4><p>Measures upcoming-season fantasy output relative to the player's own position so quarterbacks do not dominate the grade simply because they score more raw points.</p></div>
-      <div class="ms-grade-item"><h4>2025 Proven Production — 7%</h4><p>Uses actual 2025 fantasy production as evidence of an NFL track record. Rookies and players without meaningful 2025 history receive a neutral treatment rather than an automatic penalty.</p></div>
-      <div class="ms-grade-item"><h4>Market Value / ADP</h4><p>This is a major input inside Pick Quality. Drafting someone after his ADP is value. Drafting him well before ADP is a reach. The farther ahead of market you select a player, the larger the penalty.</p></div>
-      <div class="ms-grade-item"><h4>Depth Score</h4><p>A supporting diagnostic showing how much usable RB/WR depth you created. Depth is also reflected inside Roster Construction, so it is not counted again as a separate final-grade percentage.</p></div>
+      <div class="ms-grade-item"><h4>ADP / Market Value — 40%</h4><p>Measures whether you paid a fair market price. Picks after ADP earn value; reaches are penalized progressively. ADP is still the largest single factor, but it is no longer most of the grade.</p></div>
+      <div class="ms-grade-item"><h4>Projected Point Potential — 30%</h4><p>Rewards players expected to produce more fantasy points in 2026 relative to others at the same position. This keeps the grade focused on future scoring rather than reputation alone.</p></div>
+      <div class="ms-grade-item"><h4>Roster Need / Fit — 20%</h4><p>Rewards picks that fill missing starters or useful RB/WR depth. Drafting an unneeded extra QB, TE, kicker or defense is penalized, especially when more important roster needs remain.</p></div>
+      <div class="ms-grade-item"><h4>Final Roster Construction — 10%</h4><p>Checks the completed team as a whole: required starters, practical depth, sensible positional counts and proper timing for kicker and D/ST.</p></div>
+      <div class="ms-grade-item"><h4>Individual Pick Score</h4><p>Each pick is scored 45% ADP/value, 30% projected point potential and 25% roster need. That lets a strong high-upside player who fills an important need justify a modest reach.</p></div>
+      <div class="ms-grade-item"><h4>2025 Production</h4><p>Still appears in the draft review as useful context, but it is no longer a direct percentage of the overall grade. The new system emphasizes 2026 potential.</p></div>
+      <div class="ms-grade-item"><h4>Depth Score</h4><p>A supporting diagnostic showing how much usable RB/WR depth you created. It helps explain roster construction but is not counted again as a separate percentage.</p></div>
       <div class="ms-grade-item"><h4>Grade Scale</h4><div class="ms-grade-scale">
         <div class="ms-grade-band"><b>90–99 · Elite</b>Outstanding value and roster construction with almost no costly mistakes.</div>
         <div class="ms-grade-band"><b>85–89 · Excellent</b>Clear draft advantage with only minor weaknesses.</div>
@@ -101,11 +102,12 @@
   <summary>ⓘ Explain my live Draft Grade</summary>
   <div class="ms-grade-body">
     <div class="ms-grade-components">
-      <div class="ms-grade-component"><b>Pick Quality · biggest factor</b><span id="grade-pick-quality">—</span><small>How strong each selection was at that exact pick. Earlier picks carry more weight, so a major first-round reach hurts more than a late-round miss.</small></div>
-      <div class="ms-grade-component"><b>Roster Construction</b><span id="grade-balance">—</span><small>Whether you are filling starters, building RB/WR depth, avoiding unnecessary QB/TE hoarding, and waiting appropriately on K/D/ST.</small></div>
-      <div class="ms-grade-component"><b>2026 Projection</b><span id="grade-projection">—</span><small>Expected 2026 fantasy production compared with players at the same position.</small></div>
-      <div class="ms-grade-component"><b>2025 Proven Production</b><span id="grade-history">—</span><small>Actual 2025 production, position-adjusted. Rookies and players without meaningful 2025 history are treated neutrally.</small></div>
-      <div class="ms-grade-component"><b>Market Value / ADP</b><span id="grade-market">—</span><small>Supporting value signal showing whether your picks beat or trailed market cost. Large reaches are penalized more aggressively.</small></div>
+      <div class="ms-grade-component"><b>ADP / Market Value · 40%</b><span id="grade-market">—</span><small>How efficiently you used each draft slot compared with market cost. Earlier-round decisions carry more weight.</small></div>
+      <div class="ms-grade-component"><b>Projected Point Potential · 30%</b><span id="grade-projection">—</span><small>Expected 2026 fantasy production relative to other players at the same position.</small></div>
+      <div class="ms-grade-component"><b>Roster Need / Fit · 20%</b><span id="grade-need">—</span><small>Whether your selections filled starters and useful depth instead of duplicating positions you already had covered.</small></div>
+      <div class="ms-grade-component"><b>Final Roster Construction · 10%</b><span id="grade-balance">—</span><small>Checks the whole roster for required starters, RB/WR depth, position limits and proper K/D/ST timing.</small></div>
+      <div class="ms-grade-component"><b>Individual Pick Quality</b><span id="grade-pick-quality">—</span><small>Supporting diagnostic. Each pick is 45% ADP/value, 30% projected points and 25% roster need.</small></div>
+      <div class="ms-grade-component"><b>2025 Production · reference only</b><span id="grade-history">—</span><small>Historical production remains visible for context but is not a direct percentage of the v6 overall grade.</small></div>
     </div>
   </div>
 </details>
@@ -136,7 +138,7 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  const expectedBuild="mock-draft-v34-unified";
+  const expectedBuild="mock-draft-v42-balanced-scoring";
   let id = null, available = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="";
 
   async function api(url,opt={}){
@@ -172,7 +174,7 @@
     try{
       const d=await api(`/api/diagnostics/mock-draft?league=${encodeURIComponent($("league").value)}`);
       if(d.build_id!==expectedBuild){
-        throw new Error("Mock Draft frontend/backend versions do not match. Upload the complete v34 replacement package together, redeploy, then refresh this page.");
+        throw new Error("Mock Draft frontend/backend versions do not match. Upload the complete v42 scoring package together, redeploy, then refresh this page.");
       }
       if(!d.player_pool_complete){
         throw new Error(`The deployed player database is incomplete (${formatCounts(d.position_counts)}). The draft has been disabled so it cannot make incorrect picks.`);
@@ -243,13 +245,14 @@
     $("grade-pick-quality").textContent=Number.isFinite(Number(grade.pick_quality_score))?`${grade.pick_quality_score}/100`:"—";
     $("grade-balance").textContent=Number.isFinite(Number(grade.balance_score))?`${grade.balance_score}/100`:"—";
     $("grade-projection").textContent=Number.isFinite(Number(grade.projection_score))?`${grade.projection_score}/100`:"—";
+    $("grade-need").textContent=Number.isFinite(Number(grade.need_score))?`${grade.need_score}/100`:"—";
     $("grade-history").textContent=Number.isFinite(Number(grade.stats_score))?`${grade.stats_score}/100`:"—";
     $("grade-market").textContent=Number.isFinite(Number(grade.value_score))?`${grade.value_score}/100`:"—";
     const worst=(grade.pick_reports||[]).reduce((current,pick)=>
       !current||Number(pick.pick_grade)<Number(current.pick_grade)?pick:current,null);
     $("grade-detail").textContent=worst
-      ? `Selection quality ${grade.pick_quality_score}/100 · Worst pick: ${worst.name} ${worst.pick_grade}/100${grade.severe_reach_count?` · ${grade.severe_reach_count} severe reach${grade.severe_reach_count===1?"":"es"}`:""}`
-      : "Your grade measures the quality of your picks at the spots you made them — not just projected points.";
+      ? `ADP ${grade.value_score}/100 · Potential ${grade.projection_score}/100 · Need ${grade.need_score}/100 · Worst pick: ${worst.name} ${worst.pick_grade}/100${grade.severe_reach_count?` · ${grade.severe_reach_count} severe reach${grade.severe_reach_count===1?"":"es"}`:""}`
+      : "Your grade balances ADP value, projected points, roster need and final roster construction.";
     $("pick").textContent=d.current_pick
       ? `Round ${d.current_pick.round} · Pick #${d.current_pick.overall}`
       : "Draft Complete";
