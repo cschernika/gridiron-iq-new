@@ -53,6 +53,7 @@ jobs:
               assert len(payload.get("teams", {})) >= 28
               assert len(payload.get("offensive_lines", {})) >= 28
               assert len(payload.get("schedule_2026", [])) >= 200
+              assert int(payload.get("data_through_week", 0)) >= 1
               assert all(
                   row.get("run_blocking_grade") is not None
                   for row in payload.get("offensive_lines", {}).values()
