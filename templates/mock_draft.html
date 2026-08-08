@@ -62,28 +62,28 @@
     <div class="ms-grade-summary-copy">
       <div class="ms-k">DRAFT GRADE EXPLANATION</div>
       <h2>ⓘ How is my Draft Grade calculated?</h2>
-      <p>Click to see the grading weights, definitions and grade scale.</p>
+      <p>Click to see the round-neutral grading formula and definitions.</p>
     </div>
   </summary>
   <div class="ms-grade-expanded">
-    <p>The v6 score balances market value with what actually helps your fantasy team win. ADP still matters, but it can no longer overpower roster need or projected scoring potential.</p>
-    <div class="ms-grade-formula">Overall draft weighting: ADP / Market Value 40% · Projected Point Potential 30% · Roster Need / Fit 20% · Final Roster Construction 10%</div>
+    <p>v7 removes the automatic early-round weighting. A late-round pick is judged on the same 0–100 scale as an early pick. Strong late selections can raise your grade when they add quality, scoring upside, roster fit and a meaningful NFL role.</p>
+    <div class="ms-grade-formula">Overall: ADP 20% · Player Quality 20% · Scoring Potential 20% · Roster Need 15% · Usage / NFL Role 15% · Roster Construction 10%</div>
     <div class="ms-grade-body">
-      <div class="ms-grade-item"><h4>ADP / Market Value — 40%</h4><p>Measures whether you paid a fair market price. Picks after ADP earn value; reaches are penalized progressively. ADP is still the largest single factor, but it is no longer most of the grade.</p></div>
-      <div class="ms-grade-item"><h4>Projected Point Potential — 30%</h4><p>Rewards players expected to produce more fantasy points in 2026 relative to others at the same position. This keeps the grade focused on future scoring rather than reputation alone.</p></div>
-      <div class="ms-grade-item"><h4>Roster Need / Fit — 20%</h4><p>Rewards picks that fill missing starters or useful RB/WR depth. Drafting an unneeded extra QB, TE, kicker or defense is penalized, especially when more important roster needs remain.</p></div>
-      <div class="ms-grade-item"><h4>Final Roster Construction — 10%</h4><p>Checks the completed team as a whole: required starters, practical depth, sensible positional counts and proper timing for kicker and D/ST.</p></div>
-      <div class="ms-grade-item"><h4>Individual Pick Score</h4><p>Each pick is scored 45% ADP/value, 30% projected point potential and 25% roster need. That lets a strong high-upside player who fills an important need justify a modest reach.</p></div>
-      <div class="ms-grade-item"><h4>2025 Production</h4><p>Still appears in the draft review as useful context, but it is no longer a direct percentage of the overall grade. The new system emphasizes 2026 potential.</p></div>
-      <div class="ms-grade-item"><h4>Depth Score</h4><p>A supporting diagnostic showing how much usable RB/WR depth you created. It helps explain roster construction but is not counted again as a separate percentage.</p></div>
+      <div class="ms-grade-item"><h4>ADP / Market Value — 20%</h4><p>Rewards value and penalizes meaningful reaches, but ADP no longer dominates the score.</p></div>
+      <div class="ms-grade-item"><h4>Player Quality — 20%</h4><p>Blends scoring upside, current role/usage and proven production. It does not contain a round penalty.</p></div>
+      <div class="ms-grade-item"><h4>Scoring Potential — 20%</h4><p>Compares the player's 2026 projection with same-position players normally available around that draft range. A strong Round 12 option is graded against Round 12 alternatives, not against first-round stars.</p></div>
+      <div class="ms-grade-item"><h4>Roster Need / Fit — 15%</h4><p>Rewards filling open starters and useful depth while lowering unnecessary duplicate-position picks.</p></div>
+      <div class="ms-grade-item"><h4>Usage / NFL Role — 15%</h4><p>Uses current depth-chart role plus available snap, target and workload information. WR1/WR2, RB1/RB2, starting QB and starting TE roles receive more credit than reserve roles.</p></div>
+      <div class="ms-grade-item"><h4>Final Roster Construction — 10%</h4><p>Checks starters, practical RB/WR depth, position limits and sensible K/D/ST timing.</p></div>
+      <div class="ms-grade-item"><h4>Individual Pick Score</h4><p>Each pick is round-neutral: 20% ADP, 25% player quality, 25% scoring potential, 15% roster need and 15% usage/role.</p></div>
       <div class="ms-grade-item"><h4>Grade Scale</h4><div class="ms-grade-scale">
-        <div class="ms-grade-band"><b>90–99 · Elite</b>Outstanding value and roster construction with almost no costly mistakes.</div>
+        <div class="ms-grade-band"><b>90–99 · Elite</b>Outstanding selection quality and roster construction.</div>
         <div class="ms-grade-band"><b>85–89 · Excellent</b>Clear draft advantage with only minor weaknesses.</div>
-        <div class="ms-grade-band"><b>80–84 · Very Good</b>Strong team with a few picks or roster spots that could be improved.</div>
-        <div class="ms-grade-band"><b>75–79 · Solid</b>Competitive draft with some opportunity cost or depth concerns.</div>
-        <div class="ms-grade-band"><b>70–74 · Average</b>Playable roster, but several picks were inefficient or the roster is imbalanced.</div>
-        <div class="ms-grade-band"><b>65–69 · Below Average</b>Too many reaches, weak construction or insufficient impact production.</div>
-        <div class="ms-grade-band"><b>Below 65 · Poor</b>Major value losses or roster-building mistakes materially reduced draft quality.</div>
+        <div class="ms-grade-band"><b>80–84 · Very Good</b>Strong team with a few improvements available.</div>
+        <div class="ms-grade-band"><b>75–79 · Solid</b>Competitive draft with some opportunity cost.</div>
+        <div class="ms-grade-band"><b>70–74 · Average</b>Playable roster with several inefficiencies.</div>
+        <div class="ms-grade-band"><b>65–69 · Below Average</b>Too many weak-value, low-role or poor-fit selections.</div>
+        <div class="ms-grade-band"><b>Below 65 · Poor</b>Major value, quality or roster-building mistakes.</div>
       </div></div>
     </div>
   </div>
@@ -102,12 +102,14 @@
   <summary>ⓘ Explain my live Draft Grade</summary>
   <div class="ms-grade-body">
     <div class="ms-grade-components">
-      <div class="ms-grade-component"><b>ADP / Market Value · 40%</b><span id="grade-market">—</span><small>How efficiently you used each draft slot compared with market cost. Earlier-round decisions carry more weight.</small></div>
-      <div class="ms-grade-component"><b>Projected Point Potential · 30%</b><span id="grade-projection">—</span><small>Expected 2026 fantasy production relative to other players at the same position.</small></div>
-      <div class="ms-grade-component"><b>Roster Need / Fit · 20%</b><span id="grade-need">—</span><small>Whether your selections filled starters and useful depth instead of duplicating positions you already had covered.</small></div>
-      <div class="ms-grade-component"><b>Final Roster Construction · 10%</b><span id="grade-balance">—</span><small>Checks the whole roster for required starters, RB/WR depth, position limits and proper K/D/ST timing.</small></div>
-      <div class="ms-grade-component"><b>Individual Pick Quality</b><span id="grade-pick-quality">—</span><small>Supporting diagnostic. Each pick is 45% ADP/value, 30% projected points and 25% roster need.</small></div>
-      <div class="ms-grade-component"><b>2025 Production · reference only</b><span id="grade-history">—</span><small>Historical production remains visible for context but is not a direct percentage of the v6 overall grade.</small></div>
+      <div class="ms-grade-component"><b>ADP / Market Value · 20%</b><span id="grade-market">—</span><small>Draft-slot efficiency versus market cost. No round multiplier.</small></div>
+      <div class="ms-grade-component"><b>Player Quality · 20%</b><span id="grade-quality">—</span><small>Scoring upside, role/usage and proven production combined.</small></div>
+      <div class="ms-grade-component"><b>Scoring Potential · 20%</b><span id="grade-projection">—</span><small>Projection versus same-position players normally available around that draft range.</small></div>
+      <div class="ms-grade-component"><b>Roster Need / Fit · 15%</b><span id="grade-need">—</span><small>Whether each selection fills a useful starter or depth need.</small></div>
+      <div class="ms-grade-component"><b>Usage / NFL Role · 15%</b><span id="grade-usage">—</span><small>Depth-chart role plus available snap, target and workload signals.</small></div>
+      <div class="ms-grade-component"><b>Final Roster Construction · 10%</b><span id="grade-balance">—</span><small>Starter coverage, useful depth, position limits and K/D/ST timing.</small></div>
+      <div class="ms-grade-component"><b>Individual Pick Quality</b><span id="grade-pick-quality">—</span><small>Every pick uses the same 0–100 scale regardless of round.</small></div>
+      <div class="ms-grade-component"><b>2025 Production · reference</b><span id="grade-history">—</span><small>Historical production is context for quality; rookies/unknown history remain neutral.</small></div>
     </div>
   </div>
 </details>
@@ -138,7 +140,7 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  const expectedBuild="mock-draft-v42-balanced-scoring";
+  const expectedBuild="mock-draft-v44-role-adjusted-scoring";
   let id = null, available = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="";
 
   async function api(url,opt={}){
@@ -248,6 +250,8 @@
     $("grade-need").textContent=Number.isFinite(Number(grade.need_score))?`${grade.need_score}/100`:"—";
     $("grade-history").textContent=Number.isFinite(Number(grade.stats_score))?`${grade.stats_score}/100`:"—";
     $("grade-market").textContent=Number.isFinite(Number(grade.value_score))?`${grade.value_score}/100`:"—";
+    $("grade-quality").textContent=Number.isFinite(Number(grade.quality_score))?`${grade.quality_score}/100`:"—";
+    $("grade-usage").textContent=Number.isFinite(Number(grade.usage_score))?`${grade.usage_score}/100`:"—";
     const worst=(grade.pick_reports||[]).reduce((current,pick)=>
       !current||Number(pick.pick_grade)<Number(current.pick_grade)?pick:current,null);
     $("grade-detail").textContent=worst
