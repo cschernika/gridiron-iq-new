@@ -3,22 +3,28 @@
 ## Added
 
 - A sortable **SOS** column in Player Research.
-- A color-coded schedule label: **Easy**, **Average** or **Hard**.
-- SOS rank from 1–32, where **#1 is the easiest fantasy schedule**.
-- A complete 18-week schedule inside every supported player profile.
-- Opponent, home/away site, opponent defensive rank, defensive grade and weekly matchup rating.
-- A separate Weeks 15–17 fantasy-playoff schedule rank.
-- Automatic bye-week detection.
+- Position-adjusted rankings for QB, RB, WR and TE.
+- A colored schedule label: Easy, Favorable, Neutral, Difficult or Very Difficult.
+- The SOS rank uses **#1 as the easiest schedule** among 32 NFL teams.
+- A complete **2026 Strength of Schedule** section in each individual player profile.
+- The player profile includes the overall rank, SOS score, schedule label, easiest three weeks, toughest three weeks and all 17 weekly opponents.
 
-## Position-adjusted formulas
+## How the calculation works
 
-- **QB:** opponent secondary and pass-rush strength.
-- **RB:** opponent run-defense and defensive-front strength.
-- **WR/TE:** opponent secondary, pass rush and PPR points allowed per target to that position.
+- **QB:** opponent secondary, pass rush and passing EPA allowed.
+- **RB:** opponent run defense, defensive front, yards per carry allowed and RB receiving allowance.
+- **WR:** opponent secondary, pass rush and WR PPR points allowed per target.
+- **TE:** opponent secondary, pass rush and TE PPR points allowed per target.
 
-The main table and individual profile currently show SOS for QB, RB, WR and TE. Kicker and team-defense SOS remain blank because those positions require different opponent scoring models; the app does not manufacture unsupported ratings.
+The model uses the 2026 NFL schedule and the latest available defensive baseline. It refreshes automatically when the defensive snapshot is updated.
 
-## Updates
+Kicker and D/ST schedule ratings display as unavailable because they require different opponent-offense and special-teams inputs.
 
-The fixed 2026 schedule is combined with the latest defensive snapshot. When the weekly defensive refresh replaces that snapshot, Player Research automatically recalculates the SOS rankings.
+## Validation
+
+- 32 QB team schedules
+- 32 RB team schedules
+- 32 WR team schedules
+- 32 TE team schedules
+- 17 games per supported team-position schedule
 

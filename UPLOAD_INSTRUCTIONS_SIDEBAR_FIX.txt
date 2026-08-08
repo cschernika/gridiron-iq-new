@@ -1,0 +1,30 @@
+GRIDIRON IQ — SIDEBAR SYNC-ONLY FIX
+====================================
+
+OPTION 1 — SMALLEST UPDATE
+
+1. Open the downloaded gridiron_iq_sidebar_sync_only_fix.zip file.
+2. Upload app.py to the ROOT of your GitHub repository and replace the existing app.py.
+3. Upload templates/dashboard.html to your repository's templates folder and replace the existing dashboard.html.
+4. Commit the changes to the main branch.
+5. In Render, open your Gridiron IQ service and choose Manual Deploy > Deploy latest commit.
+6. After the deployment finishes, hard-refresh the browser:
+   Windows: Ctrl + F5
+   Mac: Command + Shift + R
+
+OPTION 2 — COMPLETE PROJECT
+
+Upload the contents of gridiron_iq_offensive_stats.zip to your repository,
+preserving the included folders, then commit and redeploy.
+
+EXPECTED RESULT
+
+Under CONNECTIONS in the sidebar you should see only:
+  League Sync
+
+You should no longer see either:
+  Connect League
+  Connect a League
+
+Do not put app.py inside the templates folder. Do not upload the outer ZIP file
+directly into the repository; extract it first and upload its contents.

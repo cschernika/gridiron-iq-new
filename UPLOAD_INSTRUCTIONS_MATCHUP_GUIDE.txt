@@ -1,0 +1,25 @@
+GRIDIRON IQ — MATCHUP ANALYZER TERM GUIDE
+==========================================
+
+SMALLEST UPDATE
+
+1. Extract gridiron_iq_matchup_term_guide.zip.
+2. Open the templates folder inside the extracted package.
+3. Upload weekly_matchups.html to the templates folder in your GitHub repository.
+4. Replace the existing templates/weekly_matchups.html file.
+5. Commit the change to the main branch.
+6. In Render, choose Manual Deploy > Deploy latest commit.
+7. When deployment finishes, hard-refresh the browser:
+   Windows: Ctrl + F5
+   Mac: Command + Shift + R
+
+EXPECTED RESULT
+
+- The Matchup Analyzer header contains a Matchup Term Guide button.
+- Every table heading has a clickable information icon.
+- Clicking an information icon opens an explanation of that term.
+- Clicking the heading itself continues to sort the table.
+- The searchable guide explains every RB, WR and TE matchup field.
+
+The /matchup-analyzer address redirects to /weekly-matchups, so
+templates/weekly_matchups.html is the correct file to replace.
