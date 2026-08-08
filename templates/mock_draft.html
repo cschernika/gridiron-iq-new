@@ -91,7 +91,7 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  const expectedBuild="mock-draft-v5-grade-calibration";
+  const expectedBuild="mock-draft-v34-unified";
   let id = null, available = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="";
 
   async function api(url,opt={}){
@@ -116,7 +116,7 @@
     try{
       const d=await api(`/api/diagnostics/mock-draft?league=${encodeURIComponent($("league").value)}`);
       if(d.build_id!==expectedBuild){
-        throw new Error("Render is running an older app.py. Upload every V4 replacement file together, redeploy, then refresh this page.");
+        throw new Error("Mock Draft frontend/backend versions do not match. Upload the complete v34 replacement package together, redeploy, then refresh this page.");
       }
       if(!d.player_pool_complete){
         throw new Error(`The deployed player database is incomplete (${formatCounts(d.position_counts)}). The draft has been disabled so it cannot make incorrect picks.`);
