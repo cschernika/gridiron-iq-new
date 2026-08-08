@@ -1,6 +1,11 @@
-{% extends "base.html" %}
-{% block title %}League Sync | Gridiron IQ{% endblock %}
-{% block body %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#030d17">
+  <title>League Sync | Gridiron IQ</title>
+  <style>html,body{margin:0;min-height:100%;background:#030d17;color:#f7fbff}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Arial,sans-serif}</style>
 
 <style>
 /* v41: League Sync is deliberately self-contained so mixed app.css versions cannot break it. */
@@ -96,13 +101,15 @@
 #sync-page-shell .sync-help h3{margin:0 0 5px}
 #sync-page-shell .sync-help p{margin:0;color:#98abba;line-height:1.5}
 #sync-page-shell .help-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;border:1px solid #246489;color:#28b5ff;font-weight:900}
-@media(max-width:1150px){#sync-page-shell .connector-grid{grid-template-columns:1fr}#sync-page-shell .sync-summary{align-items:flex-start}#sync-page-shell .sync-security{min-width:260px}}
-@media(max-width:820px){#sync-page-shell{display:block}#sync-page-shell .sidebar{position:relative;height:auto;max-height:none;border-right:0;border-bottom:1px solid #183247}#sync-page-shell .sidebar-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}#sync-page-shell .nav-label{grid-column:1/-1;margin-top:9px}#sync-page-shell .sidebar-user{margin-top:8px}#sync-page-shell .main{padding:0 16px 30px}#sync-page-shell .topbar{align-items:flex-start}#sync-page-shell .user-chip{display:none}#sync-page-shell .sync-summary{display:block}#sync-page-shell .sync-security{margin-top:16px;min-width:0}#sync-page-shell .sync-form.two,#sync-page-shell .league-select-row{grid-template-columns:1fr}#sync-page-shell .connector-heading{align-items:flex-start}#sync-page-shell .connector-actions .button,#sync-page-shell .connector-actions .text-button{width:100%}#sync-page-shell .copy-field{grid-template-columns:1fr}#sync-page-shell .copy-field input{border-radius:8px 8px 0 0}#sync-page-shell .copy-button{min-height:38px;border-left:1px solid #244861;border-top:0;border-radius:0 0 8px 8px}}
+@media(max-width:1150px) { #sync-page-shell .connector-grid{grid-template-columns:1fr}#sync-page-shell .sync-summary{align-items:flex-start}#sync-page-shell .sync-security{min-width:260px}}
+@media(max-width:820px) { #sync-page-shell{display:block}#sync-page-shell .sidebar{position:relative;height:auto;max-height:none;border-right:0;border-bottom:1px solid #183247}#sync-page-shell .sidebar-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}#sync-page-shell .nav-label{grid-column:1/-1;margin-top:9px}#sync-page-shell .sidebar-user{margin-top:8px}#sync-page-shell .main{padding:0 16px 30px}#sync-page-shell .topbar{align-items:flex-start}#sync-page-shell .user-chip{display:none}#sync-page-shell .sync-summary{display:block}#sync-page-shell .sync-security{margin-top:16px;min-width:0}#sync-page-shell .sync-form.two,#sync-page-shell .league-select-row{grid-template-columns:1fr}#sync-page-shell .connector-heading{align-items:flex-start}#sync-page-shell .connector-actions .button,#sync-page-shell .connector-actions .text-button{width:100%}#sync-page-shell .copy-field{grid-template-columns:1fr}#sync-page-shell .copy-field input{border-radius:8px 8px 0 0}#sync-page-shell .copy-button{min-height:38px;border-left:1px solid #244861;border-top:0;border-radius:0 0 8px 8px}}
 </style>
 
+
+</head>
+<body>
 <div id="sync-page-shell" class="sync-page-shell">
-  {# v39: League Sync sidebar is embedded so this page never depends on _sidebar.html. #}
-  <aside class="sidebar" id="sidebar">
+    <aside class="sidebar" id="sidebar">
     <div class="sidebar-brand">
       <a href="/app" class="brand-link" aria-label="Gridiron IQ Command Center">
         <span class="brand-mark">GIQ</span>
@@ -198,19 +205,17 @@
           <div class="sync-form">
             <label>SWID
               <input id="espn-swid" type="password" autocomplete="off" placeholder="Paste SWID cookie value">
-              <small>Only needed when saving or replacing the connection.</small>
+              <small>Used only for this ESPN test/sync request; it is not displayed back to you.</small>
             </label>
             <label>espn_s2
               <input id="espn-s2" type="password" autocomplete="off" placeholder="Paste full espn_s2 cookie value">
-              <small>Only needed when saving or replacing the connection.</small>
+              <small>Used only for this ESPN test/sync request; it is not displayed back to you.</small>
             </label>
           </div>
 
           <div class="connector-actions">
-            <button id="save-espn" class="button primary">Save Connection</button>
-            <button id="test-espn" class="button outline">Test Connection</button>
-            <button id="sync-espn" class="button success">Sync League</button>
-            <button id="remove-espn" class="text-button danger-text">Remove</button>
+            <button id="test-espn" type="button" class="button outline">Test ESPN Connection</button>
+            <button id="sync-espn" type="button" class="button success">Sync ESPN League</button>
           </div>
           <div id="espn-message" class="sync-message hidden"></div>
           <div id="espn-result" class="sync-result hidden"></div>
@@ -267,11 +272,11 @@
       <div><span class="help-icon">?</span></div>
       <div>
         <h3>Having trouble connecting?</h3>
-        <p><b>ESPN:</b> save the League ID, season, SWID, and espn_s2 first. Then test before syncing. <b>Yahoo:</b> save the Yahoo app settings, authorize Yahoo, load your leagues, choose one, then sync.</p>
+        <p><b>ESPN:</b> enter the League ID, season, SWID, and espn_s2, test the connection, then sync. <b>Yahoo:</b> save the Yahoo app settings, authorize Yahoo, load your leagues, choose one, then sync.</p>
       </div>
     </section>
 
-    <section class="sync-help panel"><div><span class="help-icon">✓</span></div><div><h3>Connection build</h3><p><b>Gridiron IQ v41 Self-Contained Sync Layout</b> — Yahoo Sync and Mock Draft are packaged together so frontend/backend versions stay matched.</p></div></section>
+    <section class="sync-help panel"><div><span class="help-icon">✓</span></div><div><h3>Connection build</h3><p><b>Gridiron IQ v43 Standalone Sync</b> — Yahoo Sync and Mock Draft are packaged together so frontend/backend versions stay matched.</p></div></section>
   </main>
 </div>
 <script>
@@ -322,4 +327,43 @@
 })();
 
 </script>
-{% endblock %}
+
+<script>
+(function(){
+  const $=id=>document.getElementById(id);
+  const badge=$('espn-badge'), msg=$('espn-message'), result=$('espn-result'), output=$('espn-output');
+  function say(text,error=false){ if(!msg)return; msg.textContent=text; msg.className='sync-message '+(error?'error':'success'); }
+  function mark(text,state){ if(!badge)return; badge.className='connection-badge '+state; badge.innerHTML='<i></i>'+text; }
+  function working(btn,on,label){ if(!btn)return; if(on){btn.dataset.old=btn.textContent;btn.disabled=true;btn.textContent=label||'Working…';}else{btn.disabled=false;btn.textContent=btn.dataset.old||btn.textContent;} }
+  function payload(){ return {league_id:($('espn-league-id')?.value||'').trim(),season:($('espn-season')?.value||'2026').trim(),swid:($('espn-swid')?.value||'').trim(),espn_s2:($('espn-s2')?.value||'').trim()}; }
+  function validate(p){ return p.league_id&&p.season&&p.swid&&p.espn_s2; }
+  async function api(url,options={}){
+    const r=await fetch(url,{credentials:'same-origin',...options,headers:{'Accept':'application/json','Content-Type':'application/json',...(options.headers||{})}});
+    const ct=r.headers.get('content-type')||'';
+    const d=ct.includes('application/json')?await r.json():{error:await r.text()};
+    if(!r.ok) throw new Error([d.error,d.detail].filter(Boolean).join(' ')||('Request failed ('+r.status+')'));
+    return d;
+  }
+  function show(d){
+    if(!result)return;
+    const league=d.league||d;
+    const name=league.league_name||d.league_name||'ESPN League';
+    const teams=league.teams||d.team_count||'—';
+    const scoring=(d.settings&&d.settings.scoring)||d.scoring||'—';
+    result.innerHTML='<div><small>League</small><strong>'+name+'</strong></div><div><small>Teams</small><strong>'+teams+'</strong></div><div><small>Scoring</small><strong>'+scoring+'</strong></div>';
+    result.classList.remove('hidden');
+  }
+  $('test-espn')?.addEventListener('click',async()=>{
+    const b=$('test-espn'),p=payload(); if(!validate(p)){say('Complete League ID, season, SWID, and espn_s2 first.',true);return;}
+    working(b,true,'Testing…'); try{const d=await api('/api/espn/test',{method:'POST',body:JSON.stringify(p)});mark('Connected','connected');say(d.message||'ESPN connection successful.');show(d);}catch(e){mark('Connection failed','offline');say(e.message,true);}finally{working(b,false);}
+  });
+  $('sync-espn')?.addEventListener('click',async()=>{
+    const b=$('sync-espn'),p=payload(); if(!validate(p)){say('Complete League ID, season, SWID, and espn_s2 first.',true);return;}
+    working(b,true,'Syncing…'); try{const d=await api('/api/espn/sync',{method:'POST',body:JSON.stringify(p)});mark('Synced','connected');say(d.message||'ESPN league synced successfully.');show(d);if(output){output.textContent=JSON.stringify({league:d.league,settings:d.settings,user_team:d.user_team,espn_adp:d.espn_adp},null,2);output.classList.remove('hidden');}}catch(e){mark('Sync failed','offline');say(e.message,true);}finally{working(b,false);}
+  });
+  mark('Ready','ready');
+})();
+</script>
+
+</body>
+</html>
