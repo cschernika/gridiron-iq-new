@@ -4,7 +4,7 @@
 {% block body %}
 <style>
 .pr{--ink:#142033;--muted:#68778e;--line:#dfe5ef;--soft:#f6f8fc;--purple:#5d3df5;--red:#dc2626;--red-soft:#fff1f2;--blue:#2563eb;--blue-soft:#eff6ff;color:var(--ink)}
-.pr-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.pr-kicker{font-size:11px;font-weight:900;letter-spacing:.1em;color:var(--purple)}.pr h1{font-size:36px;line-height:1.05;margin:5px 0 8px}.pr-sub{max-width:760px;color:var(--muted);margin:0;line-height:1.5}.pr-refresh{display:flex;align-items:center;gap:7px;border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:999px;padding:8px 11px;font-size:10px;font-weight:900;white-space:nowrap}.pr-refresh.stale{border-color:#fde68a;background:#fffbeb;color:#92400e}.pr-refresh-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.pr-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.pr-kicker{font-size:11px;font-weight:900;letter-spacing:.1em;color:var(--purple)}.pr h1{font-size:36px;line-height:1.05;margin:5px 0 8px}.pr-sub{max-width:760px;color:var(--muted);margin:0;line-height:1.5}.pr-refresh{display:flex;align-items:center;gap:7px;border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:999px;padding:8px 11px;font-size:10px;font-weight:900;white-space:nowrap}.pr-refresh.stale{border-color:#fde68a;background:#fffbeb;color:#92400e}.pr-refresh-dot{width:7px;height:7px;border-radius:50%;background:currentColor}.pr-head-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}.pr-build{display:inline-flex;align-items:center;border:1px solid #ddd6fe;background:#f5f3ff;color:#5138d4;border-radius:999px;padding:8px 10px;font-size:9px;font-weight:900;white-space:nowrap}
 .pr-card{background:#fff;border:1px solid var(--line);border-radius:16px;margin-bottom:14px}.pr-controls{display:grid;grid-template-columns:minmax(220px,1fr) 150px;gap:10px;padding:15px}.pr-field label{display:block;font-size:9px;color:var(--muted);font-weight:900;letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}.pr-field input,.pr-field select{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:9px;padding:10px;background:#fff;color:var(--ink);font-size:12px}.pr-field input:focus,.pr-field select:focus{outline:2px solid #ddd6fe;border-color:var(--purple)}
 .pr-tabs{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px}.pr-tab{border:1px solid var(--line);border-radius:999px;padding:8px 13px;background:#fff;color:#4b5870;font-size:11px;font-weight:900;cursor:pointer}.pr-tab.active{background:var(--purple);border-color:var(--purple);color:#fff}.pr-count{opacity:.72;margin-left:3px}
 .pr-legend{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:10px}.pr-legend-items{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.pr-legend-item{display:inline-flex;gap:5px;align-items:center}.pr-mini-icon{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:7px;font-size:12px;font-weight:900}.pr-mini-icon.injury{color:var(--red);background:var(--red-soft);border:1px solid #fecdd3}.pr-mini-icon.news{color:var(--blue);background:var(--blue-soft);border:1px solid #bfdbfe}
@@ -19,11 +19,14 @@
     <div>
       <div class="pr-kicker">GRIDIRON IQ PLAYER CENTER</div>
       <h1>Player Research</h1>
-      <p class="pr-sub">Current teams, platform ADP, previous-season production and 2026 projections. Injury and news badges appear directly beside each affected player.</p>
+      <p class="pr-sub">Current teams, platform ADP, each player's latest available NFL season and 2026 projections. Injury and news badges appear directly beside each affected player.</p>
     </div>
-    <div id="pr-refresh" class="pr-refresh {% if not daily_refresh_fresh %}stale{% endif %}">
-      <span class="pr-refresh-dot"></span>
-      <span>{% if daily_refresh and daily_refresh.checked_at %}Daily update active{% else %}Waiting for first daily update{% endif %}</span>
+    <div class="pr-head-actions">
+      <span id="pr-build" class="pr-build">Player Data v31</span>
+      <div id="pr-refresh" class="pr-refresh {% if not daily_refresh_fresh %}stale{% endif %}">
+        <span class="pr-refresh-dot"></span>
+        <span>{% if daily_refresh and daily_refresh.checked_at %}Daily update active{% else %}Waiting for first daily update{% endif %}</span>
+      </div>
     </div>
   </div>
 
@@ -60,11 +63,12 @@
           <th data-sort="injury_status">Status <span data-arrow="injury_status"></span></th>
           <th data-sort="adp">ADP <span data-arrow="adp"></span></th>
           <th data-sort="position_adp">Pos ADP <span data-arrow="position_adp"></span></th>
+          <th data-sort="stats_season">Stat Yr <span data-arrow="stats_season"></span></th>
           <th data-sort="games">2025 G <span data-arrow="games"></span></th>
           <th data-sort="fantasy_points_ppr">2025 PPR <span data-arrow="fantasy_points_ppr"></span></th>
           <th data-sort="proj_2026_ppr">2026 Proj <span data-arrow="proj_2026_ppr"></span></th>
         </tr></thead>
-        <tbody id="pr-body"><tr><td class="pr-loading" colspan="11">Loading Player Research…</td></tr></tbody>
+        <tbody id="pr-body"><tr><td class="pr-loading" colspan="12">Loading Player Research…</td></tr></tbody>
       </table>
     </div>
     <div class="pr-foot"><span id="pr-source">Teams, depth charts and injuries refresh daily.</span><span>Click any heading to sort.</span></div>
@@ -96,7 +100,7 @@
   let liveNewsTimer = null;
 
   async function fetchAll(){
-    $("pr-body").innerHTML='<tr><td class="pr-loading" colspan="11">Loading current players, depth charts, injuries, schedule strength and news…</td></tr>';
+    $("pr-body").innerHTML='<tr><td class="pr-loading" colspan="12">Loading current players, depth charts, injuries, schedule strength and news…</td></tr>';
     try{
       const platform=$("pr-platform").value;
       const first=await fetch(`/api/player-research/table?platform=${encodeURIComponent(platform)}&page=1&page_size=250&sort=adp&direction=asc`);
@@ -109,6 +113,7 @@
         pages=pages.concat(await Promise.all(requests));
       }
       rows=pages.flatMap(page=>page.players||[]);
+      if(firstData.build_id) $("pr-build").textContent=`Player Data ${firstData.build_id}`;
       assignDepthCharts();
       rowMap.clear();rows.forEach(row=>rowMap.set(row.player_key,row));
       const counts=firstData.position_counts||{};
@@ -119,7 +124,7 @@
       render();
       const requested=new URLSearchParams(location.search).get("player");if(requested) openPlayerByName(requested,"profile");
     }catch(error){
-      $("pr-body").innerHTML=`<tr><td class="pr-empty" colspan="11">Player Research could not load: ${esc(error.message)}</td></tr>`;
+      $("pr-body").innerHTML=`<tr><td class="pr-empty" colspan="12">Player Research could not load: ${esc(error.message)}</td></tr>`;
     }
   }
 
@@ -194,7 +199,7 @@
     const visible=filtered();
     $("pr-result-count").textContent=`${visible.length.toLocaleString()} players shown`;
     document.querySelectorAll("[data-arrow]").forEach(node=>node.textContent=node.dataset.arrow===sortKey?(sortDirection==="asc"?"▲":"▼"):"");
-    if(!visible.length){$("pr-body").innerHTML='<tr><td class="pr-empty" colspan="11">No players match the selected filters.</td></tr>';return;}
+    if(!visible.length){$("pr-body").innerHTML='<tr><td class="pr-empty" colspan="12">No players match the selected filters.</td></tr>';return;}
     $("pr-body").innerHTML=visible.map(row=>{
       const injuryTitle=[row.injury_status,row.injury_body_part,row.practice_participation].filter(Boolean).join(" · ");
       const newsTitle=row.latest_news_title||`${row.news_count||1} new player update`;
@@ -202,7 +207,10 @@
       const status=row.has_injury?`<span class="pr-injury-text">${esc(row.injury_status)}</span>`:String(row.team||"").toUpperCase()==="FA"?`<span class="pr-na" title="${esc(row.data_availability_note||"Not currently assigned to an NFL team")}">Free Agent</span>`:`<span class="pr-healthy">${esc(row.status||"Active")}</span>`;
       const depth=depthChartLabel(row),depthOrder=Number(row.depth_display_order),depthClass=row.depth_is_projected?"projected":(depthOrder===1?"starter":""),depthTitle=[row.depth_display_source,Number.isFinite(depthOrder)&&depthOrder>0?`Team ${row.position}${Math.round(depthOrder)}`:""].filter(Boolean).join(" · ");
       const availability=row.data_availability_note||"";
-      return `<tr><td><div class="pr-player-line"><button class="pr-player" data-action="profile" data-key="${esc(row.player_key)}">${esc(row.name)}</button>${icons}</div></td><td class="pr-team" title="${esc(availability)}">${esc(row.team||"FA")}</td><td><span class="pr-pos">${esc(row.position)}</span></td><td><span class="pr-depth ${depthClass}" title="${esc(depthTitle||availability||"Depth chart not published")}">${esc(depth)}</span></td><td>${sosPill(row)}</td><td>${status}</td><td>${Number(row.adp)<999?fmt(row.adp):"—"}</td><td>${esc(row.position_adp||"—")}</td><td>${row.has_2025_stats&&number(row.games)?Math.round(Number(row.games)):"—"}</td><td>${row.has_2025_stats?fmt(row.fantasy_points_ppr):"—"}</td><td>${fmt(row.proj_2026_ppr)}</td></tr>`;
+      const fantasyApplicable=row.position!=="DEF";
+      const hasActualSeason=number(row.stats_season)&&Number(row.stats_season)>0;
+      const hasActualGames=hasActualSeason&&number(row.games)&&Number(row.games)>0;
+      return `<tr><td><div class="pr-player-line"><button class="pr-player" data-action="profile" data-key="${esc(row.player_key)}">${esc(row.name)}</button>${icons}</div></td><td class="pr-team" title="${esc(availability)}">${esc(row.team||"FA")}</td><td><span class="pr-pos">${esc(row.position)}</span></td><td><span class="pr-depth ${depthClass}" title="${esc(depthTitle||availability||"Depth chart not published")}">${esc(depth)}</span></td><td>${sosPill(row)}</td><td>${status}</td><td>${Number(row.adp)<999?fmt(row.adp):"—"}</td><td>${esc(row.position_adp||"—")}</td><td>${hasActualSeason?Math.round(Number(row.stats_season)):"—"}</td><td>${hasActualGames?Math.round(Number(row.games)):"—"}</td><td>${hasActualGames&&fantasyApplicable?fmt(row.fantasy_points_ppr):"—"}</td><td>${fantasyApplicable?fmt(row.proj_2026_ppr):"—"}</td></tr>`;
     }).join("");
   }
 
@@ -216,7 +224,8 @@
     completions:["Completions","int"],attempts:["Pass Attempts","int"],completion_rate:["Completion %","pct"],passing_yards:["Passing Yards","int"],passing_tds:["Passing TD","int"],interceptions:["Interceptions","int"],sacks_suffered:["Sacks Taken","int"],passing_first_downs:["Passing 1st Downs","int"],passing_epa:["Passing EPA","two"],passing_cpoe:["CPOE","pct"],
     carries:["Carries","int"],rushing_yards:["Rushing Yards","int"],yards_per_carry:["Yards/Carry","one"],rushing_tds:["Rushing TD","int"],rushing_first_downs:["Rushing 1st Downs","int"],rushing_epa:["Rushing EPA","two"],red_zone_carries:["Red-Zone Carries","int"],goal_line_carries:["Goal-Line Carries","int"],yards_after_contact:["Yards After Contact","int"],
     targets:["Targets","int"],target_share:["Target Share","pct"],receptions:["Receptions","int"],catch_rate:["Catch Rate","pct"],receiving_yards:["Receiving Yards","int"],yards_per_target:["Yards/Target","one"],yards_per_reception:["Yards/Reception","one"],receiving_tds:["Receiving TD","int"],receiving_air_yards:["Air Yards","int"],air_yards_share:["Air-Yards Share","pct"],wopr:["WOPR","two"],receiving_yards_after_catch:["Yards After Catch","int"],red_zone_targets:["Red-Zone Targets","int"],end_zone_targets:["End-Zone Targets","int"],drops:["Drops","int"],drop_rate:["Drop Rate","pct"],
-    fg_made:["Field Goals Made","int"],fg_att:["Field-Goal Attempts","int"],fg_pct:["Field-Goal %","pct"],fg_long:["Longest Field Goal","int"],fg_made_40_49:["FG Made 40–49","int"],fg_made_50_59:["FG Made 50–59","int"],pat_made:["Extra Points Made","int"],pat_att:["Extra-Point Attempts","int"],pat_pct:["Extra-Point %","pct"]
+    fg_made:["Field Goals Made","int"],fg_att:["Field-Goal Attempts","int"],fg_pct:["Field-Goal %","pct"],fg_long:["Longest Field Goal","int"],fg_made_40_49:["FG Made 40–49","int"],fg_made_50_59:["FG Made 50–59","int"],pat_made:["Extra Points Made","int"],pat_att:["Extra-Point Attempts","int"],pat_pct:["Extra-Point %","pct"],
+    sacks:["Sacks","one"],qb_hits:["QB Hits","int"],pass_yards_allowed:["Pass Yards Allowed","int"],pass_tds_allowed:["Pass TD Allowed","int"],rush_yards_allowed:["Rush Yards Allowed","int"],rush_tds_allowed:["Rush TD Allowed","int"],secondary_grade:["Secondary Grade","one"],pass_rush_grade:["Pass-Rush Grade","one"],run_defense_grade:["Run-Defense Grade","one"],overall_grade:["Overall Grade","one"],overall_rank:["Overall Rank","int"]
   };
   const metricsByPosition={
     QB:["games","fantasy_points_ppr","fantasy_points_per_game","completions","attempts","completion_rate","passing_yards","passing_tds","interceptions","sacks_suffered","passing_first_downs","passing_epa","passing_cpoe","carries","rushing_yards","yards_per_carry","rushing_tds"],
@@ -224,7 +233,7 @@
     WR:["games","fantasy_points_ppr","fantasy_points_per_game","targets","target_share","receptions","catch_rate","receiving_yards","yards_per_target","yards_per_reception","receiving_tds","receiving_air_yards","air_yards_share","wopr","receiving_yards_after_catch","red_zone_targets","end_zone_targets","drops","drop_rate","carries","rushing_yards","rushing_tds"],
     TE:["games","fantasy_points_ppr","fantasy_points_per_game","targets","target_share","receptions","catch_rate","receiving_yards","yards_per_target","yards_per_reception","receiving_tds","receiving_air_yards","air_yards_share","wopr","receiving_yards_after_catch","red_zone_targets","end_zone_targets","drops","drop_rate"],
     K:["games","fantasy_points","fantasy_points_per_game","fg_made","fg_att","fg_pct","fg_long","fg_made_40_49","fg_made_50_59","pat_made","pat_att","pat_pct"],
-    DEF:["games","fantasy_points","fantasy_points_per_game"]
+    DEF:["games","sacks","interceptions","qb_hits","pass_yards_allowed","pass_tds_allowed","rush_yards_allowed","rush_tds_allowed","secondary_grade","pass_rush_grade","run_defense_grade","overall_grade","overall_rank"]
   };
   const careerByPosition={
     QB:["passing_yards","passing_tds","interceptions","rushing_yards","rushing_tds"],
@@ -296,15 +305,17 @@
       bio.depth_chart_position=row.position;
       bio.depth_chart_source=row.depth_display_source;
     }
-    const position=bio.position||row.position||"WR",actual=profile.previous_year||{},projection=profile.projection||{},injury=profile.injury||{},news=profile.news||[],sos=profile.strength_of_schedule||null;
-    const summary=`<div class="pr-stat-grid"><div class="pr-stat"><span>ADP</span><strong>${Number(bio.adp)<999?fmt(bio.adp):"—"}</strong></div><div class="pr-stat"><span>2025 PPR</span><strong>${esc(metricDisplay(actual,"fantasy_points_ppr"))}</strong></div><div class="pr-stat"><span>2026 Projection</span><strong>${esc(metricDisplay(projection,"fantasy_points_ppr"))}</strong></div><div class="pr-stat"><span>Strength of Schedule</span><strong>${sos?`#${Math.round(Number(sos.rank))} · ${esc(sos.label)}`:"—"}</strong></div><div class="pr-stat"><span>Career Seasons</span><strong>${(profile.history||[]).length}</strong></div></div>`;
+    const position=bio.position||row.position||"WR",actual=profile.previous_year||{},projection=profile.projection||{},injury=profile.injury||{},news=profile.news||[],sos=profile.strength_of_schedule||null,actualYear=profile.actual_stats_season||row.stats_season||"Latest";
+    const actualHeadline=position==="DEF"?metricDisplay(actual,"overall_grade"):metricDisplay(actual,"fantasy_points_ppr");
+    const actualLabel=position==="DEF"?`${actualYear} Def Grade`:`${actualYear} PPR`;
+    const summary=`<div class="pr-stat-grid"><div class="pr-stat"><span>ADP</span><strong>${Number(bio.adp)<999?fmt(bio.adp):"—"}</strong></div><div class="pr-stat"><span>${esc(actualLabel)}</span><strong>${esc(actualHeadline)}</strong></div><div class="pr-stat"><span>2026 Projection</span><strong>${position==="DEF"?"—":esc(metricDisplay(projection,"fantasy_points_ppr"))}</strong></div><div class="pr-stat"><span>Strength of Schedule</span><strong>${sos?`#${Math.round(Number(sos.rank))} · ${esc(sos.label)}`:"—"}</strong></div><div class="pr-stat"><span>Career Seasons</span><strong>${(profile.history||[]).length}</strong></div></div>`;
     const sources=(profile.data_notes||[]).map(note=>`<li>${esc(note)}</li>`).join("");
     return [
       summary,
       `<section class="pr-profile-section" id="pr-profile-bio"><div class="pr-profile-head"><div><h3>Player Overview</h3><p>Current bio, rankings and roster role</p></div><span class="pr-trend">${esc(profile.trend?.direction||"Trend unavailable")}</span></div>${bioGrid(bio,profile)}</section>`,
       `<section class="pr-profile-section"><div class="pr-profile-head"><div><h3>2026 Strength of Schedule</h3><p>Position-adjusted opponent difficulty for every regular-season week</p></div>${sos?`<span class="pr-sos ${sosClass(sos.label)}">#${Math.round(Number(sos.rank))} ${esc(sos.label)}</span>`:""}</div>${strengthOfScheduleHtml(sos,position)}</section>`,
       `<section class="pr-profile-section"><div class="pr-profile-head"><div><h3>Complete Career History</h3><p>Every NFL regular season this player has played</p></div></div>${careerTable(profile.history,position)}</section>`,
-      `<section class="pr-profile-section"><div class="pr-profile-head"><div><h3>2025 Actual Statistics</h3><p>Regular-season production and usage</p></div></div>${metricGrid(actual,position)}</section>`,
+      `<section class="pr-profile-section"><div class="pr-profile-head"><div><h3>${esc(actualYear)} Actual Statistics</h3><p>Latest available NFL regular-season production and usage</p></div></div>${metricGrid(actual,position)}</section>`,
       `<section class="pr-profile-section"><div class="pr-profile-head"><div><h3>2026 Projected Statistics</h3><p>${esc(projection.method||"Gridiron IQ projection")}</p></div></div>${metricGrid(projection,position)}</section>`,
       `<section class="pr-profile-section" id="pr-profile-injury"><div class="pr-profile-head"><div><h3>Injury & Availability</h3><p>Current designation and practice participation</p></div></div>${injuryHtml(row,injury)}</section>`,
       `<section class="pr-profile-section" id="pr-profile-news"><div class="pr-profile-head"><div><h3>Current Player News</h3><p>Checked immediately and every minute while this profile is open</p></div><span id="pr-live-news-status" class="pr-live-status">Checking live news now…</span></div><div id="pr-live-news">${newsHtml(news)}</div></section>`,
