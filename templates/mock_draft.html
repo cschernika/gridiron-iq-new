@@ -34,11 +34,12 @@
 .ms-status{display:none;margin-top:12px;padding:11px 12px;border-radius:10px;font-size:11px;font-weight:800}
 .ms-status.show{display:block}.ms-status.busy{color:#264a88;background:#edf4ff;border:1px solid #cfe0ff}.ms-status.error{color:#991b1b;background:#fff1f2;border:1px solid #fecdd3}.ms-status.good{color:#166534;background:#f0fdf4;border:1px solid #bbf7d0}
 .ms-build-check{margin:0 0 14px}.ms-rank-source{display:block;color:var(--m);font-size:8px;margin-top:2px;max-width:125px;line-height:1.25}
+.ms-grade-guide{margin-top:10px;border:1px solid var(--l);border-radius:11px;background:#fff;overflow:hidden}.ms-grade-guide summary{cursor:pointer;padding:10px 12px;font-size:10px;font-weight:900;color:var(--t);background:#f7f8fc;list-style:none}.ms-grade-guide summary::-webkit-details-marker{display:none}.ms-grade-guide summary:after{content:"+";float:right;color:var(--p);font-size:14px}.ms-grade-guide[open] summary:after{content:"−"}.ms-grade-body{padding:12px}.ms-grade-body h4{margin:0 0 4px;font-size:10px}.ms-grade-body p{font-size:9px;line-height:1.45;margin:0 0 10px}.ms-grade-item{padding:9px 0;border-bottom:1px solid #edf0f5}.ms-grade-item:last-child{border-bottom:0}.ms-grade-weight{display:inline-block;margin-left:5px;border-radius:999px;padding:2px 6px;background:#eee9ff;color:#4c35d8;font-size:8px;font-weight:900}.ms-grade-scale{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}.ms-grade-band{padding:7px 8px;border-radius:8px;background:#f7f8fc;font-size:8px;color:var(--m)}.ms-grade-band b{display:block;color:var(--t);font-size:9px;margin-bottom:2px}
 
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
 </style>
 <div class="ms">
-<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · STRICT DRAFT GRADING V5</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
+<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · STRICT DRAFT GRADING V5 · CLEAR GRADE GUIDE</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
 <div id="build-status" class="ms-status ms-build-check show busy" role="status" aria-live="polite">Checking the deployed server and complete player database…</div>
 
 <div id="setup" class="ms-grid">
@@ -63,7 +64,28 @@
 </div>
 <div class="ms-card">
 <div class="ms-stat"><span>ON THE CLOCK</span><strong id="pick">—</strong></div>
-<div class="ms-stat"><span>LIVE GRADE</span><strong id="grade">—</strong><small id="grade-detail">Your selections will be graded against market rank, projection and roster fit.</small></div>
+<div class="ms-stat"><span>LIVE DRAFT GRADE</span><strong id="grade">—</strong><small id="grade-detail">Your grade measures the quality of your picks at the spots you made them — not just projected points.</small></div>
+<details class="ms-grade-guide">
+  <summary>What does the Draft Grade mean?</summary>
+  <div class="ms-grade-body">
+    <div class="ms-grade-item"><h4>Overall Draft Grade</h4><p>Your 0–99 score for the draft as a whole. It asks: <b>Did you make strong selections at the right time and build a usable roster?</b> On a completed draft, Pick Quality is the biggest factor, followed by Roster Construction, 2026 Projection and Proven 2025 Production.</p></div>
+    <div class="ms-grade-item"><h4>Pick Quality <span class="ms-grade-weight">62% of final grade</span></h4><p>Grades every selection based on how good that player was <b>at that exact pick</b>. Earlier-round selections count more because mistakes with premium picks are more costly. Each individual pick is driven mostly by market/ADP timing, with smaller adjustments for 2026 projection and roster fit.</p></div>
+    <div class="ms-grade-item"><h4>Market Value / ADP</h4><p>Compares where you drafted a player with where the fantasy market expects him to go. Getting a player later than ADP is rewarded. Reaching ahead of ADP is penalized, and the penalty becomes much stronger for large or severe reaches. Late-round K and D/ST picks are treated separately so normal end-of-draft selections are not unfairly punished.</p></div>
+    <div class="ms-grade-item"><h4>2026 Projected Production <span class="ms-grade-weight">9% of final grade</span></h4><p>Measures expected fantasy production for the upcoming season <b>relative to the player's position</b>. A quarterback is compared with quarterbacks, an RB with RBs, and so on. This keeps raw QB scoring from overwhelming other positions.</p></div>
+    <div class="ms-grade-item"><h4>Proven Production <span class="ms-grade-weight">7% of final grade</span></h4><p>Uses actual 2025 fantasy production as evidence that a player has already produced at an NFL level. It is position-adjusted. Rookies and players without meaningful 2025 history receive a neutral score rather than being automatically treated as bad picks.</p></div>
+    <div class="ms-grade-item"><h4>Roster Construction <span class="ms-grade-weight">22% of final grade</span></h4><p>Checks whether the roster is being built in a practical way: required starters can still be filled, RB/WR depth develops at the right pace, you are not hoarding unnecessary QBs or TEs, and K/DST are not taken too early. The score becomes stricter as the draft gets closer to completion.</p></div>
+    <div class="ms-grade-item"><h4>Depth Score</h4><p>Shows how much usable RB/WR depth you created. It is a supporting diagnostic in the current grading model rather than a separate direct percentage of the final grade, because much of roster depth is already reflected in Roster Construction.</p></div>
+    <div class="ms-grade-item"><h4>Grade Scale</h4><div class="ms-grade-scale">
+      <div class="ms-grade-band"><b>90–99 · Elite</b>Outstanding value and roster build with very few costly mistakes.</div>
+      <div class="ms-grade-band"><b>85–89 · Excellent</b>Strong draft with clear advantages and only minor weaknesses.</div>
+      <div class="ms-grade-band"><b>80–84 · Very Good</b>Good value and structure; a few picks or roster spots could be improved.</div>
+      <div class="ms-grade-band"><b>75–79 · Solid</b>Competitive draft, but there are noticeable opportunity costs or depth concerns.</div>
+      <div class="ms-grade-band"><b>70–74 · Average</b>Playable roster, but several picks were inefficient or the roster is imbalanced.</div>
+      <div class="ms-grade-band"><b>65–69 · Below Average</b>Too many reaches, weak roster construction, or not enough impact production.</div>
+      <div class="ms-grade-band"><b>Below 65 · Poor</b>Major value losses or roster-building mistakes significantly reduced draft quality.</div>
+    </div></div>
+  </div>
+</details>
 <button id="auto-rest" class="ms-btn ms-full">AI Auto-Draft My Remaining Picks</button>
 <h3>Your Roster</h3><table class="ms-roster"><tbody id="roster"></tbody></table>
 <div id="complete" style="display:none"><a id="review" class="ms-btn primary ms-full" href="#">Review Completed Draft</a></div>
@@ -105,6 +127,17 @@
     return ["QB","RB","WR","TE","K","DEF"]
       .map(position=>`${position==="DEF"?"D/ST":position} ${Number(counts[position]||0)}`)
       .join(" · ");
+  }
+
+  function gradeBand(score){
+    const n=Number(score||0);
+    if(n>=90) return "Elite";
+    if(n>=85) return "Excellent";
+    if(n>=80) return "Very Good";
+    if(n>=75) return "Solid";
+    if(n>=70) return "Average";
+    if(n>=65) return "Below Average";
+    return "Poor";
   }
 
   async function verifyBuild(){
@@ -182,13 +215,13 @@
 
     const grade=d.grade||{};
     $("grade").textContent=Number.isFinite(Number(grade.overall))&&Number(grade.overall)>0
-      ? `${grade.overall}/100`
+      ? `${grade.overall}/100 · ${gradeBand(grade.overall)}`
       : "—";
     const worst=(grade.pick_reports||[]).reduce((current,pick)=>
       !current||Number(pick.pick_grade)<Number(current.pick_grade)?pick:current,null);
     $("grade-detail").textContent=worst
       ? `Selection quality ${grade.pick_quality_score}/100 · Worst pick: ${worst.name} ${worst.pick_grade}/100${grade.severe_reach_count?` · ${grade.severe_reach_count} severe reach${grade.severe_reach_count===1?"":"es"}`:""}`
-      : "Your selections will be graded against market rank, projection and roster fit.";
+      : "Your grade measures the quality of your picks at the spots you made them — not just projected points.";
     $("pick").textContent=d.current_pick
       ? `Round ${d.current_pick.round} · Pick #${d.current_pick.overall}`
       : "Draft Complete";
