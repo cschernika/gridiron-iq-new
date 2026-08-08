@@ -745,7 +745,7 @@ def league_sync():
             analytics=DEMO,
             yahoo_configured=yahoo_configured,
             yahoo_redirect=yahoo_redirect,
-            gridiron_build="v35-sync-stability",
+            gridiron_build="v42-balanced-scoring",
         )
     except Exception as exc:
         app.logger.exception("League Sync page failed to render")
@@ -773,7 +773,7 @@ def league_sync_diagnostics():
     snapshot = load_snapshot()
     return jsonify(
         ok=True,
-        build="v35-sync-stability",
+        build="v42-balanced-scoring",
         league_sync_template=(template_dir / "league_sync.html").exists(),
         base_template=(template_dir / "base.html").exists(),
         sidebar_template=(template_dir / "_sidebar.html").exists(),
@@ -996,7 +996,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v35-sync-stability",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v42-balanced-scoring",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -1414,7 +1414,7 @@ def yahoo_diagnostics():
 
     return jsonify(
         ok=not issues,
-        build="v35-sync-stability",
+        build="v42-balanced-scoring",
         issues=issues,
         redirect_uri=creds["redirect_uri"] or f"{request.url_root.rstrip('/')}/auth/yahoo/callback",
         connected=bool(token.get("access_token") or token.get("refresh_token")),
@@ -1499,7 +1499,7 @@ def yahoo_leagues():
             leagues=leagues,
             selected_league=_yahoo_selected_league(),
             connected=True,
-            build="v35-sync-stability",
+            build="v42-balanced-scoring",
         )
     except Exception as exc:
         app.logger.exception("Yahoo league discovery failed")
@@ -1608,7 +1608,7 @@ def yahoo_sync():
             "league_name": league_name,
             "teams": payload["settings"]["team_count"],
         })
-        return jsonify(ok=True, build="v35-sync-stability", **payload)
+        return jsonify(ok=True, build="v42-balanced-scoring", **payload)
     except Exception as exc:
         app.logger.exception("Yahoo league sync failed")
         return jsonify(
@@ -1627,7 +1627,7 @@ MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
 BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
-MOCK_DRAFT_BUILD = "mock-draft-v34-unified"
+MOCK_DRAFT_BUILD = "mock-draft-v42-balanced-scoring"
 MOCK_DIRECTORY_MINIMUMS = {
     "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
 }
@@ -1819,7 +1819,7 @@ def _manual_mock_list(limit=30):
     for mock in store.values():
         if _manual_ensure_complete_pool(mock):
             changed = True
-        if (mock.get("grade") or {}).get("grade_version") != "strict-v5":
+        if (mock.get("grade") or {}).get("grade_version") != "balanced-v6":
             mock["grade"] = _manual_grade(mock)
             changed = True
     if changed:
@@ -2122,8 +2122,8 @@ def _manual_ensure_complete_pool(mock):
     """Upgrade saved drafts created by the old partial-pool implementation."""
     existing = mock.get("player_pool") or []
     changed = False
-    if mock.get("formula_version") != "smart-draft-v5":
-        mock["formula_version"] = "smart-draft-v5"
+    if mock.get("formula_version") != "smart-draft-v6":
+        mock["formula_version"] = "smart-draft-v6"
         changed = True
     needs_pool_upgrade = (
         not _mock_pool_is_complete(existing)
@@ -2150,7 +2150,7 @@ def _manual_ensure_complete_pool(mock):
             merged[key] = dict(player)
     mock["player_pool"] = list(merged.values())
     mock["pool_version"] = "complete-v5"
-    mock["formula_version"] = "smart-draft-v5"
+    mock["formula_version"] = "smart-draft-v6"
     mock["updated_at"] = datetime.now(timezone.utc).isoformat()
     return True
 
@@ -2384,15 +2384,20 @@ def _manual_pick_score_components(mock, player, counts=None, overall=None, round
     need_signal = _mock_position_need_score(
         position, roster, round_no, total_rounds
     )
-    roster_fit_grade = max(0.0, min(98.0, 76.0 + need_signal * 1.60))
+    # Roster need matters materially in v6. Missing starters grade very well,
+    # useful depth grades positively, and unnecessary positional hoarding is
+    # penalized much more clearly than in the previous formula.
+    roster_fit_grade = max(0.0, min(98.0, 70.0 + need_signal * 2.50))
     if position not in allowed_positions:
         roster_fit_grade = min(roster_fit_grade, 5.0)
 
     projection_grade = _manual_projection_grade(player)
+    # Balanced pick score: ADP remains important, but a high-upside player who
+    # fills a real roster need can justify a modest reach.
     score = (
-        market_grade * 0.74
-        + projection_grade * 0.16
-        + roster_fit_grade * 0.10
+        market_grade * 0.45
+        + projection_grade * 0.30
+        + roster_fit_grade * 0.25
     )
 
     hard_cap = 99.0
@@ -2531,12 +2536,13 @@ def _manual_grade(mock):
     roster = _manual_user_roster(mock)
     if not roster:
         return {
-            "grade_version": "strict-v5",
+            "grade_version": "balanced-v6",
             "overall": 0,
             "projection_score": 0,
             "stats_score": 0,
             "value_score": 0,
             "balance_score": 0,
+            "need_score": 0,
             "depth_score": 0,
             "pick_quality_score": 0,
             "worst_pick_score": 0,
@@ -2557,13 +2563,28 @@ def _manual_grade(mock):
         1.0 + 0.5 * (1.0 - (int(report.get("round") or 1) - 1) / max(1, int(mock.get("rounds") or 12)))
         for report in reports
     ]
+    weight_total = max(1.0, sum(weights))
     pick_quality_score = round(
         sum(report["pick_grade"] * weight for report, weight in zip(reports, weights))
-        / max(1.0, sum(weights))
+        / weight_total
     )
-    value_score = round(sum(report["market_grade"] for report in reports) / max(1, len(reports)))
-    projection_score = round(sum(report["projection_grade"] for report in reports) / max(1, len(reports)))
-    stats_score = round(sum(report["history_grade"] for report in reports) / max(1, len(reports)))
+    # Premium-round decisions count more in each scoring pillar.
+    value_score = round(
+        sum(report["market_grade"] * weight for report, weight in zip(reports, weights))
+        / weight_total
+    )
+    projection_score = round(
+        sum(report["projection_grade"] * weight for report, weight in zip(reports, weights))
+        / weight_total
+    )
+    need_score = round(
+        sum(report["roster_fit_grade"] * weight for report, weight in zip(reports, weights))
+        / weight_total
+    )
+    stats_score = round(
+        sum(report["history_grade"] * weight for report, weight in zip(reports, weights))
+        / weight_total
+    )
     balance_score = _manual_balance_score(mock, roster)
 
     rbwr = counts.get("RB", 0) + counts.get("WR", 0)
@@ -2576,14 +2597,19 @@ def _manual_grade(mock):
     severe_reach_count = sum(1 for report in reports if report["severe_reach"])
     complete = len(roster) >= int(mock.get("rounds") or 12)
 
+    # Overall v6 draft grade. ADP/value is still the largest single factor,
+    # but projected point potential and roster need now drive 50% of the grade.
+    # Final roster construction supplies the remaining 10%.
     overall = (
-        pick_quality_score * (0.62 if complete else 0.68)
-        + balance_score * (0.22 if complete else 0.17)
-        + projection_score * (0.09 if complete else 0.08)
-        + stats_score * 0.07
+        value_score * 0.40
+        + projection_score * 0.30
+        + need_score * 0.20
+        + balance_score * 0.10
     )
-    overall -= max(0, 40 - worst_pick_score) * 0.10
-    overall -= severe_reach_count * 1.25
+    # Keep truly damaging reaches from being completely hidden by a strong
+    # roster elsewhere, without allowing ADP to dominate the entire grade.
+    overall -= max(0, 35 - worst_pick_score) * 0.06
+    overall -= severe_reach_count * 0.75
     overall = round(max(0, min(99, overall)))
 
     strengths = []
@@ -2591,11 +2617,13 @@ def _manual_grade(mock):
     if pick_quality_score >= 85:
         strengths.append("consistently strong selections")
     if value_score >= 85:
-        strengths.append("strong market value")
+        strengths.append("strong ADP value")
     if projection_score >= 82:
-        strengths.append("high projected production")
+        strengths.append("high projected point potential")
+    if need_score >= 85:
+        strengths.append("drafted well for roster needs")
     if balance_score >= 85:
-        strengths.append("balanced roster construction")
+        strengths.append("balanced final roster construction")
     if counts.get("RB", 0) < 3:
         concerns.append("running-back depth")
     if counts.get("WR", 0) < 4:
@@ -2604,6 +2632,10 @@ def _manual_grade(mock):
         concerns.append("quarterback still open")
     if counts.get("TE", 0) == 0:
         concerns.append("tight end still open")
+    if projection_score < 68:
+        concerns.append("low projected point potential")
+    if need_score < 68:
+        concerns.append("too many picks that did not address roster needs")
     if reach_count:
         concerns.append(f"{reach_count} early pick{'s' if reach_count != 1 else ''} versus market rank")
     if severe_reach_count:
@@ -2618,12 +2650,13 @@ def _manual_grade(mock):
         summary += " Watch: " + ", ".join(concerns) + "."
 
     return {
-        "grade_version": "strict-v5",
+        "grade_version": "balanced-v6",
         "overall": overall,
         "projection_score": projection_score,
         "stats_score": stats_score,
         "value_score": value_score,
         "balance_score": balance_score,
+        "need_score": need_score,
         "depth_score": depth_score,
         "pick_quality_score": pick_quality_score,
         "worst_pick_score": worst_pick_score,
@@ -3069,7 +3102,7 @@ def _mock_ai_pick(
         "manager": f"Team {slot}",
         "ai_style": style,
         "ai_score": round(ai_score, 2),
-        "formula_version": "smart-draft-v5",
+        "formula_version": "smart-draft-v6",
     }
 
 def _manual_autopick_until_user(mock):
@@ -3184,7 +3217,7 @@ def manual_mock_start():
         "picks": [],
         "player_pool": player_pool,
         "pool_version": "complete-v5",
-        "formula_version": "smart-draft-v5",
+        "formula_version": "smart-draft-v6",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -3233,7 +3266,7 @@ def manual_mock_state(mock_id):
     if not mock:
         return jsonify(ok=False, error="Mock draft not found."), 404
     changed = _manual_ensure_complete_pool(mock)
-    if (mock.get("grade") or {}).get("grade_version") != "strict-v5":
+    if (mock.get("grade") or {}).get("grade_version") != "balanced-v6":
         mock["grade"] = _manual_grade(mock)
         changed = True
     if changed:
@@ -3311,7 +3344,7 @@ def manual_mock_state(mock_id):
         available_count=len(scored),
         position_counts=position_counts,
         pool_version=mock.get("pool_version") or "complete-v5",
-        formula_version=mock.get("formula_version") or "smart-draft-v5",
+        formula_version=mock.get("formula_version") or "smart-draft-v6",
         server_build=MOCK_DRAFT_BUILD,
         ranking_label=ranking_label,
         ranking_source=ranking_source,
@@ -3399,7 +3432,7 @@ def manual_mock_review(mock_id):
         return page("error.html", code=404, message="Mock draft not found."), 404
 
     changed = _manual_ensure_complete_pool(mock)
-    if (mock.get("grade") or {}).get("grade_version") != "strict-v5":
+    if (mock.get("grade") or {}).get("grade_version") != "balanced-v6":
         mock["grade"] = _manual_grade(mock)
         changed = True
     if changed:
