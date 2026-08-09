@@ -8001,6 +8001,17 @@ def _fast_2026_projection_from_2025(stats, position):
         "receiving_yards_after_catch": round(number("receiving_yards_after_catch") * factor),
         "receiving_first_downs": round(number("receiving_first_downs") * factor),
         "receiving_epa": round(number("receiving_epa") * factor, 2),
+        # Kicker volume is required by the role-aware weekly matchup model.
+        "fg_made": round(number("fg_made") * factor),
+        "fg_att": round(number("fg_att") * factor),
+        "fg_pct": round(number("fg_pct"), 2),
+        "fg_long": round(number("fg_long")),
+        "fg_made_40_49": round(number("fg_made_40_49") * factor),
+        "fg_made_50_59": round(number("fg_made_50_59") * factor),
+        "fg_made_60_": round(number("fg_made_60_") * factor),
+        "pat_made": round(number("pat_made") * factor),
+        "pat_att": round(number("pat_att") * factor),
+        "pat_pct": round(number("pat_pct"), 2),
     }
 
     # Public usage/efficiency fields are carried forward as a transparent 2025
@@ -8976,14 +8987,18 @@ def _matchup_percentile_grades(rows, position):
     }
 
 
-def _weekly_rb_role_profile(player):
-    """Return depth-chart role, expected-volume grade and weekly touch estimate.
+def _weekly_position_role_profile(player):
+    """Position-specific depth-chart and expected-usage profile.
 
-    The score is intentionally role-aware. A published RB2/RB3 is not treated
-    like an RB1 just because his offensive line has a favorable matchup. If a
-    nominal backup has starter-level projected volume, the usage signals can
-    lift his grade so injury replacements and true committees are not buried.
+    The weekly matchup model should answer two different questions:
+      1. Is the football matchup favorable?
+      2. Is this player likely to receive enough real work to exploit it?
+
+    Depth-chart order is the starting signal, while projected/current usage can
+    move a nominal backup upward when injuries, committees or personnel changes
+    create starter-level opportunity.
     """
+    pos = str(player.get("position") or "").upper()
     try:
         depth = int(float(player.get("depth_chart_order") or 0))
     except (TypeError, ValueError):
@@ -8991,111 +9006,242 @@ def _weekly_rb_role_profile(player):
 
     games = max(1.0, _off_num(player.get("games"), 17.0))
     carries = _off_num(player.get("carries"))
+    attempts = _off_num(player.get("attempts"))
     targets = _off_num(player.get("targets"))
     receptions = _off_num(player.get("receptions"))
-    expected_touches = (carries + receptions) / games if games else 0.0
-    expected_opportunities = (carries + targets) / games if games else 0.0
+    fg_att = _off_num(player.get("fg_att"))
+    pat_att = _off_num(player.get("pat_att"))
     rush_share = _off_num(player.get("rush_share"))
     opportunity_share = _off_num(player.get("opportunity_share"))
-    red_zone_share = _off_num(player.get("red_zone_carry_share"))
     target_share = _off_num(player.get("target_share"))
+    red_zone_carry_share = _off_num(player.get("red_zone_carry_share"))
+    red_zone_target_share = _off_num(player.get("red_zone_target_share"))
+    snap_share = _off_num(player.get("snap_share"))
+    route_share = _off_num(player.get("route_share"))
 
-    if depth == 1:
-        label, base = "RB1 / starter", 96.0
-    elif depth == 2:
-        label, base = "RB2 / committee", 72.0
-    elif depth == 3:
-        label, base = "RB3 / change of pace", 52.0
-    elif depth >= 4:
-        label, base = "Reserve RB", 35.0
-    elif expected_opportunities >= 16 or rush_share >= 50:
-        label, base = "RB1-type workload", 91.0
-    elif expected_opportunities >= 10 or rush_share >= 34 or opportunity_share >= 24:
-        label, base = "RB2-type workload", 75.0
-    elif expected_opportunities >= 6 or opportunity_share >= 14:
-        label, base = "Committee / rotational", 60.0
-    else:
-        label, base = "Role uncertain / reserve", 48.0
+    base = 50.0
+    label = f"{pos} role uncertain"
+    primary = 0.0
+    secondary = 0.0
+    primary_label = "Expected usage"
+    secondary_label = "Secondary usage"
+    adjustment = 0.0
 
-    # Volume can move a published depth-chart label because real weekly roles
-    # change with injuries, committees and coaching decisions.
-    volume_adjustment = 0.0
-    if expected_opportunities >= 18:
-        volume_adjustment += 10
-    elif expected_opportunities >= 14:
-        volume_adjustment += 7
-    elif expected_opportunities >= 10:
-        volume_adjustment += 4
-    elif expected_opportunities < 5:
-        volume_adjustment -= 8
-    elif expected_opportunities < 7:
-        volume_adjustment -= 4
+    if pos == "QB":
+        pass_attempts_pg = attempts / games
+        rush_attempts_pg = carries / games
+        primary, secondary = pass_attempts_pg, rush_attempts_pg
+        primary_label, secondary_label = "Pass attempts/game", "Rush attempts/game"
+        if depth == 1:
+            label, base = "QB1 / starter", 97.0
+        elif depth == 2:
+            label, base = "QB2 / backup", 48.0
+        elif depth >= 3:
+            label, base = "QB3+ / reserve", 30.0
+        elif pass_attempts_pg >= 26:
+            label, base = "QB1-type workload", 91.0
+        elif pass_attempts_pg >= 12:
+            label, base = "Spot starter / QB2", 62.0
+        else:
+            label, base = "Backup / role uncertain", 42.0
+        if pass_attempts_pg >= 34: adjustment += 5
+        elif pass_attempts_pg >= 28: adjustment += 3
+        elif pass_attempts_pg < 8: adjustment -= 18
+        elif pass_attempts_pg < 15: adjustment -= 8
+        if rush_attempts_pg >= 6: adjustment += 4
+        elif rush_attempts_pg >= 3: adjustment += 2
+        if snap_share >= 90: adjustment += 2
 
-    if rush_share >= 55:
-        volume_adjustment += 5
-    elif rush_share >= 40:
-        volume_adjustment += 3
-    elif rush_share and rush_share < 22:
-        volume_adjustment -= 4
+    elif pos == "RB":
+        touches_pg = (carries + receptions) / games
+        opportunities_pg = (carries + targets) / games
+        primary, secondary = touches_pg, opportunities_pg
+        primary_label, secondary_label = "Touches/game", "Opportunities/game"
+        if depth == 1:
+            label, base = "RB1 / starter", 96.0
+        elif depth == 2:
+            label, base = "RB2 / committee", 72.0
+        elif depth == 3:
+            label, base = "RB3 / change of pace", 52.0
+        elif depth >= 4:
+            label, base = "Reserve RB", 35.0
+        elif opportunities_pg >= 16 or rush_share >= 50:
+            label, base = "RB1-type workload", 91.0
+        elif opportunities_pg >= 10 or rush_share >= 34 or opportunity_share >= 24:
+            label, base = "RB2-type workload", 75.0
+        elif opportunities_pg >= 6 or opportunity_share >= 14:
+            label, base = "Committee / rotational", 60.0
+        else:
+            label, base = "Role uncertain / reserve", 48.0
+        if opportunities_pg >= 18: adjustment += 10
+        elif opportunities_pg >= 14: adjustment += 7
+        elif opportunities_pg >= 10: adjustment += 4
+        elif opportunities_pg < 5: adjustment -= 8
+        elif opportunities_pg < 7: adjustment -= 4
+        if rush_share >= 55: adjustment += 5
+        elif rush_share >= 40: adjustment += 3
+        elif rush_share and rush_share < 22: adjustment -= 4
+        if opportunity_share >= 32: adjustment += 5
+        elif opportunity_share >= 23: adjustment += 3
+        elif opportunity_share and opportunity_share < 12: adjustment -= 4
+        if red_zone_carry_share >= 50: adjustment += 3
+        elif red_zone_carry_share >= 30: adjustment += 1
 
-    if opportunity_share >= 32:
-        volume_adjustment += 5
-    elif opportunity_share >= 23:
-        volume_adjustment += 3
-    elif opportunity_share and opportunity_share < 12:
-        volume_adjustment -= 4
+    elif pos == "WR":
+        targets_pg = targets / games
+        primary, secondary = targets_pg, target_share
+        primary_label, secondary_label = "Targets/game", "Target share %"
+        if depth == 1:
+            label, base = "WR1 / primary starter", 95.0
+        elif depth == 2:
+            label, base = "WR2 / starter", 87.0
+        elif depth == 3:
+            label, base = "WR3 / slot-rotation", 77.0
+        elif depth == 4:
+            label, base = "WR4 / rotational", 60.0
+        elif depth >= 5:
+            label, base = "Reserve WR", 42.0
+        elif targets_pg >= 7 or target_share >= 22:
+            label, base = "WR1/WR2-type workload", 88.0
+        elif targets_pg >= 4 or target_share >= 14:
+            label, base = "WR3 / rotational workload", 72.0
+        else:
+            label, base = "Reserve / role uncertain", 50.0
+        if targets_pg >= 8: adjustment += 8
+        elif targets_pg >= 6: adjustment += 5
+        elif targets_pg >= 4: adjustment += 2
+        elif targets_pg < 2: adjustment -= 9
+        if target_share >= 25: adjustment += 7
+        elif target_share >= 20: adjustment += 4
+        elif target_share >= 15: adjustment += 2
+        elif target_share and target_share < 8: adjustment -= 6
+        if route_share >= 80: adjustment += 4
+        elif route_share >= 65: adjustment += 2
+        if snap_share >= 80: adjustment += 3
+        elif snap_share and snap_share < 45: adjustment -= 4
+        if red_zone_target_share >= 22: adjustment += 3
 
-    if red_zone_share >= 50:
-        volume_adjustment += 3
-    elif red_zone_share >= 30:
-        volume_adjustment += 1
+    elif pos == "TE":
+        targets_pg = targets / games
+        primary, secondary = targets_pg, target_share
+        primary_label, secondary_label = "Targets/game", "Target share %"
+        if depth == 1:
+            label, base = "TE1 / starter", 94.0
+        elif depth == 2:
+            label, base = "TE2 / rotational", 68.0
+        elif depth == 3:
+            label, base = "TE3 / reserve", 48.0
+        elif depth >= 4:
+            label, base = "Reserve TE", 36.0
+        elif targets_pg >= 5 or target_share >= 17:
+            label, base = "TE1-type receiving role", 88.0
+        elif targets_pg >= 2.5 or target_share >= 9:
+            label, base = "TE2 / rotational role", 67.0
+        else:
+            label, base = "Blocking/reserve role", 46.0
+        if targets_pg >= 6: adjustment += 8
+        elif targets_pg >= 4: adjustment += 5
+        elif targets_pg >= 2.5: adjustment += 2
+        elif targets_pg < 1.5: adjustment -= 8
+        if target_share >= 20: adjustment += 6
+        elif target_share >= 14: adjustment += 4
+        elif target_share >= 9: adjustment += 2
+        if route_share >= 75: adjustment += 4
+        elif route_share >= 55: adjustment += 2
+        if snap_share >= 75: adjustment += 3
+        elif snap_share and snap_share < 40: adjustment -= 4
+        if red_zone_target_share >= 18: adjustment += 3
 
-    role_grade = _def_clamp(base + volume_adjustment)
+    elif pos == "K":
+        kick_opps_pg = (fg_att + pat_att) / games
+        primary, secondary = kick_opps_pg, fg_att / games
+        primary_label, secondary_label = "Kick opportunities/game", "FG attempts/game"
+        if depth == 1:
+            label, base = "K1 / starting kicker", 96.0
+        elif depth >= 2:
+            label, base = "K2 / backup", 38.0
+        elif kick_opps_pg >= 3:
+            label, base = "Starting-kicker workload", 88.0
+        elif kick_opps_pg > 0:
+            label, base = "Kicker role uncertain", 62.0
+        else:
+            label, base = "Backup / no projected volume", 35.0
+        if kick_opps_pg >= 5: adjustment += 6
+        elif kick_opps_pg >= 4: adjustment += 4
+        elif kick_opps_pg >= 3: adjustment += 2
+        elif kick_opps_pg < 1: adjustment -= 15
+        if fg_att / games >= 2.2: adjustment += 3
+
+    role_grade = _def_clamp(base + adjustment)
     startability = (
-        "Lead workload" if role_grade >= 88
-        else "Startable / strong committee" if role_grade >= 76
-        else "Flex / committee dependent" if role_grade >= 62
+        "Locked-in starter role" if role_grade >= 90
+        else "Strong weekly role" if role_grade >= 78
+        else "Usable / volume dependent" if role_grade >= 64
         else "Backup-volume risk"
     )
+    usage_summary = f"{primary:.1f} {primary_label.lower()}"
+    if secondary_label and secondary:
+        usage_summary += f" · {secondary:.1f} {secondary_label.lower()}"
     return {
-        "rb_role": label,
+        "role_label": label,
         "role_grade": round(role_grade, 1),
-        "expected_touches_per_game": round(expected_touches, 1),
-        "expected_opportunities_per_game": round(expected_opportunities, 1),
         "startability": startability,
         "depth_chart_order": depth or None,
+        "depth_chart_position": player.get("depth_chart_position") or pos,
         "depth_chart_source": player.get("depth_chart_source") or "",
         "injury_status": player.get("injury_status") or "",
-        "role_note": (
-            f"{label}; estimated {expected_touches:.1f} touches and {expected_opportunities:.1f} opportunities per game. "
-            f"Role grade {role_grade:.1f}/100 ({startability.lower()})."
-        ),
+        "usage_primary": round(primary, 1),
+        "usage_primary_label": primary_label,
+        "usage_secondary": round(secondary, 1),
+        "usage_secondary_label": secondary_label,
+        "usage_summary": usage_summary,
+        "role_note": f"{label}; {usage_summary}. Role grade {role_grade:.1f}/100 ({startability.lower()}).",
+        # Position-specific aliases kept for the existing RB UI/API and useful
+        # sortable columns for the other positions.
+        "rb_role": label if pos == "RB" else "",
+        "expected_touches_per_game": round((carries + receptions) / games, 1) if pos == "RB" else None,
+        "expected_opportunities_per_game": round((carries + targets) / games, 1) if pos == "RB" else None,
+        "expected_attempts_per_game": round(attempts / games, 1) if pos == "QB" else None,
+        "expected_targets_per_game": round(targets / games, 1) if pos in {"WR", "TE"} else None,
+        "expected_kick_opportunities_per_game": round((fg_att + pat_att) / games, 1) if pos == "K" else None,
+        "fg_attempts_per_game": round(fg_att / games, 1) if pos == "K" else None,
+        "pat_attempts_per_game": round(pat_att / games, 1) if pos == "K" else None,
     }
+
+
+def _weekly_rb_role_profile(player):
+    """Backward-compatible wrapper retained for older callers."""
+    return _weekly_position_role_profile({**player, "position": "RB"})
 
 
 def _weekly_matchup_rows(week=1, position="ALL"):
     payload = _defensive_stats_snapshot()
     schedule = _weekly_schedule_lookup(payload, week)
     offense_rows, _ = _offensive_stats_rows(season=2026, scoring="PPR")
-    positions = {"RB", "WR", "TE"} if position == "ALL" else {position}
+    positions = {"QB", "RB", "WR", "TE", "K"} if position == "ALL" else {position}
+
+    def has_meaningful_usage(row):
+        pos = str(row.get("position") or "").upper()
+        if _off_num(row.get("fantasy_points")) <= 0:
+            return False
+        if pos == "QB":
+            return _off_num(row.get("attempts")) > 0 or _off_num(row.get("carries")) > 0
+        if pos == "RB":
+            return _off_num(row.get("carries")) > 0 or _off_num(row.get("targets")) > 0
+        if pos in {"WR", "TE"}:
+            return _off_num(row.get("targets")) > 0 or _off_num(row.get("receptions")) > 0
+        if pos == "K":
+            return _off_num(row.get("fg_att")) > 0 or _off_num(row.get("pat_att")) > 0
+        return False
+
     offense_rows = [
         row for row in offense_rows
-        if (
-            row.get("position") in positions
-            and _off_num(row.get("fantasy_points")) > 0
-            and (
-                _off_num(row.get("carries")) > 0
-                or _off_num(row.get("targets")) > 0
-                or _off_num(row.get("receptions")) > 0
-                or _off_num(row.get("receiving_yards")) > 0
-            )
-        )
+        if row.get("position") in positions and has_meaningful_usage(row)
     ]
-    skill_grades = {
-        **_matchup_percentile_grades(offense_rows, "RB"),
-        **_matchup_percentile_grades(offense_rows, "WR"),
-        **_matchup_percentile_grades(offense_rows, "TE"),
-    }
+    skill_grades = {}
+    for pos in ("QB", "RB", "WR", "TE", "K"):
+        skill_grades.update(_matchup_percentile_grades(offense_rows, pos))
+
     teams = payload.get("teams", {}) or {}
     offensive_lines = payload.get("offensive_lines", {}) or {}
     receiver_splits = payload.get("receiver_splits", {}) or {}
@@ -9110,6 +9256,23 @@ def _weekly_matchup_rows(week=1, position="ALL"):
         ]
         position_allowed_averages[pos] = sum(values) / len(values) if values else 1.5
 
+    def team_average(field, default=0.0):
+        vals = [_off_num(team.get(field)) for team in teams.values() if team.get(field) not in (None, "")]
+        return sum(vals) / len(vals) if vals else default
+
+    league_def = {
+        "yards_per_attempt": team_average("yards_per_attempt", 7.0),
+        "pass_td_rate": team_average("pass_td_rate", 4.5),
+        "interception_rate": team_average("interception_rate", 2.3),
+        "sack_rate": team_average("sack_rate", 6.5),
+        "yards_per_carry": team_average("yards_per_carry", 4.3),
+    }
+    rush_td_rates = [
+        _off_div(team.get("rush_tds"), team.get("rush_attempts"), 100)
+        for team in teams.values() if _off_num(team.get("rush_attempts")) > 0
+    ]
+    league_def["rush_td_rate"] = sum(rush_td_rates) / len(rush_td_rates) if rush_td_rates else 3.0
+
     prepared = []
     for player in offense_rows:
         name = str(player.get("name") or "").strip()
@@ -9121,37 +9284,45 @@ def _weekly_matchup_rows(week=1, position="ALL"):
         opponent = game["opponent"]
         defense = dict(teams.get(opponent) or {})
         line = dict(offensive_lines.get(team) or {})
-        defenders = _weekly_defender_candidates(payload, opponent, player_position)
-        primary = defenders[0] if defenders else {}
+        role = _weekly_position_role_profile(player)
 
+        defenders = _weekly_defender_candidates(payload, opponent, player_position) if player_position in {"WR", "TE"} else []
+        primary = defenders[0] if defenders else {}
         man_rate = _off_num(defense.get("man_rate"))
         zone_rate = _off_num(defense.get("zone_rate"))
         dominant_label = "ZONE_COVERAGE" if zone_rate >= man_rate else "MAN_COVERAGE"
         dominant_name = "Zone" if dominant_label == "ZONE_COVERAGE" else "Man"
         dominant_rate = max(man_rate, zone_rate)
-        player_history = receiver_splits.get(_pr_norm(name), {}) or {}
-        split = ((player_history.get("splits") or {}).get(dominant_label) or {})
-        baseline = (((league_splits.get(player_position) or {}).get(dominant_label)) or {})
-        player_ppr_target = split.get("ppr_per_target")
-        baseline_ppr_target = _off_num(baseline.get("ppr_per_target"), 1.5)
-        if player_ppr_target is None:
-            player_ppr_target = baseline_ppr_target
-            split_basis = "Position baseline"
-        else:
-            split_basis = "2025 player split"
-        coverage_fit = _def_clamp(
-            (_off_num(player_ppr_target) - baseline_ppr_target) * 12,
-            -12,
-            12,
-        )
 
-        allowed = ((defense.get("allowed_by_position") or {}).get(player_position) or {})
-        allowed_ppr_target = _off_num(allowed.get("ppr_per_target"), position_allowed_averages[player_position])
-        allowed_fit = _def_clamp(
-            (allowed_ppr_target - position_allowed_averages[player_position]) * 10,
-            -10,
-            10,
-        )
+        player_ppr_target = 0.0
+        baseline_ppr_target = 0.0
+        split_basis = "Not used"
+        coverage_fit = 0.0
+        allowed_ppr_target = 0.0
+        allowed_fit = 0.0
+        if player_position in {"WR", "TE", "RB"}:
+            allowed = ((defense.get("allowed_by_position") or {}).get(player_position) or {})
+            allowed_ppr_target = _off_num(allowed.get("ppr_per_target"), position_allowed_averages[player_position])
+            allowed_fit = _def_clamp(
+                (allowed_ppr_target - position_allowed_averages[player_position]) * 10,
+                -10, 10,
+            )
+        if player_position in {"WR", "TE"}:
+            player_history = receiver_splits.get(_pr_norm(name), {}) or {}
+            split = ((player_history.get("splits") or {}).get(dominant_label) or {})
+            baseline = (((league_splits.get(player_position) or {}).get(dominant_label)) or {})
+            player_ppr_target = split.get("ppr_per_target")
+            baseline_ppr_target = _off_num(baseline.get("ppr_per_target"), 1.5)
+            if player_ppr_target is None:
+                player_ppr_target = baseline_ppr_target
+                split_basis = "Position baseline"
+            else:
+                split_basis = "2025 player split"
+            coverage_fit = _def_clamp(
+                (_off_num(player_ppr_target) - baseline_ppr_target) * 12,
+                -12, 12,
+            )
+
         skill_grade = _off_num(skill_grades.get(_pr_norm(name)), 50)
         secondary_grade = _off_num(defense.get("secondary_grade"), 50)
         defender_grade = _off_num(primary.get("coverage_grade") or primary.get("defense_grade"), 50)
@@ -9162,76 +9333,136 @@ def _weekly_matchup_rows(week=1, position="ALL"):
         front_grade = _off_num(defense.get("front_grade"), 50)
         pass_trench_score = _def_clamp(50 + (pass_pro_grade - pass_rush_grade) * 0.55)
         run_trench_score = _def_clamp(50 + (run_block_grade - run_defense_grade) * 0.55)
+
         rush_share = _off_num(player.get("rush_share"))
         opportunity_share = _off_num(player.get("opportunity_share"))
         red_zone_carry_share = player.get("red_zone_carry_share")
         if red_zone_carry_share in (None, ""):
             red_zone_carry_share = rush_share
         red_zone_carry_share = _off_num(red_zone_carry_share)
-        workload_grade = _def_clamp(
-            20 + rush_share * 0.45 + opportunity_share * 0.25 + red_zone_carry_share * 0.20
-        )
-        rb_role = _weekly_rb_role_profile(player) if player_position == "RB" else {}
+        workload_grade = _def_clamp(20 + rush_share * 0.45 + opportunity_share * 0.25 + red_zone_carry_share * 0.20)
         receiving_matchup_grade = _def_clamp(
-            50
-            + (allowed_ppr_target - position_allowed_averages[player_position]) * 20
+            50 + (allowed_ppr_target - position_allowed_averages.get(player_position, allowed_ppr_target or 1.5)) * 20
             + _off_num(player.get("target_share")) * 0.20
-        )
+        ) if player_position in {"RB", "WR", "TE"} else 50.0
         run_defense_advantage = _def_clamp(100 - run_defense_grade)
 
+        coverage_matchup_grade = _def_clamp(
+            50 + (50 - secondary_grade) * 0.55 + (50 - defender_grade) * 0.25 + allowed_fit * 1.20
+        )
+        scheme_fit_grade = _def_clamp(50 + coverage_fit * 2.3)
+
+        qb_pass_matchup_grade = _def_clamp(
+            50
+            + (50 - secondary_grade) * 0.30
+            + (50 - pass_rush_grade) * 0.12
+            + (_off_num(defense.get("yards_per_attempt"), league_def["yards_per_attempt"]) - league_def["yards_per_attempt"]) * 7.0
+            + (_off_num(defense.get("pass_td_rate"), league_def["pass_td_rate"]) - league_def["pass_td_rate"]) * 3.5
+            - (_off_num(defense.get("interception_rate"), league_def["interception_rate"]) - league_def["interception_rate"]) * 4.0
+            - (_off_num(defense.get("sack_rate"), league_def["sack_rate"]) - league_def["sack_rate"]) * 2.0
+        )
+        qb_rushing_grade = _def_clamp(45 + (_off_num(player.get("carries")) / max(1.0, _off_num(player.get("games"), 17.0))) * 5.0)
+
+        def_rush_td_rate = _off_div(defense.get("rush_tds"), defense.get("rush_attempts"), 100) if _off_num(defense.get("rush_attempts")) else league_def["rush_td_rate"]
+        drive_access_grade = _def_clamp(
+            50
+            + (_off_num(defense.get("yards_per_attempt"), league_def["yards_per_attempt"]) - league_def["yards_per_attempt"]) * 8
+            + (_off_num(defense.get("yards_per_carry"), league_def["yards_per_carry"]) - league_def["yards_per_carry"]) * 8
+        )
+        td_resistance_grade = _def_clamp(
+            50
+            + (league_def["pass_td_rate"] - _off_num(defense.get("pass_td_rate"), league_def["pass_td_rate"])) * 4
+            + (league_def["rush_td_rate"] - def_rush_td_rate) * 4
+        )
+        kicker_opportunity_grade = _def_clamp(drive_access_grade * 0.55 + td_resistance_grade * 0.45)
+
         if player_position == "RB":
-            # v50 role-aware RB model. Every RB is evaluated on the same 0-100
-            # scale, but an RB2/RB3 no longer receives an elite ranking merely
-            # because the offensive-line matchup is excellent. Published depth
-            # chart role and projected workload together carry 25% of the score.
-            #
-            # 30% run trenches + 20% RB strength + 15% run defense +
-            # 25% depth-chart role/expected volume + 10% receiving role.
             score = _def_clamp(
                 run_trench_score * 0.30
                 + skill_grade * 0.20
                 + run_defense_advantage * 0.15
-                + _off_num(rb_role.get("role_grade"), 50) * 0.25
+                + _off_num(role.get("role_grade"), 50) * 0.25
                 + receiving_matchup_grade * 0.10
             )
-            matchup_model = "RUNNING_BACK_ROLE_AWARE"
-        else:
+            matchup_model = "RB_ROLE_AWARE_V5"
+        elif player_position in {"WR", "TE"}:
+            # Role/usage now carries 25%, preventing low-volume reserves from
+            # topping the board solely because the coverage matchup is soft.
             score = _def_clamp(
-                50
-                + (skill_grade - 50) * 0.30
-                + (50 - secondary_grade) * 0.28
-                + (50 - defender_grade) * 0.12
-                + coverage_fit
-                + allowed_fit
-                + (pass_trench_score - 50) * 0.12
+                skill_grade * 0.25
+                + _off_num(role.get("role_grade"), 50) * 0.25
+                + coverage_matchup_grade * 0.30
+                + scheme_fit_grade * 0.10
+                + pass_trench_score * 0.10
             )
-            matchup_model = "RECEIVER"
-        grade = _def_letter_grade(score)
-        if score >= 72:
-            verdict = "Strong advantage"
-        elif score >= 58:
-            verdict = "Favorable"
-        elif score >= 44:
-            verdict = "Neutral"
-        elif score >= 32:
-            verdict = "Difficult"
+            matchup_model = f"{player_position}_ROLE_AWARE_V5"
+        elif player_position == "QB":
+            score = _def_clamp(
+                skill_grade * 0.25
+                + _off_num(role.get("role_grade"), 50) * 0.25
+                + qb_pass_matchup_grade * 0.30
+                + pass_trench_score * 0.15
+                + qb_rushing_grade * 0.05
+            )
+            matchup_model = "QB_ROLE_AWARE_V5"
+        elif player_position == "K":
+            # Kicker matchup data is thinner than skill-position coverage data,
+            # so the model deliberately leans harder on confirmed starter role
+            # and actual/projected kicking opportunities.
+            score = _def_clamp(
+                skill_grade * 0.30
+                + _off_num(role.get("role_grade"), 50) * 0.40
+                + kicker_opportunity_grade * 0.30
+            )
+            matchup_model = "K_ROLE_AWARE_V5"
         else:
-            verdict = "Major challenge"
+            score = skill_grade
+            matchup_model = "ROLE_AWARE_V5"
+
+        grade = _def_letter_grade(score)
+        verdict = (
+            "Strong advantage" if score >= 72 else
+            "Favorable" if score >= 58 else
+            "Neutral" if score >= 44 else
+            "Difficult" if score >= 32 else
+            "Major challenge"
+        )
 
         top_coverage = str(defense.get("top_coverage") or "").replace("_", " ").title()
-        coverage_note = (
-            f"{opponent} used {dominant_name.lower()} on {dominant_rate:.1f}% of charted dropbacks"
-            + (f" and leaned most on {top_coverage}." if top_coverage else ".")
-            + f" {name} produced {_off_num(player_ppr_target):.2f} PPR points per target against {dominant_name.lower()} ({split_basis.lower()})."
-        )
+        if player_position in {"WR", "TE"}:
+            coverage_note = (
+                f"{opponent} used {dominant_name.lower()} on {dominant_rate:.1f}% of charted dropbacks"
+                + (f" and leaned most on {top_coverage}." if top_coverage else ".")
+                + f" {name} produced {_off_num(player_ppr_target):.2f} PPR points per target against {dominant_name.lower()} ({split_basis.lower()})."
+            )
+        elif player_position == "QB":
+            coverage_note = (
+                f"{opponent} secondary grade {secondary_grade:.1f}, pass-rush grade {pass_rush_grade:.1f}, "
+                f"{_off_num(defense.get('yards_per_attempt')):.2f} yards per attempt allowed and "
+                f"{_off_num(defense.get('sack_rate')):.1f}% sack rate. QB pass-matchup grade {qb_pass_matchup_grade:.1f}."
+            )
+        elif player_position == "K":
+            coverage_note = (
+                f"Kicker opportunity is a drive-and-stall proxy: drive access {drive_access_grade:.1f}, "
+                f"touchdown-resistance {td_resistance_grade:.1f}, combined opportunity grade {kicker_opportunity_grade:.1f}."
+            )
+        else:
+            coverage_note = "RB scoring is driven primarily by workload, run trenches and opponent run defense."
+
         if player_position == "RB":
-            role_note = rb_role.get("role_note") or "RB role unavailable."
             defender_note = (
                 f"{opponent}'s defensive front grade is {front_grade:.1f} "
                 f"(rank #{int(_off_num(defense.get('front_rank'), 0)) or '—'}), with a "
                 f"{run_defense_grade:.1f} run-defense grade. The RB receiving matchup allows "
                 f"{allowed_ppr_target:.2f} PPR points per target."
             )
+        elif player_position == "QB":
+            defender_note = (
+                f"{opponent} secondary #{int(_off_num(defense.get('secondary_rank'), 0)) or '—'} "
+                f"and pass rush #{int(_off_num(defense.get('pass_rush_rank'), 0)) or '—'} form the primary QB matchup."
+            )
+        elif player_position == "K":
+            defender_note = "Kicker scoring does not use a single defender; it uses starter status, kicking volume and opponent drive/TD-resistance proxies."
         elif primary:
             defender_note = (
                 f"Likely primary matchup: {primary.get('name')} ({primary.get('role')}) — "
@@ -9241,15 +9472,17 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             )
         else:
             defender_note = "No returning high-snap coverage defender was available in the bundled current roster."
+
         if player_position == "RB":
             trench_note = (
                 f"{team} projected run-blocking grade {run_block_grade:.1f} "
                 f"(rank #{int(_off_num(line.get('run_blocking_rank'), 0)) or '—'}) versus "
                 f"{opponent} run-defense grade {run_defense_grade:.1f} "
                 f"(rank #{int(_off_num(defense.get('run_defense_rank'), 0)) or '—'}); "
-                f"run-trench advantage score {run_trench_score:.1f}. "
-                f"That is a {verdict.lower()} RB matchup."
+                f"run-trench advantage score {run_trench_score:.1f}. That is a {verdict.lower()} RB matchup."
             )
+        elif player_position == "K":
+            trench_note = "Kicker matchup score does not directly weight trench grades; kicking opportunity and confirmed starter role carry more weight."
         else:
             trench_note = (
                 f"Pass protection grade {pass_pro_grade:.1f} versus {opponent} pass-rush grade {pass_rush_grade:.1f}; "
@@ -9268,32 +9501,62 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             "projected_points": _off_round(player.get("fantasy_points"), 1),
             "offense_data_type": player.get("data_type") or "projection",
             "matchup_model": matchup_model,
+            "skill_grade": round(skill_grade, 1),
+            "workload_grade": workload_grade,
+            "role_label": role.get("role_label") or "",
+            "rb_role": role.get("rb_role") or "",
+            "role_grade": role.get("role_grade"),
+            "startability": role.get("startability") or "",
+            "role_note": role.get("role_note") or "",
+            "usage_summary": role.get("usage_summary") or "",
+            "usage_primary": role.get("usage_primary"),
+            "usage_primary_label": role.get("usage_primary_label") or "",
+            "usage_secondary": role.get("usage_secondary"),
+            "usage_secondary_label": role.get("usage_secondary_label") or "",
+            "depth_chart_order": role.get("depth_chart_order"),
+            "depth_chart_position": role.get("depth_chart_position") or "",
+            "depth_chart_source": role.get("depth_chart_source") or "",
+            "injury_status": role.get("injury_status") or "",
+            "expected_touches_per_game": role.get("expected_touches_per_game"),
+            "expected_opportunities_per_game": role.get("expected_opportunities_per_game"),
+            "expected_attempts_per_game": role.get("expected_attempts_per_game"),
+            "expected_targets_per_game": role.get("expected_targets_per_game"),
+            "expected_kick_opportunities_per_game": role.get("expected_kick_opportunities_per_game"),
+            "fg_attempts_per_game": role.get("fg_attempts_per_game"),
+            "pat_attempts_per_game": role.get("pat_attempts_per_game"),
+            "attempts": player.get("attempts"),
+            "passing_yards": player.get("passing_yards"),
+            "passing_tds": player.get("passing_tds"),
+            "interceptions": player.get("interceptions"),
             "carries": player.get("carries"),
             "rushing_yards": player.get("rushing_yards"),
             "yards_per_carry": player.get("yards_per_carry"),
+            "targets": player.get("targets"),
+            "receptions": player.get("receptions"),
             "target_share": player.get("target_share"),
             "rush_share": player.get("rush_share"),
             "opportunity_share": player.get("opportunity_share"),
             "red_zone_carry_share": player.get("red_zone_carry_share"),
+            "red_zone_target_share": player.get("red_zone_target_share"),
             "red_zone_touch_share": player.get("red_zone_touch_share"),
             "air_yards_share": player.get("air_yards_share"),
-            "skill_grade": round(skill_grade, 1),
-            "workload_grade": workload_grade,
-            "rb_role": rb_role.get("rb_role") if player_position == "RB" else "",
-            "role_grade": rb_role.get("role_grade") if player_position == "RB" else None,
-            "expected_touches_per_game": rb_role.get("expected_touches_per_game") if player_position == "RB" else None,
-            "expected_opportunities_per_game": rb_role.get("expected_opportunities_per_game") if player_position == "RB" else None,
-            "startability": rb_role.get("startability") if player_position == "RB" else "",
-            "depth_chart_order": rb_role.get("depth_chart_order") if player_position == "RB" else player.get("depth_chart_order"),
-            "depth_chart_source": rb_role.get("depth_chart_source") if player_position == "RB" else player.get("depth_chart_source"),
-            "injury_status": rb_role.get("injury_status") if player_position == "RB" else player.get("injury_status"),
-            "role_note": role_note if player_position == "RB" else "",
+            "snap_share": player.get("snap_share"),
+            "route_share": player.get("route_share"),
+            "fg_att": player.get("fg_att"),
+            "fg_pct": player.get("fg_pct"),
+            "pat_att": player.get("pat_att"),
+            "pat_pct": player.get("pat_pct"),
             "receiving_matchup_grade": receiving_matchup_grade,
+            "coverage_matchup_grade": round(coverage_matchup_grade, 1),
+            "scheme_fit_grade": round(scheme_fit_grade, 1),
+            "qb_pass_matchup_grade": round(qb_pass_matchup_grade, 1),
+            "qb_rushing_grade": round(qb_rushing_grade, 1),
+            "kicker_opportunity_grade": round(kicker_opportunity_grade, 1),
             "matchup_score": score,
             "matchup_grade": grade,
             "verdict": verdict,
-            "primary_defender": primary.get("name") or "Coverage unit",
-            "primary_defender_role": primary.get("role") or "DB/LB",
+            "primary_defender": primary.get("name") or ("Coverage unit" if player_position in {"QB", "WR", "TE"} else "—"),
+            "primary_defender_role": primary.get("role") or ("Secondary" if player_position == "QB" else "DB/LB"),
             "defender_grade": round(defender_grade, 1),
             "defender_snap_share": primary.get("snap_share"),
             "defender_targets": primary.get("coverage_targets"),
@@ -9312,27 +9575,36 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             ],
             "secondary_grade": round(secondary_grade, 1),
             "secondary_rank": defense.get("secondary_rank"),
+            "opponent_overall_grade": round(_off_num(defense.get("overall_grade"), 50), 1),
+            "opponent_overall_rank": defense.get("overall_rank"),
+            "pass_rush_grade": round(pass_rush_grade, 1),
+            "pass_rush_rank": defense.get("pass_rush_rank"),
             "front_grade": round(front_grade, 1),
             "front_rank": defense.get("front_rank"),
-            "position_ppr_per_target_allowed": round(allowed_ppr_target, 2),
+            "position_ppr_per_target_allowed": round(allowed_ppr_target, 2) if player_position in {"RB", "WR", "TE"} else None,
             "man_rate": defense.get("man_rate"),
             "zone_rate": defense.get("zone_rate"),
             "top_coverage": defense.get("top_coverage"),
             "dominant_coverage": dominant_name,
-            "player_ppr_per_target_vs_dominant": round(_off_num(player_ppr_target), 2),
+            "player_ppr_per_target_vs_dominant": round(_off_num(player_ppr_target), 2) if player_position in {"WR", "TE"} else None,
             "coverage_split_basis": split_basis,
             "pass_protection_grade": round(pass_pro_grade, 1),
-            "pass_rush_grade": round(pass_rush_grade, 1),
             "pass_trench_score": pass_trench_score,
             "run_blocking_grade": round(run_block_grade, 1),
             "run_blocking_rank": line.get("run_blocking_rank"),
             "run_defense_grade": round(run_defense_grade, 1),
             "run_defense_rank": defense.get("run_defense_rank"),
+            "opponent_yards_per_attempt": defense.get("yards_per_attempt"),
+            "opponent_pass_td_rate": defense.get("pass_td_rate"),
+            "opponent_interception_rate": defense.get("interception_rate"),
+            "opponent_sack_rate": defense.get("sack_rate"),
             "opponent_yards_per_carry": defense.get("yards_per_carry"),
             "opponent_rush_epa_per_carry": defense.get("rush_epa_per_carry"),
             "opponent_stuff_rate": defense.get("stuff_rate"),
             "opponent_explosive_run_rate": defense.get("explosive_run_rate"),
             "run_trench_score": run_trench_score,
+            "drive_access_grade": round(drive_access_grade, 1),
+            "td_resistance_grade": round(td_resistance_grade, 1),
             "coverage_note": coverage_note,
             "defender_note": defender_note,
             "trench_note": trench_note,
@@ -9363,7 +9635,7 @@ def weekly_matchups_api():
     except (TypeError, ValueError):
         week = default_week
     position = str(request.args.get("position") or "ALL").upper()
-    if position not in {"ALL", "RB", "WR", "TE"}:
+    if position not in {"ALL", "QB", "RB", "WR", "TE", "K"}:
         position = "ALL"
     rows, payload = _weekly_matchup_rows(week=week, position=position)
     offense_data_type = "actual" if any(str(row.get("offense_data_type") or "").lower() == "actual" for row in rows) else "projection"
@@ -9374,7 +9646,7 @@ def weekly_matchups_api():
         count=len(rows),
         rows=rows,
         metadata={
-            "model_version": "Weekly Matchup Model V3",
+            "model_version": "Weekly Matchup Model V5 Role-Aware",
             "season": payload.get("matchup_season", 2026),
             "active_week": default_week,
             "data_through_week": _matchup_data_through_week(payload),
