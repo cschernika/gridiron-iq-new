@@ -82,7 +82,7 @@ def hide_legacy_connect_league_navigation(response):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
-            response.headers["X-Gridiron-Build"] = "v35-sync-stability"
+            response.headers["X-Gridiron-Build"] = "v45-yahoo-token-storage"
     except Exception:
         pass
     return response
@@ -745,7 +745,7 @@ def league_sync():
             analytics=DEMO,
             yahoo_configured=yahoo_configured,
             yahoo_redirect=yahoo_redirect,
-            gridiron_build="v44-role-adjusted-scoring",
+            gridiron_build="v45-yahoo-token-storage",
         )
     except Exception as exc:
         app.logger.exception("League Sync page failed to render")
@@ -763,7 +763,7 @@ def league_sync():
             "<p><a href='/api/diagnostics/league-sync'>Open League Sync diagnostics</a> · "
             "<a href='/app'>Return to Command Center</a></p></div></body></html>",
             200,
-            {"X-Gridiron-Build": "v35-sync-stability", "Cache-Control": "no-store"},
+            {"X-Gridiron-Build": "v45-yahoo-token-storage", "Cache-Control": "no-store"},
         )
 
 
@@ -773,7 +773,7 @@ def league_sync_diagnostics():
     snapshot = load_snapshot()
     return jsonify(
         ok=True,
-        build="v44-role-adjusted-scoring",
+        build="v45-yahoo-token-storage",
         league_sync_template=(template_dir / "league_sync.html").exists(),
         base_template=(template_dir / "base.html").exists(),
         sidebar_template=(template_dir / "_sidebar.html").exists(),
@@ -996,7 +996,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v44-role-adjusted-scoring",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v45-yahoo-token-storage",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -1138,6 +1138,12 @@ YAHOO_AUTH_URL = "https://api.login.yahoo.com/oauth2/request_auth"
 YAHOO_TOKEN_URL = "https://api.login.yahoo.com/oauth2/get_token"
 YAHOO_FANTASY_URL = "https://fantasysports.yahooapis.com/fantasy/v2"
 YAHOO_TOKEN_FILE = DATA_DIR / "yahoo_oauth_token.json"
+# Secondary server-side token location. This protects Yahoo OAuth from a
+# misconfigured GRIDIRON_DATA_DIR while keeping credentials out of templates
+# and browser storage. When DATA_DIR already points at BASE_DIR/data the two
+# locations collapse to one.
+YAHOO_TOKEN_FALLBACK_FILE = BASE_DIR / "data" / "yahoo_oauth_token.json"
+YAHOO_OAUTH_STATUS_FILE = DATA_DIR / "yahoo_oauth_status.json"
 YAHOO_PREF_FILE = DATA_DIR / "yahoo_league_preference.json"
 YAHOO_SNAPSHOT_FILE = DATA_DIR / "yahoo_snapshot.json"
 
@@ -1171,8 +1177,44 @@ def _yahoo_write_json(path, payload):
         pass
 
 
+def _yahoo_token_paths():
+    paths = []
+    for candidate in (YAHOO_TOKEN_FILE, YAHOO_TOKEN_FALLBACK_FILE):
+        try:
+            key = str(candidate.resolve())
+        except Exception:
+            key = str(candidate)
+        if key not in {str(x[0]) for x in paths}:
+            paths.append((key, candidate))
+    return [candidate for _, candidate in paths]
+
+
 def _yahoo_token():
-    return _yahoo_read_json(YAHOO_TOKEN_FILE)
+    # Read from the configured persistent location first, then the safe local
+    # server fallback. If the fallback has the token, migrate it back to the
+    # primary location when possible.
+    for path in _yahoo_token_paths():
+        data = _yahoo_read_json(path)
+        if data.get("access_token") or data.get("refresh_token"):
+            if path != YAHOO_TOKEN_FILE:
+                try:
+                    _yahoo_write_json(YAHOO_TOKEN_FILE, data)
+                except Exception:
+                    app.logger.exception("Unable to migrate Yahoo token to primary storage")
+            return data
+    return {}
+
+
+def _yahoo_store_oauth_status(status, detail=""):
+    payload = {
+        "status": str(status),
+        "detail": str(detail)[:500],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        _yahoo_write_json(YAHOO_OAUTH_STATUS_FILE, payload)
+    except Exception:
+        app.logger.exception("Unable to write Yahoo OAuth status")
 
 
 def _yahoo_store_token(token):
@@ -1188,7 +1230,24 @@ def _yahoo_store_token(token):
         "xoauth_yahoo_guid": token.get("xoauth_yahoo_guid") or current.get("xoauth_yahoo_guid") or "",
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    _yahoo_write_json(YAHOO_TOKEN_FILE, payload)
+
+    saved = []
+    errors = []
+    for path in _yahoo_token_paths():
+        try:
+            _yahoo_write_json(path, payload)
+            verify = _yahoo_read_json(path)
+            if verify.get("access_token"):
+                saved.append(str(path))
+            else:
+                errors.append(f"{path}: verification read failed")
+        except Exception as exc:
+            errors.append(f"{path}: {exc}")
+
+    if not saved:
+        raise RuntimeError("Yahoo token was received but could not be saved on the server. " + " | ".join(errors))
+
+    _yahoo_store_oauth_status("connected", "Yahoo OAuth token saved server-side.")
     return payload
 
 
@@ -1412,9 +1471,25 @@ def yahoo_diagnostics():
     else:
         next_step = "Yahoo is ready. Load your leagues, select one, and sync."
 
+    storage_paths = _yahoo_token_paths()
+    storage = []
+    for path in storage_paths:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            writable = os.access(path.parent, os.W_OK)
+        except Exception:
+            writable = False
+        storage.append({
+            "path": str(path),
+            "exists": path.exists(),
+            "parent_writable": writable,
+        })
+
+    oauth_status = _yahoo_read_json(YAHOO_OAUTH_STATUS_FILE)
+
     return jsonify(
         ok=not issues,
-        build="v44-role-adjusted-scoring",
+        build="v45-yahoo-token-storage",
         issues=issues,
         redirect_uri=creds["redirect_uri"] or f"{request.url_root.rstrip('/')}/auth/yahoo/callback",
         connected=bool(token.get("access_token") or token.get("refresh_token")),
@@ -1422,6 +1497,9 @@ def yahoo_diagnostics():
         api_detail=api_detail,
         league_count=league_count,
         next_step=next_step,
+        token_storage=storage,
+        oauth_status=oauth_status,
+        persistent_data_configured=bool(str(os.getenv("GRIDIRON_DATA_DIR", "") or "").strip()),
     )
 
 @app.post("/api/yahoo/app-credentials")
@@ -1442,6 +1520,7 @@ def yahoo_start():
         return page("error.html", code=400, message="Yahoo is not fully configured in Render."), 400
     state = os.urandom(24).hex()
     session["yahoo_state"] = state
+    _yahoo_store_oauth_status("started", "Yahoo authorization started; waiting for callback.")
     params = {
         "client_id": creds["client_id"],
         "redirect_uri": creds["redirect_uri"],
@@ -1470,18 +1549,24 @@ def yahoo_callback():
             timeout=25,
         )
         if not response.ok:
+            _yahoo_store_oauth_status("token_exchange_failed", f"HTTP {response.status_code}: {response.text[:250]}")
             return page("error.html", code=502, message=f"Yahoo token exchange failed ({response.status_code}): {response.text[:250]}"), 502
         _yahoo_store_token(response.json())
+        verify = _yahoo_token()
+        if not (verify.get("access_token") or verify.get("refresh_token")):
+            raise RuntimeError("Yahoo authorized, but the saved token could not be read back by the server.")
         session.pop("yahoo_state", None)
+        _yahoo_store_oauth_status("connected", "Yahoo authorization completed and token was verified.")
         return redirect(url_for("league_sync", yahoo="connected"))
     except Exception as exc:
+        _yahoo_store_oauth_status("callback_failed", str(exc))
         app.logger.exception("Yahoo authorization failed")
         return page("error.html", code=502, message=f"Yahoo authorization failed: {exc}"), 502
 
 
 @app.post("/api/yahoo/disconnect")
 def yahoo_disconnect():
-    for path in (YAHOO_TOKEN_FILE, YAHOO_PREF_FILE):
+    for path in tuple(_yahoo_token_paths()) + (YAHOO_PREF_FILE, YAHOO_OAUTH_STATUS_FILE):
         try:
             if path.exists():
                 path.unlink()
@@ -1499,7 +1584,7 @@ def yahoo_leagues():
             leagues=leagues,
             selected_league=_yahoo_selected_league(),
             connected=True,
-            build="v44-role-adjusted-scoring",
+            build="v45-yahoo-token-storage",
         )
     except Exception as exc:
         app.logger.exception("Yahoo league discovery failed")
@@ -1608,7 +1693,7 @@ def yahoo_sync():
             "league_name": league_name,
             "teams": payload["settings"]["team_count"],
         })
-        return jsonify(ok=True, build="v44-role-adjusted-scoring", **payload)
+        return jsonify(ok=True, build="v45-yahoo-token-storage", **payload)
     except Exception as exc:
         app.logger.exception("Yahoo league sync failed")
         return jsonify(
