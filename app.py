@@ -29,6 +29,9 @@ _data_dir_setting = str(os.getenv("GRIDIRON_DATA_DIR", "") or "").strip()
 DATA_DIR = Path(_data_dir_setting) if _data_dir_setting else (BASE_DIR / "data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 ESPN_SNAPSHOT = DATA_DIR / "espn_snapshot.json"
+DRAFT_CENTER_STATE_FILE = DATA_DIR / "draft_center_state.json"
+ESPN_LIVE_AUTH_FILE = DATA_DIR / "espn_live_draft_auth.json"
+_LIVE_ESPN_LEAGUES = {}
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "change-me")
@@ -67,6 +70,16 @@ def hide_legacy_connect_league_navigation(response):
                 "</script></head>",
                 1,
             )
+        # v49 Live Draft Auto: add the live tracker without replacing the
+        # existing Draft Center template. This keeps the current UI intact and
+        # lets this backend work with the page already deployed in the repo.
+        if request.path == "/draft-center" and "/static/draft_live.js" not in markup and "</body>" in markup:
+            markup = markup.replace(
+                "</body>",
+                '<script src="/static/draft_live.js?v=49" defer></script></body>',
+                1,
+            )
+
         response.set_data(markup)
 
     # Player Research changes frequently and older cached HTML/API payloads can
@@ -78,11 +91,11 @@ def hide_legacy_connect_league_navigation(response):
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
             response.headers["X-Gridiron-Player-Research-Build"] = "v31"
-        if request.path in {"/mock-draft", "/league-sync"} or request.path.startswith("/api/mock-draft/") or request.path == "/api/diagnostics/mock-draft" or request.path.startswith("/api/yahoo/") or request.path.startswith("/auth/yahoo"):
+        if request.path in {"/mock-draft", "/league-sync", "/draft-center"} or request.path.startswith("/api/mock-draft/") or request.path.startswith("/api/draft/live/") or request.path == "/api/diagnostics/mock-draft" or request.path.startswith("/api/yahoo/") or request.path.startswith("/auth/yahoo"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
-            response.headers["X-Gridiron-Build"] = "v48-yahoo-login-rewrite"
+            response.headers["X-Gridiron-Build"] = "v49-live-draft-auto"
     except Exception:
         pass
     return response
@@ -415,11 +428,69 @@ def page(template, **ctx):
         **ctx,
     )
 
+def _draft_state_default():
+    return {"drafted": [], "roster": [], "draft_log": []}
+
+
+def _draft_state_store_read():
+    try:
+        if DRAFT_CENTER_STATE_FILE.exists():
+            payload = json.loads(DRAFT_CENTER_STATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        app.logger.exception("Unable to read Draft Center state")
+    return {}
+
+
+def _draft_state_store_write(payload):
+    try:
+        DRAFT_CENTER_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = DRAFT_CENTER_STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(DRAFT_CENTER_STATE_FILE)
+        try:
+            os.chmod(DRAFT_CENTER_STATE_FILE, 0o600)
+        except Exception:
+            pass
+        return True
+    except Exception:
+        app.logger.exception("Unable to save Draft Center state")
+        return False
+
+
 def draft_state(key):
-    return session.get(f"draft_{key}", {"drafted":[],"roster":[],"draft_log":[]})
+    store = _draft_state_store_read()
+    saved = store.get(str(key))
+    if isinstance(saved, dict):
+        state = dict(_draft_state_default())
+        state.update(saved)
+        for field in ("drafted", "roster", "draft_log"):
+            if not isinstance(state.get(field), list):
+                state[field] = []
+        return state
+
+    # One-time migration from the original cookie-backed state.
+    legacy = session.get(f"draft_{key}")
+    if isinstance(legacy, dict):
+        state = dict(_draft_state_default())
+        state.update(legacy)
+        save_draft_state(key, state)
+        session.pop(f"draft_{key}", None)
+        return state
+    return _draft_state_default()
+
 
 def save_draft_state(key, state):
-    session[f"draft_{key}"] = state
+    store = _draft_state_store_read()
+    clean = dict(_draft_state_default())
+    if isinstance(state, dict):
+        clean.update(state)
+    for field in ("drafted", "roster", "draft_log"):
+        if not isinstance(clean.get(field), list):
+            clean[field] = []
+    store[str(key)] = clean
+    _draft_state_store_write(store)
 
 def snake_pick(round_no, slot, teams):
     return slot if round_no % 2 else teams-slot+1
@@ -716,9 +787,17 @@ def draft_center():
     key=request.args.get("league") or session.get("active_draft_league") or "espn-gramps"
     if key not in CONTEXTS: key="espn-gramps"
     session["active_draft_league"]=key
-    context=dict(CONTEXTS[key]); state=draft_state(key); strategy="balanced"
+    context=dict(CONTEXTS[key]); state=draft_state(key)
+    live_context = state.get("live_context") if isinstance(state.get("live_context"), dict) else {}
+    for live_key in ("draft_slot", "round", "pick_in_round"):
+        if live_context.get(live_key) is not None:
+            try:
+                context[live_key] = int(live_context[live_key])
+            except (TypeError, ValueError):
+                pass
+    strategy=str(live_context.get("strategy") or "balanced")
     context["next_picks"]=next_picks(context["draft_slot"],context["teams"],context["round"])
-    rec=recommendation(context,state,context["round"],context["pick_in_round"],strategy)
+    rec=intelligent_recommendation(context,state,context["round"],context["pick_in_round"],strategy)
     players=[player_score(p,context,state,context["round"],context["pick_in_round"],strategy) for p in PLAYERS]
     drafted=set(state["drafted"])
     for p in players: p["drafted"]=p["name"] in drafted
@@ -996,7 +1075,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v48-yahoo-login-rewrite",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v49-live-draft-auto",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -1018,6 +1097,12 @@ def espn_sync():
     try:
         from espn_api.football import League
         espn=League(league_id=int(data["league_id"]),year=int(data["season"]),swid=str(data["swid"]).strip(),espn_s2=str(data["espn_s2"]).strip())
+        _save_espn_live_auth({
+            "league_id": str(data["league_id"]).strip(),
+            "season": int(data["season"]),
+            "swid": str(data["swid"]).strip(),
+            "espn_s2": str(data["espn_s2"]).strip(),
+        })
         teams=[team_dict(t) for t in espn.teams]
         scoring=short_scoring(espn.settings)
         settings={"name":getattr(espn.settings,"name","ESPN League"),"team_count":len(teams),"reg_season_count":getattr(espn.settings,"reg_season_count",14) or 14,"playoff_team_count":getattr(espn.settings,"playoff_team_count",6) or 6,"scoring":scoring,"scoring_label":scoring}
@@ -4030,6 +4115,22 @@ def intelligent_recommendation(context, state, round_no, pick_no, strategy):
     ]
     tier_risk = "High" if len(same_tier) <= 2 else "Medium" if len(same_tier) <= 4 else "Low"
 
+    # v49 component view: expose the exact live signals the Draft Center
+    # should show while the room is updating. These do not apply a round
+    # penalty; they describe player quality, scoring, need, usage and value.
+    master_for_role = _current_master_player(best["name"])
+    role_player = dict(master_for_role) if isinstance(master_for_role, dict) else {}
+    role_player.update(best)
+    role_player["pos"] = best.get("pos")
+    usage_role, usage_score = _manual_usage_role_grade(role_player)
+    scoring_potential = round(_manual_projection_grade(
+        {**role_player, "projection": best.get("projection_2026") or best.get("projection") or 0},
+        {"player_pool": PLAYERS},
+        overall,
+    ))
+    player_quality = round(max(0, min(100, float(best.get("position_score") or 0))))
+    roster_need_score = round(max(0, min(100, float(need_score(best["pos"], counts, context)))))
+
     rationale = (
         f"{best['name']} grades as the best current pick using "
         f"{context['platform']} ADP, 2026 projection, 2025 production, "
@@ -4061,6 +4162,11 @@ def intelligent_recommendation(context, state, round_no, pick_no, strategy):
         "criteria_strengths": best["criteria_strengths"],
         "criteria_risks": best["criteria_risks"],
         "criteria_coverage": best["criteria_coverage"],
+        "player_quality": player_quality,
+        "scoring_potential": scoring_potential,
+        "roster_need_score": roster_need_score,
+        "usage_role": usage_role,
+        "usage_score": round(usage_score),
         "rationale": rationale,
         "next_best": scored[1:4],
     }
@@ -4104,6 +4210,280 @@ def draft_intelligence_api():
     )
     return jsonify(ok=True, recommendation=rec, context=context)
 
+def _save_espn_live_auth(payload):
+    """Keep ESPN draft credentials server-side for live draft polling.
+
+    Nothing from this file is returned to the browser. It is created only
+    after the same credentials have successfully opened the ESPN league.
+    """
+    try:
+        clean = {
+            "league_id": str(payload.get("league_id") or "").strip(),
+            "season": int(payload.get("season") or 2026),
+            "swid": str(payload.get("swid") or "").strip(),
+            "espn_s2": str(payload.get("espn_s2") or "").strip(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if not all((clean["league_id"], clean["swid"], clean["espn_s2"])):
+            return False
+        ESPN_LIVE_AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ESPN_LIVE_AUTH_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(clean, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(ESPN_LIVE_AUTH_FILE)
+        try:
+            os.chmod(ESPN_LIVE_AUTH_FILE, 0o600)
+        except Exception:
+            pass
+        # A successful resync should rebuild the in-memory League object with
+        # the newest credentials on the next live request.
+        _LIVE_ESPN_LEAGUES.clear()
+        return True
+    except Exception:
+        app.logger.exception("Unable to retain ESPN credentials for live draft tracking")
+        return False
+
+
+def _load_espn_live_auth():
+    try:
+        if not ESPN_LIVE_AUTH_FILE.exists():
+            return None
+        payload = json.loads(ESPN_LIVE_AUTH_FILE.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        if not all(str(payload.get(k) or "").strip() for k in ("league_id", "swid", "espn_s2")):
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def _live_player_position(name):
+    target = re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+    for player in PLAYERS:
+        key = re.sub(r"[^a-z0-9]", "", str(player.get("name") or "").lower())
+        if target and key == target:
+            return str(player.get("pos") or "")
+    try:
+        master = _current_master_player(name)
+        return str(master.get("position") or master.get("position_group") or "")
+    except Exception:
+        return ""
+
+
+def _espn_live_draft_rows():
+    auth = _load_espn_live_auth()
+    if not auth:
+        raise RuntimeError("Sync ESPN once before the draft so Live Auto can use the private-league connection.")
+
+    cache_key = f"{auth['league_id']}:{auth['season']}:{auth.get('swid','')}"
+    league = _LIVE_ESPN_LEAGUES.get(cache_key)
+    try:
+        if league is None:
+            from espn_api.football import League
+            league = League(
+                league_id=int(auth["league_id"]),
+                year=int(auth.get("season") or 2026),
+                swid=str(auth["swid"]),
+                espn_s2=str(auth["espn_s2"]),
+            )
+            _LIVE_ESPN_LEAGUES[cache_key] = league
+        else:
+            refresh = getattr(league, "refresh_draft", None)
+            if callable(refresh):
+                refresh()
+            else:
+                from espn_api.football import League
+                league = League(
+                    league_id=int(auth["league_id"]),
+                    year=int(auth.get("season") or 2026),
+                    swid=str(auth["swid"]),
+                    espn_s2=str(auth["espn_s2"]),
+                )
+                _LIVE_ESPN_LEAGUES[cache_key] = league
+    except Exception:
+        # One clean rebuild handles stale process cache/session cookies.
+        _LIVE_ESPN_LEAGUES.pop(cache_key, None)
+        raise
+
+    rows = []
+    for pick in list(getattr(league, "draft", None) or []):
+        try:
+            round_no = int(getattr(pick, "round_num", 0) or 0)
+            round_pick = int(getattr(pick, "round_pick", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        player_name = str(getattr(pick, "playerName", "") or "").strip()
+        if round_no <= 0 or round_pick <= 0 or not player_name:
+            continue
+        team = getattr(pick, "team", None)
+        team_name = str(
+            getattr(team, "team_name", "")
+            or getattr(team, "name", "")
+            or f"Team {round_pick}"
+        ).strip()
+        rows.append({
+            "round": round_no,
+            "round_pick": round_pick,
+            "player": player_name,
+            "position": _live_player_position(player_name),
+            "team": team_name,
+        })
+
+    # ESPN returns the round/pick coordinates. Convert them into a stable
+    # overall order so snake picks can identify the user's roster reliably.
+    rows.sort(key=lambda x: (x["round"], x["round_pick"]))
+    return rows
+
+
+def _sync_live_draft_state(key, context, rows, draft_slot, strategy):
+    teams = max(2, int(context.get("teams") or 12))
+    slot = max(1, min(teams, int(draft_slot or context.get("draft_slot") or 1)))
+    state = draft_state(key)
+
+    normalized = []
+    for row in rows:
+        round_no = int(row["round"])
+        round_pick = int(row["round_pick"])
+        overall = (round_no - 1) * teams + round_pick
+        normalized.append({**row, "overall": overall})
+    normalized.sort(key=lambda x: x["overall"])
+
+    # Only make the live feed authoritative after the first actual pick. This
+    # preserves pre-draft manual preparation until ESPN reports the draft began.
+    if normalized:
+        state["drafted"] = [row["player"] for row in normalized]
+        state["roster"] = [
+            row["player"] for row in normalized
+            if row["round_pick"] == snake_pick(row["round"], slot, teams)
+        ]
+        state["draft_log"] = [
+            {
+                "overall": row["overall"],
+                "round": row["round"],
+                "round_pick": row["round_pick"],
+                "player": row["player"],
+                "position": row.get("position") or "",
+                "team_label": (
+                    "Your Team"
+                    if row["round_pick"] == snake_pick(row["round"], slot, teams)
+                    else row.get("team") or f"Team {row['round_pick']}"
+                ),
+            }
+            for row in normalized
+        ]
+
+    last_overall = max([row["overall"] for row in normalized] or [0])
+    next_overall = last_overall + 1
+    current_round = ((next_overall - 1) // teams) + 1
+    current_pick = ((next_overall - 1) % teams) + 1
+    user_pick_in_round = snake_pick(current_round, slot, teams)
+    on_clock = current_pick == user_pick_in_round
+
+    state["live_context"] = {
+        "draft_slot": slot,
+        "round": current_round,
+        "pick_in_round": current_pick,
+        "strategy": str(strategy or "balanced"),
+        "pick_count": len(normalized),
+        "last_overall": last_overall,
+        "on_clock": on_clock,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    save_draft_state(key, state)
+    return state, current_round, current_pick, on_clock
+
+
+@app.get("/api/draft/live/status")
+def draft_live_status_api():
+    # Refresh CONTEXTS from the saved league snapshot on every worker before
+    # reading the live room. This matters when Gunicorn routes consecutive
+    # requests to different worker processes.
+    try:
+        draft_leagues()
+    except Exception:
+        pass
+    key = str(request.args.get("league_key") or session.get("active_draft_league") or "espn-gramps")
+    if key not in CONTEXTS:
+        key = "espn-gramps"
+    context = dict(CONTEXTS[key])
+    platform = str(context.get("platform") or "ESPN").upper()
+    strategy = str(request.args.get("strategy") or "balanced")
+    try:
+        draft_slot = int(request.args.get("draft_slot") or context.get("draft_slot") or 1)
+    except (TypeError, ValueError):
+        draft_slot = int(context.get("draft_slot") or 1)
+
+    if "ESPN" not in platform:
+        return jsonify(
+            ok=True,
+            build="v49-live-draft-auto",
+            live_available=False,
+            platform=platform,
+            status="manual",
+            message="Live Auto is enabled for ESPN in this build. The manual recommendation button still works for this league.",
+        )
+
+    auth = _load_espn_live_auth()
+    if not auth:
+        return jsonify(
+            ok=True,
+            build="v49-live-draft-auto",
+            live_available=False,
+            platform="ESPN",
+            status="needs_sync",
+            message="Sync ESPN once before the draft to enable automatic pick tracking.",
+        )
+
+    try:
+        rows = _espn_live_draft_rows()
+        state, current_round, current_pick, on_clock = _sync_live_draft_state(
+            key, context, rows, draft_slot, strategy
+        )
+        context["draft_slot"] = max(1, min(int(context.get("teams") or 12), int(draft_slot)))
+        context["round"] = current_round
+        context["pick_in_round"] = current_pick
+        context["next_picks"] = next_picks(
+            context["draft_slot"], context["teams"], current_round
+        )
+        rec = intelligent_recommendation(
+            context, state, current_round, current_pick, strategy
+        )
+        last_pick = rows[-1] if rows else None
+        revision = f"{len(rows)}:{last_pick.get('round',0) if last_pick else 0}:{last_pick.get('round_pick',0) if last_pick else 0}:{last_pick.get('player','') if last_pick else ''}:{context['draft_slot']}"
+        return jsonify(
+            ok=True,
+            build="v49-live-draft-auto",
+            live_available=True,
+            platform="ESPN",
+            status=("on_clock" if on_clock else "tracking" if rows else "waiting"),
+            pick_count=len(rows),
+            revision=revision,
+            current_round=current_round,
+            current_pick_in_round=current_pick,
+            current_overall=((current_round - 1) * context["teams"] + current_pick),
+            user_pick_in_round=snake_pick(current_round, context["draft_slot"], context["teams"]),
+            on_clock=on_clock,
+            upcoming_picks=context["next_picks"],
+            last_pick=last_pick,
+            roster=state.get("roster", []),
+            drafted_count=len(state.get("drafted", [])),
+            recommendation=rec,
+            checked_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except Exception as exc:
+        app.logger.warning("Live ESPN draft refresh failed: %s", exc)
+        return jsonify(
+            ok=True,
+            build="v49-live-draft-auto",
+            live_available=True,
+            platform="ESPN",
+            status="error",
+            message="Live Auto could not read the ESPN draft yet. The manual recommendation remains available.",
+            detail=str(exc)[:240],
+            checked_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+
 @app.post("/api/draft/pro/recommend")
 def draft_recommend_api():
     data = request.get_json(silent=True) or {}
@@ -4117,12 +4497,22 @@ def draft_recommend_api():
         context["draft_slot"], context["teams"], context["round"]
     )
 
+    state = draft_state(key)
+    strategy = str(data.get("strategy") or "balanced")
+    state["live_context"] = {
+        **(state.get("live_context") if isinstance(state.get("live_context"), dict) else {}),
+        "draft_slot": context["draft_slot"],
+        "round": context["round"],
+        "pick_in_round": context["pick_in_round"],
+        "strategy": strategy,
+    }
+    save_draft_state(key, state)
     rec = intelligent_recommendation(
         context,
-        draft_state(key),
+        state,
         context["round"],
         context["pick_in_round"],
-        str(data.get("strategy") or "balanced"),
+        strategy,
     )
     return jsonify(ok=True, recommendation=rec, context=context)
 
