@@ -18,6 +18,10 @@ from draft_evaluation_engine import (
     evaluate_player as evaluate_position_player,
     load_position_weights,
 )
+from draft_intelligence_engine import (
+    ENGINE_VERSION as DRAFT_INTELLIGENCE_VERSION,
+    rank_candidates as rank_draft_candidates,
+)
 
 load_dotenv()
 
@@ -3919,15 +3923,93 @@ def manual_mock_state(mock_id):
         )
         scored.append(item)
 
-    # Add Draft-Center-style decision analytics after the complete available
-    # pool is known, so tier scarcity and next-pick survival are contextual.
+    # v55: Run the same Draft Intelligence Engine used by the real Draft
+    # Center.  This makes mock-draft decisions react to the strength/weakness
+    # of the entire remaining position group, league rules and players already
+    # taken -- not just ADP and the candidate's isolated score.
+    prior_points_map = _manual_2025_points_map([item.get("name") for item in scored])
+    engine_inputs = []
     for item in scored:
-        item["analytics"] = _manual_candidate_analytics(
-            mock, item, counts=counts, overall=overall, round_no=round_no, available=scored
+        components = _manual_pick_score_components(
+            mock, item, counts=counts, overall=overall, round_no=round_no
         )
-        # Keep Pick Score sourced from the same component calculation displayed
-        # in the analytics panel.
+        item["_draft_components"] = components
+        engine_inputs.append({
+            "name": item.get("name"),
+            "pos": item.get("pos"),
+            "team": item.get("team"),
+            "rank": item.get("rank"),
+            "tier": item.get("tier"),
+            "adp": item.get("adp"),
+            "projection": item.get("projection"),
+            "previous_points": prior_points_map.get(item.get("name"), 0),
+            "quality_score": components.get("quality_grade"),
+            "scoring_score": components.get("scoring_grade"),
+            "history_score": _manual_history_grade(
+                str(item.get("pos") or "").upper(), prior_points_map.get(item.get("name"), 0)
+            ),
+            "usage_score": components.get("usage_grade"),
+            "role_label": components.get("role_label"),
+            "injury_status": item.get("injury_status"),
+            "active": item.get("active"),
+        })
+
+    next_pick = _manual_next_user_pick(mock)
+    next_overall = int(next_pick.get("overall")) if next_pick else None
+    league_profile = dict(CONTEXTS.get(mock.get("league_key"), CONTEXTS["espn-gramps"]))
+    league_profile.update({
+        "platform": mock.get("platform") or league_profile.get("platform"),
+        "teams": int(mock.get("teams") or league_profile.get("teams") or 12),
+        "starters": dict(league_profile.get("starters") or {}),
+    })
+    engine = rank_draft_candidates(
+        engine_inputs,
+        league=league_profile,
+        roster=roster,
+        recent_picks=list(mock.get("picks") or []),
+        overall_pick=int(overall),
+        next_overall=next_overall,
+        round_no=int(round_no),
+        total_rounds=int(mock.get("rounds") or 15),
+    )
+    engine_by_name = {
+        _mock_identity_key(candidate.get("name")): candidate
+        for candidate in engine.get("ranked", [])
+    }
+
+    for item in scored:
+        decision = engine_by_name.get(_mock_identity_key(item.get("name"))) or {}
+        comp = decision.get("components") or {}
+        group = decision.get("position_group") or {}
+        tier_remaining = int(group.get("top_tier_remaining") or 0)
+        urgency = int(group.get("urgency_score") or 0)
+        item["analytics"] = {
+            "pick_score": int(decision.get("draft_score") or item.get("pick_score") or 0),
+            "player_quality": int(comp.get("player_quality") or 0),
+            "scoring_potential": int(comp.get("scoring_potential") or 0),
+            "roster_need": int(comp.get("roster_need") or 0),
+            "league_fit": int(comp.get("league_fit") or 0),
+            "group_urgency": int(comp.get("group_urgency") or 0),
+            "usage_score": int(comp.get("usage_role") or 0),
+            "usage_role": decision.get("role_label") or (item.get("_draft_components") or {}).get("role_label") or "Role unknown",
+            "market_grade": int(comp.get("market_value") or 0),
+            "adp": decision.get("adp"),
+            "value_vs_adp": decision.get("adp_value"),
+            "projection_2026": round(float(item.get("projection") or 0), 1),
+            "survival_probability": int(decision.get("survival_probability") or 0),
+            "next_pick_overall": next_overall,
+            "scarcity": "High" if urgency >= 78 else "Medium" if urgency >= 58 else "Low",
+            "tier_risk": "High" if tier_remaining and tier_remaining <= 2 else "Medium" if tier_remaining and tier_remaining <= 4 else "Low",
+            "tier_remaining": tier_remaining,
+            "position_group": group,
+            "recommendation": decision.get("recommendation") or "CONSIDER",
+            "reasons": decision.get("reasons") or [],
+            "rationale": decision.get("rationale") or "",
+            "engine_version": DRAFT_INTELLIGENCE_VERSION,
+            "engine_weights": decision.get("weights") or engine.get("weights") or {},
+        }
         item["pick_score"] = item["analytics"]["pick_score"]
+        item.pop("_draft_components", None)
 
     recommendations = sorted(
         scored,
@@ -3963,6 +4045,9 @@ def manual_mock_state(mock_id):
         ranking_source=ranking_source,
         platform_adp_loaded=has_platform_adp,
         next_user_pick=_manual_next_user_pick(mock),
+        draft_engine_version=DRAFT_INTELLIGENCE_VERSION,
+        draft_engine_weights=engine.get("weights") or {},
+        position_groups=engine.get("position_groups") or {},
         recommendations=[{
             "name": candidate.get("name"),
             "pos": candidate.get("pos"),
@@ -4174,28 +4259,91 @@ def _draft_survival_probability(adp, next_overall):
     return round(max(5, min(95, 82 * exp(-max(0, distance) / 18))))
 
 def intelligent_recommendation(context, state, round_no, pick_no, strategy):
-    overall = (round_no - 1) * context["teams"] + pick_no
+    """Return the live-draft recommendation using the shared Draft IQ engine.
+
+    Live Draft Center and Mock Draft now use the same decision framework.  ADP
+    remains a market input, but the ranking is driven primarily by player
+    quality, projected points, roster need, league fit, position-group
+    strength/weakness, role/usage and next-pick risk.
+    """
+    overall = (round_no - 1) * int(context["teams"]) + pick_no
     next_round = round_no + 1
     next_overall = (
-        (next_round - 1) * context["teams"]
-        + snake_pick(next_round, context["draft_slot"], context["teams"])
+        (next_round - 1) * int(context["teams"])
+        + snake_pick(next_round, int(context["draft_slot"]), int(context["teams"]))
     )
 
-    counts = position_counts(state["roster"])
-    drafted = set(state["drafted"])
-    scored = []
+    # Use the same deep, current player union that powers the mock draft.  This
+    # avoids a live draft recommendation pool that ends after the original
+    # small preseason list.
+    try:
+        candidate_pool = _build_dynamic_mock_pool(context)
+    except Exception:
+        app.logger.exception("Draft Intelligence could not build the dynamic player pool")
+        candidate_pool = list(PLAYERS)
+    if len(candidate_pool) < 80:
+        candidate_pool = list(PLAYERS)
 
-    for base in PLAYERS:
-        if base["name"] in drafted:
+    drafted = {_mock_identity_key(name) for name in (state.get("drafted") or [])}
+    pool_lookup = {_mock_identity_key(p.get("name")): p for p in candidate_pool}
+
+    # Resolve the user's current roster against the same complete pool.
+    roster_players = []
+    for name in state.get("roster") or []:
+        base = pool_lookup.get(_mock_identity_key(name)) or _current_master_player(name) or {}
+        pos = base.get("pos") or base.get("position") or ((base.get("fantasy_positions") or [""])[0])
+        roster_players.append({"name": name, "pos": pos, "team": base.get("team")})
+    counts = Counter(_pos for _pos in (str(p.get("pos") or "").upper() for p in roster_players) if _pos)
+
+    scored = []
+    engine_inputs = []
+    available_for_scarcity = [p for p in candidate_pool if _mock_identity_key(p.get("name")) not in drafted]
+    # Read prior-season fantasy points once for the whole board rather than
+    # re-opening platform/stat files for every candidate.
+    prior_points_map = _manual_2025_points_map([p.get("name") for p in available_for_scarcity])
+
+    for base in available_for_scarcity:
+        name = str(base.get("name") or "").strip()
+        pos = str(base.get("pos") or base.get("position") or "").upper()
+        if not name or pos not in {"QB", "RB", "WR", "TE", "K", "DEF"}:
             continue
 
-        enriched = _draft_player_enrichment(base, context, overall)
-        need = need_score(base["pos"], counts, context)
-        scarcity_label, scarcity_num = scarcity(base["pos"], drafted)
+        base = dict(base)
+        base["name"] = name
+        base["pos"] = pos
+        base.setdefault("rank", 999)
+        base.setdefault("tier", 9)
+        base.setdefault("adp", 999)
+        base.setdefault("projection", 0)
 
-        production_signal = min(12, enriched["projection_2026"] / 28.0)
-        history_signal = min(10, enriched["points_2025"] / 30.0)
-        adp_signal = max(-10, min(14, enriched["value_vs_adp"] * 0.9))
+        try:
+            platform_adp = float(base.get("adp") or base.get("rank") or 999)
+        except (TypeError, ValueError):
+            platform_adp = 999.0
+        if not 0 < platform_adp < 999:
+            platform_adp = 999.0
+        projection_2026 = float(base.get("projection") or 0)
+        prior_points = float(
+            base.get("fantasy_points_ppr")
+            or base.get("fantasy_points")
+            or prior_points_map.get(name)
+            or 0
+        )
+        enriched = {
+            "current_team": _resolve_rostered_team(base.get("team"), base.get("team")),
+            "platform_adp": round(platform_adp, 1) if platform_adp < 999 else 999,
+            "projection_2026": round(projection_2026, 1),
+            "points_2025": round(prior_points, 1),
+            "value_vs_adp": round(overall - platform_adp, 1) if platform_adp < 999 else 0,
+        }
+        need = need_score(pos, counts, context)
+
+        same_pos_top = [
+            p for p in available_for_scarcity
+            if str(p.get("pos") or "").upper() == pos and int(p.get("tier") or 99) <= 3
+        ]
+        n = len(same_pos_top)
+        scarcity_label, scarcity_num = (("High", 90) if n <= 4 else ("Medium", 60) if n <= 7 else ("Low", 35))
 
         position_metrics = position_baseline_metrics(
             projection=enriched["projection_2026"],
@@ -4204,91 +4352,130 @@ def intelligent_recommendation(context, state, round_no, pick_no, strategy):
             roster_need=need,
             scarcity=scarcity_num,
         )
-        position_evaluation = evaluate_position_player(
-            base["pos"],
-            position_metrics,
+        position_evaluation = evaluate_position_player(pos, position_metrics)
+
+        current_master = _current_master_player(name)
+        role_player = dict(current_master) if isinstance(current_master, dict) else {}
+        role_player.update(base)
+        role_player.update(enriched)
+        role_player["pos"] = pos
+        role_label, usage_score = _manual_usage_role_grade(role_player)
+        scoring_grade = _manual_projection_grade(
+            {**role_player, "projection": enriched.get("projection_2026") or base.get("projection") or 0},
+            {"player_pool": candidate_pool},
+            overall,
         )
+        history_grade = _manual_history_grade(pos, enriched.get("points_2025") or 0)
+        quality_grade = max(20.0, min(99.0,
+            float(position_evaluation.get("score") or 50) * 0.50
+            + float(scoring_grade) * 0.30
+            + float(usage_score) * 0.20
+        ))
 
-        score = (
-            43
-            + position_evaluation["score"] * 0.32
-            + production_signal
-            + history_signal
-            + adp_signal
-            + need * 0.06
-            + scarcity_num * 0.03
-            + scoring_bonus(base, context["scoring"])
-            + strategy_bonus(base, strategy, round_no)
-        )
-
-        survival = _draft_survival_probability(enriched["platform_adp"], next_overall)
-        # Reward players unlikely to make it back to the user.
-        score += (100 - survival) * 0.07
-
-        fit = "Excellent" if need >= 80 else "Good" if need >= 55 else "Depth"
-
-        scored.append({
+        item = {
             **base,
             **enriched,
-            "iq_score": round(max(40, min(99, score))),
-            "roster_fit": fit,
-            "scarcity": scarcity_label,
-            "survival_probability": survival,
             "position_evaluation": position_evaluation,
             "position_score": position_evaluation["score"],
             "draft_action": position_evaluation["action"],
             "criteria_strengths": position_evaluation["strengths"],
             "criteria_risks": position_evaluation["risks"],
             "criteria_coverage": position_evaluation["coverage"],
+            "roster_fit": "Excellent" if need >= 80 else "Good" if need >= 55 else "Depth",
+            "scarcity": scarcity_label,
+            "usage_role": role_label,
+            "usage_score": round(usage_score),
+        }
+        scored.append(item)
+        engine_inputs.append({
+            "name": name,
+            "pos": pos,
+            "team": enriched.get("current_team") or base.get("team"),
+            "rank": base.get("rank"),
+            "tier": base.get("tier"),
+            "adp": enriched.get("platform_adp"),
+            "projection": enriched.get("projection_2026"),
+            "previous_points": enriched.get("points_2025"),
+            "quality_score": quality_grade,
+            "scoring_score": scoring_grade,
+            "history_score": history_grade,
+            "usage_score": usage_score,
+            "role_label": role_label,
+            "injury_status": role_player.get("injury_status") or base.get("injury_status"),
+            "active": role_player.get("active", base.get("active")),
         })
+
+    if not engine_inputs:
+        return recommendation(context, state, round_no, pick_no, strategy)
+
+    recent_picks = []
+    for pick in state.get("draft_log") or []:
+        row = dict(pick)
+        if not row.get("pos"):
+            player = pool_lookup.get(_mock_identity_key(row.get("player"))) or {}
+            row["pos"] = player.get("pos")
+        recent_picks.append(row)
+
+    league_profile = dict(context)
+    league_profile["teams"] = int(context.get("teams") or 12)
+    league_profile["starters"] = dict(context.get("starters") or {})
+    total_rounds = int(context.get("rounds") or context.get("roster_size") or 15)
+
+    engine = rank_draft_candidates(
+        engine_inputs,
+        league=league_profile,
+        roster=roster_players,
+        recent_picks=recent_picks,
+        overall_pick=overall,
+        next_overall=next_overall,
+        round_no=round_no,
+        total_rounds=total_rounds,
+        strategy=strategy,
+    )
+    engine_by_name = {_mock_identity_key(row.get("name")): row for row in engine.get("ranked", [])}
+
+    for item in scored:
+        decision = engine_by_name.get(_mock_identity_key(item.get("name"))) or {}
+        if not decision:
+            continue
+        components = decision.get("components") or {}
+        group = decision.get("position_group") or {}
+        item["iq_score"] = int(decision.get("draft_score") or 0)
+        item["draft_engine"] = decision
+        item["survival_probability"] = int(decision.get("survival_probability") or 0)
+        item["player_quality"] = int(components.get("player_quality") or 0)
+        item["scoring_potential"] = int(components.get("scoring_potential") or 0)
+        item["roster_need_score"] = int(components.get("roster_need") or 0)
+        item["league_fit_score"] = int(components.get("league_fit") or 0)
+        item["group_urgency_score"] = int(components.get("group_urgency") or 0)
+        item["market_grade"] = int(components.get("market_value") or 0)
+        item["usage_score"] = int(components.get("usage_role") or item.get("usage_score") or 0)
+        item["usage_role"] = decision.get("role_label") or item.get("usage_role") or "Role unknown"
+        item["position_group"] = group
+        item["recommendation"] = decision.get("recommendation")
+        item["rationale"] = decision.get("rationale")
+        urgency = int(group.get("urgency_score") or 0)
+        item["scarcity"] = "High" if urgency >= 78 else "Medium" if urgency >= 58 else "Low"
 
     scored.sort(
         key=lambda x: (
-            x["iq_score"],
-            -x["projection_2026"],
-            -x["points_2025"],
-            -x["rank"],
+            int(x.get("iq_score") or 0),
+            int(x.get("player_quality") or 0),
+            int(x.get("scoring_potential") or 0),
+            -float(x.get("platform_adp") or 999),
         ),
         reverse=True,
     )
-
     if not scored:
         return recommendation(context, state, round_no, pick_no, strategy)
 
     best = scored[0]
-    same_tier = [
-        p for p in scored
-        if p["pos"] == best["pos"] and p.get("tier") == best.get("tier")
-    ]
-    tier_risk = "High" if len(same_tier) <= 2 else "Medium" if len(same_tier) <= 4 else "Low"
+    group = best.get("position_group") or {}
+    tier_remaining = int(group.get("top_tier_remaining") or 0)
+    tier_risk = "High" if tier_remaining and tier_remaining <= 2 else "Medium" if tier_remaining and tier_remaining <= 4 else "Low"
 
-    # v49 component view: expose the exact live signals the Draft Center
-    # should show while the room is updating. These do not apply a round
-    # penalty; they describe player quality, scoring, need, usage and value.
-    master_for_role = _current_master_player(best["name"])
-    role_player = dict(master_for_role) if isinstance(master_for_role, dict) else {}
-    role_player.update(best)
-    role_player["pos"] = best.get("pos")
-    usage_role, usage_score = _manual_usage_role_grade(role_player)
-    scoring_potential = round(_manual_projection_grade(
-        {**role_player, "projection": best.get("projection_2026") or best.get("projection") or 0},
-        {"player_pool": PLAYERS},
-        overall,
-    ))
-    player_quality = round(max(0, min(100, float(best.get("position_score") or 0))))
-    roster_need_score = round(max(0, min(100, float(need_score(best["pos"], counts, context)))))
-
-    rationale = (
-        f"{best['name']} grades as the best current pick using "
-        f"{context['platform']} ADP, 2026 projection, 2025 production, "
-        f"positional need and scarcity. "
-        f"ADP: {best['platform_adp'] if best['platform_adp'] < 999 else 'N/A'}; "
-        f"2025 PPR points: {best['points_2025']}; "
-        f"2026 projection: {best['projection_2026']}; "
-        f"chance of surviving to your next pick: {best['survival_probability']}%. "
-        f"Position model: {best['position_evaluation']['grade']} "
-        f"({best['position_evaluation']['score']}/100) — "
-        f"{best['position_evaluation']['action']}."
+    rationale = best.get("rationale") or (
+        f"{best['name']} is the top Draft Intelligence recommendation at pick #{overall}."
     )
 
     return {
@@ -4305,15 +4492,20 @@ def intelligent_recommendation(context, state, round_no, pick_no, strategy):
         "survival_probability": best["survival_probability"],
         "position_evaluation": best["position_evaluation"],
         "position_score": best["position_score"],
-        "draft_action": best["draft_action"],
+        "draft_action": best.get("recommendation") or best["draft_action"],
         "criteria_strengths": best["criteria_strengths"],
         "criteria_risks": best["criteria_risks"],
         "criteria_coverage": best["criteria_coverage"],
-        "player_quality": player_quality,
-        "scoring_potential": scoring_potential,
-        "roster_need_score": roster_need_score,
-        "usage_role": usage_role,
-        "usage_score": round(usage_score),
+        "player_quality": best.get("player_quality"),
+        "scoring_potential": best.get("scoring_potential"),
+        "roster_need_score": best.get("roster_need_score"),
+        "league_fit_score": best.get("league_fit_score"),
+        "group_urgency_score": best.get("group_urgency_score"),
+        "usage_role": best.get("usage_role"),
+        "usage_score": best.get("usage_score"),
+        "position_group": group,
+        "engine_version": DRAFT_INTELLIGENCE_VERSION,
+        "engine_weights": engine.get("weights") or {},
         "rationale": rationale,
         "next_best": scored[1:4],
     }
