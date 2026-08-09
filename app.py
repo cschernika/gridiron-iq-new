@@ -776,11 +776,20 @@ def mock_draft():
     context = dict(CONTEXTS[key])
     history = mock_history()
     summary = summarize_mock_batch(history[-25:]) if history else {}
+    roster_defaults = {}
+    for league_key, league_context in CONTEXTS.items():
+        default_requirements = _mock_roster_template(dict(league_context))
+        roster_defaults[league_key] = {
+            **default_requirements,
+            "teams": int(league_context.get("teams") or 12),
+            "draft_slot": int(league_context.get("draft_slot") or 7),
+        }
     return page(
         "mock_draft.html",
         draft_leagues=draft_leagues(),
         active_league_key=key,
         mock_context=context,
+        mock_roster_defaults=roster_defaults,
         mock_history=history[-20:][::-1],
         mock_summary=summary,
         manual_mocks=_manual_mock_list(20),
@@ -1997,7 +2006,7 @@ MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
 BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
-MOCK_DRAFT_BUILD = "mock-draft-v53-slot-analytics"
+MOCK_DRAFT_BUILD = "mock-draft-v56-roster-strategy"
 MOCK_DIRECTORY_MINIMUMS = {
     "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
 }
@@ -2894,8 +2903,15 @@ def _manual_pick_score_components(mock, player, counts=None, overall=None, round
         for roster_position, amount in counts.items()
         for _ in range(int(amount or 0))
     ]
-    allowed_positions = _mock_allowed_positions(roster, round_no, total_rounds)
-    need_signal = _mock_position_need_score(position, roster, round_no, total_rounds)
+    requirements = _mock_requirements_for_mock(mock)
+    strategy = str(mock.get("draft_strategy") or "balanced")
+    scoring = str(mock.get("scoring") or "")
+    allowed_positions = _mock_allowed_positions(
+        roster, round_no, total_rounds, requirements, scoring, strategy
+    )
+    need_signal = _mock_position_need_score(
+        position, roster, round_no, total_rounds, requirements, scoring, strategy
+    )
     roster_fit_grade = max(0.0, min(98.0, 72.0 + need_signal * 2.30))
     if position not in allowed_positions:
         roster_fit_grade = min(roster_fit_grade, 5.0)
@@ -3135,9 +3151,12 @@ def _manual_balance_score(mock, roster):
     selected = len(roster)
     remaining = max(0, total_rounds - selected)
     counts = Counter(player.get("pos") for player in roster)
-    targets = _mock_roster_plan(total_rounds)
-    minimums = _mock_mandatory_minimums(total_rounds)
-    caps = _mock_position_caps(total_rounds)
+    requirements = _mock_requirements_for_mock(mock)
+    strategy = str(mock.get("draft_strategy") or "balanced")
+    scoring = str(mock.get("scoring") or "")
+    targets = _mock_roster_plan(total_rounds, requirements, scoring, strategy)
+    minimums = _mock_mandatory_minimums(total_rounds, requirements)
+    caps = _mock_position_caps(total_rounds, requirements, scoring, strategy)
     score = 96.0
 
     for position, maximum in caps.items():
@@ -3151,10 +3170,8 @@ def _manual_balance_score(mock, roster):
         and int(player.get("round") or 1) < late_round_start
     )
 
-    missing_required = sum(
-        max(0, required - counts.get(position, 0))
-        for position, required in minimums.items()
-    )
+    completion = _mock_requirement_status(requirements, roster)
+    missing_required = int(completion.get("required_open", 0))
     # Missing starters are penalized only when the remaining selections can no
     # longer fill them. This keeps an otherwise good early live grade honest
     # without punishing positions that should be drafted later.
@@ -3342,43 +3359,188 @@ def _mock_platform_adp(context):
     return platform, data
 
 def _mock_roster_template(context):
-    # Use connected league settings if available, otherwise sensible defaults.
+    """Editable mock-draft lineup defaults, preferring synced league settings."""
     scoring = str(context.get("scoring") or "")
+    starters = context.get("starters") if isinstance(context.get("starters"), dict) else {}
+    normalized = {}
+    for key, value in starters.items():
+        label = str(key or "").upper().replace("D/ST", "DEF").replace("DST", "DEF")
+        try:
+            normalized[label] = max(0, int(value or 0))
+        except (TypeError, ValueError):
+            pass
     return {
-        "QB": 1,
-        "RB": 2,
-        "WR": 2 if "Half" in scoring else 3,
-        "TE": 1,
-        "FLEX": 1,
-        "K": 1,
-        "DEF": 1,
-        "BENCH": 6,
+        "QB": normalized.get("QB", 1),
+        "RB": normalized.get("RB", 2),
+        "WR": normalized.get("WR", 2 if "Half" in scoring else 3),
+        "TE": normalized.get("TE", 1),
+        "FLEX": normalized.get("FLEX", normalized.get("W/R/T", 1)),
+        "K": normalized.get("K", 1),
+        "DEF": normalized.get("DEF", 1),
+        "BENCH": max(0, int(context.get("bench_spots") or context.get("bench") or 6)),
     }
+
+
+def _mock_normalize_roster_requirements(raw, context=None):
+    defaults = _mock_roster_template(context or {})
+    source = raw if isinstance(raw, dict) else {}
+    result = {}
+    for position in ("QB", "RB", "WR", "TE", "FLEX", "K", "DEF", "BENCH"):
+        value = source.get(position, source.get("D/ST") if position == "DEF" else None)
+        if value is None:
+            value = defaults.get(position, 0)
+        try:
+            result[position] = max(0, min(20, int(value or 0)))
+        except (TypeError, ValueError):
+            result[position] = int(defaults.get(position, 0) or 0)
+    return result
+
+
+def _mock_requirements_for_mock(mock):
+    context = dict(CONTEXTS.get(mock.get("league_key"), CONTEXTS["espn-gramps"]))
+    return _mock_normalize_roster_requirements(mock.get("roster_requirements"), context)
+
+
+def _mock_requirements_starters(requirements):
+    requirements = _mock_normalize_roster_requirements(requirements or {}, {})
+    return {
+        "QB": requirements["QB"],
+        "RB": requirements["RB"],
+        "WR": requirements["WR"],
+        "TE": requirements["TE"],
+        "FLEX": requirements["FLEX"],
+        "K": requirements["K"],
+        "DEF": requirements["DEF"],
+    }
+
+
+def _mock_league_profile(mock):
+    profile = dict(CONTEXTS.get(mock.get("league_key"), CONTEXTS["espn-gramps"]))
+    requirements = _mock_requirements_for_mock(mock)
+    strategy = str(mock.get("draft_strategy") or "balanced")
+    profile.update({
+        "platform": mock.get("platform") or profile.get("platform"),
+        "teams": int(mock.get("teams") or profile.get("teams") or 12),
+        "starters": _mock_requirements_starters(requirements),
+        "bench_spots": int(requirements.get("BENCH", 0)),
+        "roster_size": int(mock.get("rounds") or sum(requirements.values())),
+        "position_targets": _mock_position_targets_from_requirements(
+            requirements, mock.get("scoring") or profile.get("scoring"), strategy
+        ),
+    })
+    return profile
+
+
+def _mock_position_targets_from_requirements(requirements, scoring="", strategy="balanced"):
+    """Create soft total-position targets for the flexible/bench portion.
+
+    Direct starters remain hard requirements. These totals are *strategy
+    targets*, not rigid quotas, so the Draft Intelligence Engine may deviate
+    when a tier/value opportunity is clearly better.
+    """
+    req = _mock_normalize_roster_requirements(requirements or {}, {})
+    plan = {pos: int(req.get(pos, 0)) for pos in ("QB", "RB", "WR", "TE", "K", "DEF")}
+    flexible_spots = int(req.get("FLEX", 0)) + int(req.get("BENCH", 0))
+    strategy_key = str(strategy or "balanced").lower().replace("_", "-")
+    scoring_label = str(scoring or "").upper()
+
+    # One reserve QB/TE is useful in deeper benches, but the engine should not
+    # burn multiple premium picks on replaceable backups.
+    if flexible_spots >= 5 and plan.get("QB", 0) > 0 and strategy_key != "late-qb":
+        plan["QB"] += 1
+        flexible_spots -= 1
+    if flexible_spots >= 5 and plan.get("TE", 0) > 0:
+        plan["TE"] += 1
+        flexible_spots -= 1
+
+    if strategy_key in {"zero-rb", "hero-rb"}:
+        order = ["WR", "WR", "RB", "WR", "RB", "TE"]
+    elif strategy_key in {"robust-rb", "rb-heavy"}:
+        order = ["RB", "RB", "WR", "RB", "WR", "TE"]
+    elif "FULL" in scoring_label or ("PPR" in scoring_label and "HALF" not in scoring_label):
+        order = ["WR", "RB", "WR", "RB", "WR", "TE", "RB"]
+    else:
+        order = ["RB", "WR", "RB", "WR", "RB", "TE", "WR"]
+
+    for index in range(max(0, flexible_spots)):
+        plan[order[index % len(order)]] += 1
+    return plan
+
 
 def _mock_team_counts(team_roster):
     return Counter(p.get("pos") for p in team_roster)
 
-def _mock_roster_plan(total_rounds):
-    """Build a practical redraft roster plan for 6-15 round simulations."""
+
+def _mock_requirement_status(requirements, roster):
+    req = _mock_normalize_roster_requirements(requirements or {}, {})
+    counts = _mock_team_counts(roster)
+    direct_positions = ("QB", "RB", "WR", "TE", "K", "DEF")
+    direct_filled = {pos: min(counts.get(pos, 0), req.get(pos, 0)) for pos in direct_positions}
+    direct_missing = {pos: max(0, req.get(pos, 0) - counts.get(pos, 0)) for pos in direct_positions}
+    extra_flex = sum(max(0, counts.get(pos, 0) - req.get(pos, 0)) for pos in ("RB", "WR", "TE"))
+    flex_filled = min(req.get("FLEX", 0), extra_flex)
+    flex_missing = max(0, req.get("FLEX", 0) - flex_filled)
+    starter_filled = sum(direct_filled.values()) + flex_filled
+    starter_required = sum(req.get(pos, 0) for pos in direct_positions) + req.get("FLEX", 0)
+    bench_used = max(0, len(roster) - starter_filled)
+    bench_required = req.get("BENCH", 0)
+    required_open = sum(direct_missing.values()) + flex_missing
+    total_roster = starter_required + bench_required
+    remaining_picks = max(0, total_roster - len(roster))
+
+    priority = [pos for pos in direct_positions if direct_missing.get(pos, 0) > 0]
+    if flex_missing:
+        priority.append("FLEX")
+    return {
+        "requirements": req,
+        "counts": dict(counts),
+        "direct_filled": direct_filled,
+        "direct_missing": direct_missing,
+        "flex_filled": flex_filled,
+        "flex_missing": flex_missing,
+        "starter_filled": starter_filled,
+        "starter_required": starter_required,
+        "bench_used": bench_used,
+        "bench_required": bench_required,
+        "required_open": required_open,
+        "total_roster": total_roster,
+        "remaining_picks": remaining_picks,
+        "priority_positions": priority,
+        "complete": len(roster) >= total_roster and required_open == 0,
+        "completion_percent": round(100 * len(roster) / max(1, total_roster)),
+    }
+
+
+def _mock_roster_plan(total_rounds, requirements=None, scoring="", strategy="balanced"):
+    """Build a practical roster plan, honoring editable mock requirements."""
+    if requirements:
+        return _mock_position_targets_from_requirements(requirements, scoring, strategy)
     total_rounds = max(6, int(total_rounds or 12))
     plan = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 0, "DEF": 0}
-
     if total_rounds >= 8:
         plan["K"] = 1
         plan["DEF"] = 1
-
     remaining = total_rounds - sum(plan.values())
     if total_rounds >= 14 and remaining > 0:
         plan["QB"] += 1
         remaining -= 1
-
     depth_order = ("RB", "WR", "RB", "WR", "RB", "WR", "TE")
     for index in range(max(0, remaining)):
         plan[depth_order[index % len(depth_order)]] += 1
     return plan
 
-def _mock_position_caps(total_rounds):
-    plan = _mock_roster_plan(total_rounds)
+
+def _mock_position_caps(total_rounds, requirements=None, scoring="", strategy="balanced"):
+    plan = _mock_roster_plan(total_rounds, requirements, scoring, strategy)
+    if requirements:
+        return {
+            "QB": plan["QB"] + 1,
+            "RB": plan["RB"] + 1,
+            "WR": plan["WR"] + 1,
+            "TE": plan["TE"] + 1,
+            "K": max(0, int(_mock_normalize_roster_requirements(requirements, {}).get("K", 0))),
+            "DEF": max(0, int(_mock_normalize_roster_requirements(requirements, {}).get("DEF", 0))),
+        }
     return {
         "QB": plan["QB"],
         "RB": plan["RB"] + 1,
@@ -3388,43 +3550,50 @@ def _mock_position_caps(total_rounds):
         "DEF": 1 if plan["DEF"] else 0,
     }
 
-def _mock_mandatory_minimums(total_rounds):
+
+def _mock_mandatory_minimums(total_rounds, requirements=None):
+    if requirements:
+        req = _mock_normalize_roster_requirements(requirements, {})
+        return {pos: req.get(pos, 0) for pos in ("QB", "RB", "WR", "TE", "K", "DEF")}
     minimums = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 0, "DEF": 0}
     if int(total_rounds) >= 8:
         minimums["K"] = 1
         minimums["DEF"] = 1
     return minimums
 
-def _mock_allowed_positions(roster, round_no, total_rounds):
-    """Prevent impossible rosters and force unfilled starters at the end."""
+
+def _mock_allowed_positions(roster, round_no, total_rounds, requirements=None, scoring="", strategy="balanced"):
+    """Prevent impossible rosters and force configured starters at the end."""
     counts = _mock_team_counts(roster)
-    caps = _mock_position_caps(total_rounds)
-    minimums = _mock_mandatory_minimums(total_rounds)
+    caps = _mock_position_caps(total_rounds, requirements, scoring, strategy)
+    minimums = _mock_mandatory_minimums(total_rounds, requirements)
     remaining_picks = max(1, int(total_rounds) - len(roster))
-    missing = {
-        pos: max(0, required - counts.get(pos, 0))
-        for pos, required in minimums.items()
-    }
-    missing_total = sum(missing.values())
+    missing = {pos: max(0, required - counts.get(pos, 0)) for pos, required in minimums.items()}
+    flex_missing = 0
+    if requirements:
+        status = _mock_requirement_status(requirements, roster)
+        flex_missing = int(status.get("flex_missing", 0))
+    missing_total = sum(missing.values()) + flex_missing
 
     if missing_total and remaining_picks <= missing_total:
-        return {pos for pos, amount in missing.items() if amount > 0}
+        forced = {pos for pos, amount in missing.items() if amount > 0}
+        if flex_missing:
+            forced.update({"RB", "WR", "TE"})
+        return forced
 
-    allowed = {
-        pos for pos, maximum in caps.items()
-        if maximum > 0 and counts.get(pos, 0) < maximum
-    }
-    # Kicker and defense belong in the final three rounds unless a short draft
-    # has reached the point where a required slot must be filled.
+    allowed = {pos for pos, maximum in caps.items() if maximum > 0 and counts.get(pos, 0) < maximum}
     late_round_start = max(8, int(total_rounds) - 2)
     if int(round_no) < late_round_start:
-        allowed -= {"K", "DEF"}
+        # Only suppress K/DST when there is enough time left to fill them.
+        if not requirements or remaining_picks > missing_total + 2:
+            allowed -= {"K", "DEF"}
     return allowed or {pos for pos, amount in missing.items() if amount > 0}
 
-def _mock_position_need_score(pos, roster, round_no, total_rounds):
+
+def _mock_position_need_score(pos, roster, round_no, total_rounds, requirements=None, scoring="", strategy="balanced"):
     counts = _mock_team_counts(roster)
-    targets = _mock_roster_plan(total_rounds)
-    minimums = _mock_mandatory_minimums(total_rounds)
+    targets = _mock_roster_plan(total_rounds, requirements, scoring, strategy)
+    minimums = _mock_mandatory_minimums(total_rounds, requirements)
     current = counts.get(pos, 0)
     target = targets.get(pos, 0)
     minimum = minimums.get(pos, 0)
@@ -3437,15 +3606,27 @@ def _mock_position_need_score(pos, roster, round_no, total_rounds):
         score = -9.0 - max(0, current - target) * 4.0
 
     remaining_picks = max(1, int(total_rounds) - len(roster))
-    missing_total = sum(
-        max(0, required - counts.get(position, 0))
-        for position, required in minimums.items()
-    )
-    if current < minimum and remaining_picks <= missing_total + 1:
-        score += 14.0
-    if pos in {"K", "DEF"} and int(round_no) < max(8, int(total_rounds) - 2):
-        score -= 60.0
+    if requirements:
+        status = _mock_requirement_status(requirements, roster)
+        missing_total = int(status.get("required_open", 0))
+        can_fill_flex = pos in {"RB", "WR", "TE"} and int(status.get("flex_missing", 0)) > 0
+        if can_fill_flex:
+            score = max(score, 7.0)
+        if missing_total and remaining_picks <= missing_total:
+            if current < minimum or can_fill_flex:
+                score = max(score, 14.0)
+            else:
+                score = min(score, -25.0)
+        elif missing_total and remaining_picks <= missing_total + 2 and (current < minimum or can_fill_flex):
+            score = max(score, 12.0)
+    else:
+        missing_total = sum(max(0, required - counts.get(position, 0)) for position, required in minimums.items())
+        if current < minimum and remaining_picks <= missing_total + 1:
+            score += 14.0
 
+    if pos in {"K", "DEF"} and int(round_no) < max(8, int(total_rounds) - 2):
+        if not requirements or remaining_picks > missing_total + 2:
+            score -= 60.0
     return score
 
 def _mock_strategy_archetype(team_slot):
@@ -3522,7 +3703,7 @@ def _mock_scoring_format_bonus(pos, scoring):
 def _mock_ai_score(
     player, context, team_roster, overall_pick, round_no, total_rounds, style,
     adp_players=None, stats_players=None, tier_bonus=0.0,
-    position_run_bonus=0.0, randomness=2.25,
+    position_run_bonus=0.0, randomness=2.25, requirements=None,
 ):
     # adp_players/stats_players are supplied by _mock_ai_pick so hundreds of
     # candidates do not repeatedly read the same files from disk.
@@ -3562,7 +3743,8 @@ def _mock_ai_score(
         score += max(0.0, min(5.0, (prior_points - replacement_prior) / 35.0))
 
     score += _mock_position_need_score(
-        pos, team_roster, round_no, total_rounds
+        pos, team_roster, round_no, total_rounds, requirements,
+        context.get("scoring"), style
     )
     roster_counts = _mock_team_counts(team_roster)
     score += _mock_strategy_bonus_for_ai(player, style, round_no, roster_counts)
@@ -3630,7 +3812,10 @@ def _mock_ai_pick(
     if stats_players is None:
         stats_players = _stats_2025_snapshot().get("players", {})
 
-    allowed_positions = _mock_allowed_positions(roster, round_no, total_rounds)
+    requirements = _mock_requirements_for_mock(mock)
+    allowed_positions = _mock_allowed_positions(
+        roster, round_no, total_rounds, requirements, context.get("scoring"), style
+    )
     eligible = [player for player in available if player.get("pos") in allowed_positions]
     if not eligible:
         eligible = available
@@ -3678,6 +3863,7 @@ def _mock_ai_pick(
             stats_players=stats_players,
             tier_bonus=tier_bonus_by_name.get(player.get("name"), 0.0),
             position_run_bonus=run_bonus.get(player.get("pos"), 0.0),
+            requirements=requirements,
         )
         scored.append((score, platform_adp, player))
 
@@ -3755,7 +3941,7 @@ def manual_mock_autodraft_rest():
                 row,
                 adp_players=adp_players,
                 stats_players=stats_players,
-                style_override="balanced",
+                style_override=str(mock.get("draft_strategy") or "balanced"),
             )
             if not pick:
                 mock["status"] = "complete"
@@ -3785,7 +3971,18 @@ def manual_mock_start():
     context = dict(CONTEXTS.get(key, CONTEXTS["espn-gramps"]))
 
     draft_slot = max(1, min(int(context.get("teams", 12)), int(data.get("draft_slot") or context.get("draft_slot", 7))))
-    rounds = max(6, min(15, int(data.get("rounds") or 12)))
+    requirements = _mock_normalize_roster_requirements(data.get("roster_requirements"), context)
+    rounds = sum(int(requirements.get(key, 0)) for key in ("QB", "RB", "WR", "TE", "FLEX", "K", "DEF", "BENCH"))
+    if rounds < 6 or rounds > 20:
+        return jsonify(
+            ok=False,
+            error="Roster requirements must create between 6 and 20 total draft slots.",
+            detail=f"Your current roster setup creates {rounds} selections.",
+        ), 400
+    strategy = str(data.get("draft_strategy") or "balanced").lower().replace("_", "-")
+    allowed_strategies = {"balanced", "best-player", "hero-rb", "zero-rb", "robust-rb", "late-qb"}
+    if strategy not in allowed_strategies:
+        strategy = "balanced"
 
     player_pool = _build_dynamic_mock_pool(context)
     if not _mock_pool_is_complete(player_pool):
@@ -3808,6 +4005,8 @@ def manual_mock_start():
         "teams": int(context.get("teams", 12)),
         "draft_slot": draft_slot,
         "rounds": rounds,
+        "roster_requirements": requirements,
+        "draft_strategy": strategy,
         "status": "starting",
         "picks": [],
         "player_pool": player_pool,
@@ -3956,12 +4155,7 @@ def manual_mock_state(mock_id):
 
     next_pick = _manual_next_user_pick(mock)
     next_overall = int(next_pick.get("overall")) if next_pick else None
-    league_profile = dict(CONTEXTS.get(mock.get("league_key"), CONTEXTS["espn-gramps"]))
-    league_profile.update({
-        "platform": mock.get("platform") or league_profile.get("platform"),
-        "teams": int(mock.get("teams") or league_profile.get("teams") or 12),
-        "starters": dict(league_profile.get("starters") or {}),
-    })
+    league_profile = _mock_league_profile(mock)
     engine = rank_draft_candidates(
         engine_inputs,
         league=league_profile,
@@ -3971,6 +4165,7 @@ def manual_mock_state(mock_id):
         next_overall=next_overall,
         round_no=int(round_no),
         total_rounds=int(mock.get("rounds") or 15),
+        strategy=str(mock.get("draft_strategy") or "balanced"),
     )
     engine_by_name = {
         _mock_identity_key(candidate.get("name")): candidate
@@ -4048,6 +4243,8 @@ def manual_mock_state(mock_id):
         draft_engine_version=DRAFT_INTELLIGENCE_VERSION,
         draft_engine_weights=engine.get("weights") or {},
         position_groups=engine.get("position_groups") or {},
+        roster_completion=_mock_requirement_status(_mock_requirements_for_mock(mock), roster),
+        draft_strategy=str(mock.get("draft_strategy") or "balanced"),
         recommendations=[{
             "name": candidate.get("name"),
             "pos": candidate.get("pos"),

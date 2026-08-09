@@ -19,7 +19,7 @@ from math import exp
 from statistics import mean
 from typing import Any, Iterable
 
-ENGINE_VERSION = "draft-intelligence-v1"
+ENGINE_VERSION = "draft-intelligence-v2-roster-completion"
 
 BASE_WEIGHTS = {
     "scoring_potential": 0.22,
@@ -129,6 +129,61 @@ def _roster_counts(roster: Iterable[dict[str, Any]]) -> Counter:
     return Counter(_pos(player.get("pos") or player.get("position")) for player in roster)
 
 
+def _starter_completion(roster: list[dict[str, Any]], league: dict[str, Any]) -> dict[str, Any]:
+    """Return lineup-completion status for direct starters, FLEX and Superflex.
+
+    This is used as a draft safety rail: as the number of selections remaining
+    approaches the number of required lineup slots still open, candidates that
+    cannot fill a required slot are sharply deprioritized.
+    """
+    counts = _roster_counts(roster)
+    starters = _league_starters(league)
+    actual_positions = ("QB", "RB", "WR", "TE", "K", "DEF")
+    direct_missing = {
+        pos: max(0, int(starters.get(pos, 0)) - int(counts.get(pos, 0)))
+        for pos in actual_positions
+    }
+
+    # Players beyond direct RB/WR/TE requirements can fill FLEX.
+    flex_required = int(starters.get("FLEX", 0) + starters.get("W/R/T", 0))
+    flex_extras = sum(
+        max(0, int(counts.get(pos, 0)) - int(starters.get(pos, 0)))
+        for pos in FLEX_POSITIONS
+    )
+    flex_filled = min(flex_required, flex_extras)
+    flex_missing = max(0, flex_required - flex_filled)
+
+    # Superflex can use a spare QB or a FLEX-eligible player not already
+    # consumed by a FLEX slot. This approximation is intentionally conservative.
+    sf_required = int(starters.get("SUPERFLEX", 0) + starters.get("OP", 0))
+    qb_extras = max(0, int(counts.get("QB", 0)) - int(starters.get("QB", 0)))
+    flex_extras_after_flex = max(0, flex_extras - flex_filled)
+    sf_filled = min(sf_required, qb_extras + flex_extras_after_flex)
+    sf_missing = max(0, sf_required - sf_filled)
+
+    required_open = sum(direct_missing.values()) + flex_missing + sf_missing
+    can_fill: dict[str, bool] = {}
+    for pos in actual_positions:
+        direct_open = direct_missing.get(pos, 0) > 0
+        flex_open = pos in FLEX_POSITIONS and flex_missing > 0 and counts.get(pos, 0) >= starters.get(pos, 0)
+        sf_open = pos in SUPERFLEX_POSITIONS and sf_missing > 0 and counts.get(pos, 0) >= starters.get(pos, 0)
+        can_fill[pos] = bool(direct_open or flex_open or sf_open)
+
+    return {
+        "counts": counts,
+        "starters": starters,
+        "direct_missing": direct_missing,
+        "flex_required": flex_required,
+        "flex_filled": flex_filled,
+        "flex_missing": flex_missing,
+        "superflex_required": sf_required,
+        "superflex_filled": sf_filled,
+        "superflex_missing": sf_missing,
+        "required_open": required_open,
+        "can_fill": can_fill,
+    }
+
+
 def _roster_need_score(
     position: str,
     roster: list[dict[str, Any]],
@@ -137,23 +192,36 @@ def _roster_need_score(
     total_rounds: int,
 ) -> float:
     position = _pos(position)
-    counts = _roster_counts(roster)
-    starters = _league_starters(league)
+    completion = _starter_completion(roster, league)
+    counts = completion["counts"]
+    starters = completion["starters"]
     direct = int(starters.get(position, 0))
     current = int(counts.get(position, 0))
+    flex = int(completion.get("flex_required", 0))
+    superflex = int(completion.get("superflex_required", 0))
 
-    flex = int(starters.get("FLEX", 0) + starters.get("W/R/T", 0))
-    superflex = int(starters.get("SUPERFLEX", 0) + starters.get("OP", 0))
+    roster_size = int(_num(league.get("roster_size"), total_rounds) or total_rounds)
+    remaining_picks = max(0, roster_size - len(roster))
+    required_open = int(completion.get("required_open", 0))
+    can_fill_required = bool(completion.get("can_fill", {}).get(position))
+
+    # Hard completion mode. If every remaining selection is needed to satisfy
+    # the lineup rules, do not recommend a luxury/depth pick that would make a
+    # complete roster mathematically impossible.
+    if required_open > 0 and remaining_picks <= required_open:
+        return 99.0 if can_fill_required else 5.0
 
     if position in {"K", "DEF"}:
         if direct <= 0:
             return 15.0
         if current >= direct:
             return 15.0
-        # Avoid paying for replaceable positions too early.
+        if required_open and remaining_picks <= required_open + 2:
+            return 98.0
+        # Avoid paying for replaceable positions too early, but still force
+        # them late enough to complete the configured roster.
         return 90.0 if round_no >= max(8, total_rounds - 2) else 8.0
 
-    # Unfilled direct starter is the strongest need signal.
     open_direct = max(0, direct - current)
     if open_direct >= 2:
         score = 98.0
@@ -162,32 +230,36 @@ def _roster_need_score(
     else:
         score = 48.0
 
-    # FLEX and Superflex create legitimate additional demand.
-    if position in FLEX_POSITIONS and flex:
-        flex_eligible = sum(counts.get(pos, 0) for pos in FLEX_POSITIONS)
-        direct_flex_demand = sum(starters.get(pos, 0) for pos in FLEX_POSITIONS) + flex
-        if flex_eligible < direct_flex_demand:
-            score = max(score, 78.0)
+    if position in FLEX_POSITIONS and flex and completion.get("flex_missing", 0) > 0:
+        score = max(score, 82.0)
 
-    if position in SUPERFLEX_POSITIONS and superflex:
-        sf_eligible = sum(counts.get(pos, 0) for pos in SUPERFLEX_POSITIONS)
-        sf_demand = sum(starters.get(pos, 0) for pos in SUPERFLEX_POSITIONS) + superflex
-        if sf_eligible < sf_demand:
-            score = max(score, 82.0)
+    if position in SUPERFLEX_POSITIONS and superflex and completion.get("superflex_missing", 0) > 0:
+        score = max(score, 86.0)
         if position == "QB" and current < 2:
             score = max(score, 94.0)
 
-    # Once starters are filled, useful RB/WR depth remains valuable.  This is
-    # intentionally modest so it does not force needless duplicate positions.
-    if open_direct == 0:
-        depth_target = direct + (2 if position in {"RB", "WR"} else 1)
-        if current < depth_target:
+    # Two-pick warning zone: required slots become a major priority before the
+    # app reaches the final forced-selection state.
+    if required_open and remaining_picks <= required_open + 2:
+        if can_fill_required:
+            score = max(score, 96.0)
+        elif open_direct == 0:
+            score = min(score, 34.0)
+
+    # Once starters are filled, use user/league position targets when supplied;
+    # otherwise retain practical RB/WR-heavy depth targets.
+    targets = league.get("position_targets") if isinstance(league.get("position_targets"), dict) else {}
+    target = int(_num(targets.get(position), 0)) if targets else 0
+    if target <= 0:
+        target = direct + (2 if position in {"RB", "WR"} else 1)
+
+    if open_direct == 0 and not can_fill_required:
+        if current < target:
             score = max(score, 62.0 if round_no <= 9 else 68.0)
-        elif current >= depth_target + 1:
-            score = min(score, 32.0)
+        elif current >= target:
+            score = min(score, 34.0)
 
     return round(_clamp(score), 1)
-
 
 def _league_fit_score(position: str, player: dict[str, Any], league: dict[str, Any]) -> float:
     position = _pos(position)
