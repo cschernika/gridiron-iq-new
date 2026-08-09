@@ -95,7 +95,7 @@ def hide_legacy_connect_league_navigation(response):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
-            response.headers["X-Gridiron-Build"] = "v49-live-draft-auto"
+            response.headers["X-Gridiron-Build"] = "v50-rb-role-matchup"
     except Exception:
         pass
     return response
@@ -1075,7 +1075,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v49-live-draft-auto",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v50-rb-role-matchup",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -8332,6 +8332,13 @@ def _offensive_stats_rows(season=2025, scoring="PPR"):
             "season": season,
             "data_type": raw.get("data_type") or "actual",
             "usage_basis_year": raw.get("usage_basis_year"),
+            # v50: carry the current depth-chart role into Weekly Matchups so
+            # a favorable trench matchup cannot make a low-volume backup look
+            # like a better fantasy start than the team's actual lead back.
+            "depth_chart_position": master.get("depth_chart_position") or raw.get("depth_chart_position") or "",
+            "depth_chart_order": master.get("depth_chart_order") or raw.get("depth_chart_order"),
+            "depth_chart_source": master.get("depth_chart_source") or raw.get("depth_chart_source") or "",
+            "injury_status": master.get("injury_status") or raw.get("injury_status") or "",
             "games": _off_round(raw.get("games"), 0),
             "completions": _off_round(raw.get("completions"), 0),
             "attempts": _off_round(raw.get("attempts"), 0),
@@ -8969,6 +8976,103 @@ def _matchup_percentile_grades(rows, position):
     }
 
 
+def _weekly_rb_role_profile(player):
+    """Return depth-chart role, expected-volume grade and weekly touch estimate.
+
+    The score is intentionally role-aware. A published RB2/RB3 is not treated
+    like an RB1 just because his offensive line has a favorable matchup. If a
+    nominal backup has starter-level projected volume, the usage signals can
+    lift his grade so injury replacements and true committees are not buried.
+    """
+    try:
+        depth = int(float(player.get("depth_chart_order") or 0))
+    except (TypeError, ValueError):
+        depth = 0
+
+    games = max(1.0, _off_num(player.get("games"), 17.0))
+    carries = _off_num(player.get("carries"))
+    targets = _off_num(player.get("targets"))
+    receptions = _off_num(player.get("receptions"))
+    expected_touches = (carries + receptions) / games if games else 0.0
+    expected_opportunities = (carries + targets) / games if games else 0.0
+    rush_share = _off_num(player.get("rush_share"))
+    opportunity_share = _off_num(player.get("opportunity_share"))
+    red_zone_share = _off_num(player.get("red_zone_carry_share"))
+    target_share = _off_num(player.get("target_share"))
+
+    if depth == 1:
+        label, base = "RB1 / starter", 96.0
+    elif depth == 2:
+        label, base = "RB2 / committee", 72.0
+    elif depth == 3:
+        label, base = "RB3 / change of pace", 52.0
+    elif depth >= 4:
+        label, base = "Reserve RB", 35.0
+    elif expected_opportunities >= 16 or rush_share >= 50:
+        label, base = "RB1-type workload", 91.0
+    elif expected_opportunities >= 10 or rush_share >= 34 or opportunity_share >= 24:
+        label, base = "RB2-type workload", 75.0
+    elif expected_opportunities >= 6 or opportunity_share >= 14:
+        label, base = "Committee / rotational", 60.0
+    else:
+        label, base = "Role uncertain / reserve", 48.0
+
+    # Volume can move a published depth-chart label because real weekly roles
+    # change with injuries, committees and coaching decisions.
+    volume_adjustment = 0.0
+    if expected_opportunities >= 18:
+        volume_adjustment += 10
+    elif expected_opportunities >= 14:
+        volume_adjustment += 7
+    elif expected_opportunities >= 10:
+        volume_adjustment += 4
+    elif expected_opportunities < 5:
+        volume_adjustment -= 8
+    elif expected_opportunities < 7:
+        volume_adjustment -= 4
+
+    if rush_share >= 55:
+        volume_adjustment += 5
+    elif rush_share >= 40:
+        volume_adjustment += 3
+    elif rush_share and rush_share < 22:
+        volume_adjustment -= 4
+
+    if opportunity_share >= 32:
+        volume_adjustment += 5
+    elif opportunity_share >= 23:
+        volume_adjustment += 3
+    elif opportunity_share and opportunity_share < 12:
+        volume_adjustment -= 4
+
+    if red_zone_share >= 50:
+        volume_adjustment += 3
+    elif red_zone_share >= 30:
+        volume_adjustment += 1
+
+    role_grade = _def_clamp(base + volume_adjustment)
+    startability = (
+        "Lead workload" if role_grade >= 88
+        else "Startable / strong committee" if role_grade >= 76
+        else "Flex / committee dependent" if role_grade >= 62
+        else "Backup-volume risk"
+    )
+    return {
+        "rb_role": label,
+        "role_grade": round(role_grade, 1),
+        "expected_touches_per_game": round(expected_touches, 1),
+        "expected_opportunities_per_game": round(expected_opportunities, 1),
+        "startability": startability,
+        "depth_chart_order": depth or None,
+        "depth_chart_source": player.get("depth_chart_source") or "",
+        "injury_status": player.get("injury_status") or "",
+        "role_note": (
+            f"{label}; estimated {expected_touches:.1f} touches and {expected_opportunities:.1f} opportunities per game. "
+            f"Role grade {role_grade:.1f}/100 ({startability.lower()})."
+        ),
+    }
+
+
 def _weekly_matchup_rows(week=1, position="ALL"):
     payload = _defensive_stats_snapshot()
     schedule = _weekly_schedule_lookup(payload, week)
@@ -9067,6 +9171,7 @@ def _weekly_matchup_rows(week=1, position="ALL"):
         workload_grade = _def_clamp(
             20 + rush_share * 0.45 + opportunity_share * 0.25 + red_zone_carry_share * 0.20
         )
+        rb_role = _weekly_rb_role_profile(player) if player_position == "RB" else {}
         receiving_matchup_grade = _def_clamp(
             50
             + (allowed_ppr_target - position_allowed_averages[player_position]) * 20
@@ -9075,16 +9180,21 @@ def _weekly_matchup_rows(week=1, position="ALL"):
         run_defense_advantage = _def_clamp(100 - run_defense_grade)
 
         if player_position == "RB":
-            # RB model: 25% player, 40% OL/front comparison, 20% opponent
-            # run defense, 10% workload, and 5% receiving matchup.
+            # v50 role-aware RB model. Every RB is evaluated on the same 0-100
+            # scale, but an RB2/RB3 no longer receives an elite ranking merely
+            # because the offensive-line matchup is excellent. Published depth
+            # chart role and projected workload together carry 25% of the score.
+            #
+            # 30% run trenches + 20% RB strength + 15% run defense +
+            # 25% depth-chart role/expected volume + 10% receiving role.
             score = _def_clamp(
-                skill_grade * 0.25
-                + run_trench_score * 0.40
-                + run_defense_advantage * 0.20
-                + workload_grade * 0.10
-                + receiving_matchup_grade * 0.05
+                run_trench_score * 0.30
+                + skill_grade * 0.20
+                + run_defense_advantage * 0.15
+                + _off_num(rb_role.get("role_grade"), 50) * 0.25
+                + receiving_matchup_grade * 0.10
             )
-            matchup_model = "RUNNING_BACK"
+            matchup_model = "RUNNING_BACK_ROLE_AWARE"
         else:
             score = _def_clamp(
                 50
@@ -9115,6 +9225,7 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             + f" {name} produced {_off_num(player_ppr_target):.2f} PPR points per target against {dominant_name.lower()} ({split_basis.lower()})."
         )
         if player_position == "RB":
+            role_note = rb_role.get("role_note") or "RB role unavailable."
             defender_note = (
                 f"{opponent}'s defensive front grade is {front_grade:.1f} "
                 f"(rank #{int(_off_num(defense.get('front_rank'), 0)) or '—'}), with a "
@@ -9168,6 +9279,15 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             "air_yards_share": player.get("air_yards_share"),
             "skill_grade": round(skill_grade, 1),
             "workload_grade": workload_grade,
+            "rb_role": rb_role.get("rb_role") if player_position == "RB" else "",
+            "role_grade": rb_role.get("role_grade") if player_position == "RB" else None,
+            "expected_touches_per_game": rb_role.get("expected_touches_per_game") if player_position == "RB" else None,
+            "expected_opportunities_per_game": rb_role.get("expected_opportunities_per_game") if player_position == "RB" else None,
+            "startability": rb_role.get("startability") if player_position == "RB" else "",
+            "depth_chart_order": rb_role.get("depth_chart_order") if player_position == "RB" else player.get("depth_chart_order"),
+            "depth_chart_source": rb_role.get("depth_chart_source") if player_position == "RB" else player.get("depth_chart_source"),
+            "injury_status": rb_role.get("injury_status") if player_position == "RB" else player.get("injury_status"),
+            "role_note": role_note if player_position == "RB" else "",
             "receiving_matchup_grade": receiving_matchup_grade,
             "matchup_score": score,
             "matchup_grade": grade,
