@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json, os, re, uuid, time, hmac, hashlib
+import json, os, re, uuid, time, hmac, hashlib, secrets
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -82,7 +82,7 @@ def hide_legacy_connect_league_navigation(response):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
-            response.headers["X-Gridiron-Build"] = "v47-yahoo-reconnect"
+            response.headers["X-Gridiron-Build"] = "v48-yahoo-login-rewrite"
     except Exception:
         pass
     return response
@@ -745,7 +745,7 @@ def league_sync():
             analytics=DEMO,
             yahoo_configured=yahoo_configured,
             yahoo_redirect=yahoo_redirect,
-            gridiron_build="v47-yahoo-reconnect",
+            gridiron_build="v48-yahoo-login-rewrite",
         )
     except Exception as exc:
         app.logger.exception("League Sync page failed to render")
@@ -763,7 +763,7 @@ def league_sync():
             "<p><a href='/api/diagnostics/league-sync'>Open League Sync diagnostics</a> · "
             "<a href='/app'>Return to Command Center</a></p></div></body></html>",
             200,
-            {"X-Gridiron-Build": "v47-yahoo-reconnect", "Cache-Control": "no-store"},
+            {"X-Gridiron-Build": "v48-yahoo-login-rewrite", "Cache-Control": "no-store"},
         )
 
 
@@ -773,7 +773,7 @@ def league_sync_diagnostics():
     snapshot = load_snapshot()
     return jsonify(
         ok=True,
-        build="v47-yahoo-reconnect",
+        build="v48-yahoo-login-rewrite",
         league_sync_template=(template_dir / "league_sync.html").exists(),
         base_template=(template_dir / "base.html").exists(),
         sidebar_template=(template_dir / "_sidebar.html").exists(),
@@ -996,7 +996,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v47-yahoo-reconnect",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v48-yahoo-login-rewrite",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -1144,6 +1144,7 @@ YAHOO_TOKEN_FILE = DATA_DIR / "yahoo_oauth_token.json"
 # locations collapse to one.
 YAHOO_TOKEN_FALLBACK_FILE = BASE_DIR / "data" / "yahoo_oauth_token.json"
 YAHOO_OAUTH_STATUS_FILE = DATA_DIR / "yahoo_oauth_status.json"
+YAHOO_OAUTH_PENDING_FILE = DATA_DIR / "yahoo_oauth_pending.json"
 YAHOO_PREF_FILE = DATA_DIR / "yahoo_league_preference.json"
 YAHOO_SNAPSHOT_FILE = DATA_DIR / "yahoo_snapshot.json"
 
@@ -1443,7 +1444,7 @@ def yahoo_status():
         client_id_fingerprint=_yahoo_client_fingerprint(),
         app_id_configured=bool(creds.get("app_id")),
         oauth_status=_yahoo_read_json(YAHOO_OAUTH_STATUS_FILE),
-        build="v47-yahoo-reconnect",
+        build="v48-yahoo-login-rewrite",
     )
 
 
@@ -1503,10 +1504,15 @@ def yahoo_diagnostics():
         })
 
     oauth_status = _yahoo_read_json(YAHOO_OAUTH_STATUS_FILE)
+    pending_state = _yahoo_read_json(YAHOO_OAUTH_PENDING_FILE)
+    try:
+        pending_state_age = max(0, int(time.time()) - int(pending_state.get("created_at") or 0)) if pending_state else None
+    except Exception:
+        pending_state_age = None
 
     return jsonify(
         ok=not issues,
-        build="v47-yahoo-reconnect",
+        build="v48-yahoo-login-rewrite",
         issues=issues,
         redirect_uri=creds["redirect_uri"] or f"{request.url_root.rstrip('/')}/auth/yahoo/callback",
         connected=bool(token.get("access_token") or token.get("refresh_token")),
@@ -1516,7 +1522,9 @@ def yahoo_diagnostics():
         next_step=next_step,
         token_storage=storage,
         oauth_status=oauth_status,
-        oauth_state_mode="signed-stateless-with-session-fallback",
+        oauth_state_mode="server-side-single-use-state",
+        pending_state_exists=bool(pending_state.get("state")),
+        pending_state_age_seconds=pending_state_age,
         callback_path="/auth/yahoo/callback",
         persistent_data_configured=bool(str(os.getenv("GRIDIRON_DATA_DIR", "") or "").strip()),
         client_id_fingerprint=_yahoo_client_fingerprint(),
@@ -1533,58 +1541,92 @@ def yahoo_app_credentials_info():
     return jsonify(ok=False, error="Configure YAHOO_CLIENT_ID, YAHOO_CLIENT_SECRET and YAHOO_REDIRECT_URI in Render."), 400
 
 
-def _yahoo_make_oauth_state():
-    """Create a state value that can be validated without a browser session.
+def _yahoo_clear_pending_state():
+    try:
+        if YAHOO_OAUTH_PENDING_FILE.exists():
+            YAHOO_OAUTH_PENDING_FILE.unlink()
+    except Exception:
+        app.logger.exception("Unable to clear Yahoo OAuth pending-state file")
 
-    Yahoo redirects back through a top-level cross-site navigation. Some browser
-    or deployment combinations can lose the Flask session cookie on that trip.
-    Signing the nonce lets the callback validate state independently while still
-    preserving CSRF protection.
+
+def _yahoo_create_pending_state():
+    """Create a short, single-use OAuth state stored server-side.
+
+    This deliberately does not depend on the Flask session cookie and does not
+    sign a long state value into the URL. Render workers share the service
+    filesystem, so the callback can validate the exact nonce Yahoo returns.
     """
-    nonce = os.urandom(24).hex()
+    state = secrets.token_urlsafe(24)
     creds = _yahoo_credentials()
-    message = f"{nonce}|{creds.get('redirect_uri','')}".encode("utf-8")
-    secret = str(app.secret_key or os.getenv("SECRET_KEY") or "change-me").encode("utf-8")
-    signature = hmac.new(secret, message, hashlib.sha256).hexdigest()
-    return f"{nonce}.{signature}"
+    payload = {
+        "state": state,
+        "created_at": int(time.time()),
+        "client_id_fingerprint": _yahoo_client_fingerprint(),
+        "redirect_uri": creds.get("redirect_uri", ""),
+    }
+    _yahoo_write_json(YAHOO_OAUTH_PENDING_FILE, payload)
+    # Session copy is diagnostic/fallback only. The file is the source of truth.
+    session["yahoo_state"] = state
+    return state
 
 
-def _yahoo_validate_oauth_state(returned_state):
+def _yahoo_validate_pending_state(returned_state):
     returned_state = str(returned_state or "").strip()
     if not returned_state:
         return False, "missing"
 
-    # Preserve compatibility with an intact Flask session.
-    session_state = str(session.get("yahoo_state") or "").strip()
-    if session_state and hmac.compare_digest(returned_state, session_state):
-        return True, "session"
+    pending = _yahoo_read_json(YAHOO_OAUTH_PENDING_FILE)
+    expected = str(pending.get("state") or "").strip()
+    if not expected:
+        return False, "pending_state_missing"
 
-    # Stateless verification for callbacks where the session cookie was lost.
     try:
-        nonce, supplied_sig = returned_state.rsplit(".", 1)
-        if not nonce or not supplied_sig:
-            return False, "invalid_format"
-        creds = _yahoo_credentials()
-        message = f"{nonce}|{creds.get('redirect_uri','')}".encode("utf-8")
-        secret = str(app.secret_key or os.getenv("SECRET_KEY") or "change-me").encode("utf-8")
-        expected_sig = hmac.new(secret, message, hashlib.sha256).hexdigest()
-        if hmac.compare_digest(supplied_sig, expected_sig):
-            return True, "signed"
+        created_at = int(pending.get("created_at") or 0)
     except Exception:
-        app.logger.exception("Unable to validate Yahoo OAuth state")
-    return False, "mismatch"
+        created_at = 0
+    if not created_at or int(time.time()) - created_at > 15 * 60:
+        _yahoo_clear_pending_state()
+        return False, "expired"
+
+    expected_fp = str(pending.get("client_id_fingerprint") or "")
+    current_fp = _yahoo_client_fingerprint()
+    if expected_fp and current_fp and expected_fp != current_fp:
+        _yahoo_clear_pending_state()
+        return False, "client_changed"
+
+    pending_redirect = str(pending.get("redirect_uri") or "").rstrip("/")
+    current_redirect = str(_yahoo_credentials().get("redirect_uri") or "").rstrip("/")
+    if pending_redirect and current_redirect and pending_redirect != current_redirect:
+        _yahoo_clear_pending_state()
+        return False, "redirect_changed"
+
+    if not hmac.compare_digest(returned_state, expected):
+        return False, "mismatch"
+
+    return True, "server_file"
 
 
 @app.get("/auth/yahoo")
 @app.get("/auth/yahoo/start")
 def yahoo_start():
     creds = _yahoo_credentials()
-    if not creds["client_id"] or not creds["client_secret"] or not creds["redirect_uri"]:
-        return page("error.html", code=400, message="Yahoo is not fully configured in Render."), 400
+    missing = []
+    if not creds["client_id"]:
+        missing.append("YAHOO_CLIENT_ID")
+    if not creds["client_secret"]:
+        missing.append("YAHOO_CLIENT_SECRET")
+    if not creds["redirect_uri"]:
+        missing.append("YAHOO_REDIRECT_URI")
+    if missing:
+        _yahoo_store_oauth_status("configuration_error", "Missing Render variables: " + ", ".join(missing))
+        return page("error.html", code=400, message="Yahoo is not fully configured in Render: " + ", ".join(missing)), 400
 
-    # A new Yahoo developer application means any token created by the old
-    # Client ID must not be reused. The Sync page uses force=1 when the user
-    # explicitly clicks Sign In / Reconnect Yahoo.
+    if not creds["redirect_uri"].startswith("https://") or not creds["redirect_uri"].rstrip("/").endswith("/auth/yahoo/callback"):
+        _yahoo_store_oauth_status("configuration_error", "Yahoo redirect URI is not the expected HTTPS callback URL.")
+        return page("error.html", code=400, message="YAHOO_REDIRECT_URI must be the full HTTPS /auth/yahoo/callback URL registered with Yahoo."), 400
+
+    # force=1 means a deliberate fresh connection to the currently configured
+    # Yahoo developer application. Remove old tokens and prior league choice.
     if str(request.args.get("force") or "").lower() in {"1", "true", "yes"}:
         for path in _yahoo_token_paths():
             try:
@@ -1598,77 +1640,106 @@ def yahoo_start():
         except Exception:
             app.logger.exception("Unable to clear old Yahoo league preference")
 
+    _yahoo_clear_pending_state()
     session.pop("yahoo_state", None)
-    state = _yahoo_make_oauth_state()
-    session["yahoo_state"] = state
-    _yahoo_store_oauth_status("started", "Yahoo sign-in started; waiting for Yahoo to return to the callback URL.")
+    try:
+        state = _yahoo_create_pending_state()
+    except Exception as exc:
+        _yahoo_store_oauth_status("state_storage_failed", str(exc))
+        app.logger.exception("Unable to create Yahoo OAuth state")
+        return page("error.html", code=500, message="Gridiron IQ could not create the Yahoo sign-in request on the server."), 500
+
+    _yahoo_store_oauth_status("started", "Yahoo sign-in request created. Waiting for Yahoo to return the authorization code.")
     params = {
         "client_id": creds["client_id"],
         "redirect_uri": creds["redirect_uri"],
         "response_type": "code",
         "language": "en-us",
         "state": state,
-        # Yahoo documents prompt=consent for re-authorizing an application.
-        # This is important when the user has replaced the Yahoo developer app.
-        "prompt": "consent",
     }
     return redirect(f"{YAHOO_AUTH_URL}?{urlencode(params)}")
 
 
 @app.get("/auth/yahoo/callback")
 def yahoo_callback():
-    # Record callback arrival before any validation so diagnostics can
-    # distinguish "Yahoo never returned" from a state/code/token failure.
-    _yahoo_store_oauth_status("callback_received", "Yahoo callback reached Gridiron IQ; validating authorization response.")
+    _yahoo_store_oauth_status("callback_received", "Yahoo returned to Gridiron IQ. Validating the one-time sign-in state.")
 
     if request.args.get("error"):
         detail = request.args.get("error_description") or request.args.get("error")
+        _yahoo_clear_pending_state()
+        session.pop("yahoo_state", None)
         _yahoo_store_oauth_status("authorization_denied", str(detail))
         return page("error.html", code=400, message=f"Yahoo authorization was declined: {detail}."), 400
 
-    valid_state, state_mode = _yahoo_validate_oauth_state(request.args.get("state"))
+    valid_state, state_mode = _yahoo_validate_pending_state(request.args.get("state"))
     if not valid_state:
         _yahoo_store_oauth_status(
             "state_validation_failed",
-            f"Yahoo callback arrived, but OAuth state validation failed ({state_mode}). Start Connect Yahoo again after this deployment."
+            f"Yahoo callback arrived but the one-time state could not be verified ({state_mode}). Start a new Yahoo connection."
         )
-        return page("error.html", code=400, message="Yahoo returned to Gridiron IQ, but the authorization state could not be verified. Click Connect Yahoo again and approve access."), 400
+        return page(
+            "error.html",
+            code=400,
+            message=(
+                "Yahoo returned to Gridiron IQ, but this sign-in attempt could not be verified. "
+                "Return to League Sync and click Sign In / Reconnect Yahoo once to start a fresh connection."
+            ),
+        ), 400
 
     code = str(request.args.get("code") or "").strip()
     if not code:
+        _yahoo_clear_pending_state()
+        session.pop("yahoo_state", None)
         _yahoo_store_oauth_status("authorization_code_missing", "Yahoo callback arrived without an authorization code.")
         return page("error.html", code=400, message="Yahoo returned to Gridiron IQ but did not provide an authorization code."), 400
 
-    _yahoo_store_oauth_status("exchanging_code", f"Yahoo callback validated using {state_mode} state; exchanging authorization code.")
+    # State is single-use. Consume it before exchanging the code to prevent
+    # callback replay. A failed exchange requires starting Connect Yahoo again.
+    _yahoo_clear_pending_state()
+    session.pop("yahoo_state", None)
+    _yahoo_store_oauth_status("exchanging_code", "Yahoo sign-in verified. Exchanging the authorization code for access and refresh tokens.")
+
     creds = _yahoo_credentials()
     try:
         response = requests.post(
             YAHOO_TOKEN_URL,
             auth=(creds["client_id"], creds["client_secret"]),
-            data={"grant_type": "authorization_code", "redirect_uri": creds["redirect_uri"], "code": code},
+            headers={"Accept": "application/json"},
+            data={
+                "grant_type": "authorization_code",
+                "redirect_uri": creds["redirect_uri"],
+                "code": code,
+            },
             timeout=25,
         )
         if not response.ok:
-            _yahoo_store_oauth_status("token_exchange_failed", f"HTTP {response.status_code}: {response.text[:250]}")
-            return page("error.html", code=502, message=f"Yahoo token exchange failed ({response.status_code}): {response.text[:250]}"), 502
-        _yahoo_store_token(response.json())
-        verify = _yahoo_token()
-        if not (verify.get("access_token") or verify.get("refresh_token")):
-            raise RuntimeError("Yahoo authorized, but the saved token could not be read back by the server.")
-        session.pop("yahoo_state", None)
+            detail = response.text[:500]
+            _yahoo_store_oauth_status("token_exchange_failed", f"HTTP {response.status_code}: {detail}")
+            return page(
+                "error.html",
+                code=502,
+                message=f"Yahoo accepted the login but the token exchange failed ({response.status_code}). {detail}",
+            ), 502
+
         try:
-            leagues = _yahoo_discover_leagues()
-            _yahoo_store_oauth_status(
-                "connected",
-                f"Yahoo authorization completed; token verified and {len(leagues)} NFL league(s) were returned."
-            )
-            return redirect(url_for("league_sync", yahoo="connected", yahoo_leagues=len(leagues)))
-        except Exception as api_exc:
-            # Keep the valid OAuth token. A Fantasy Sports permission/API issue
-            # is different from an OAuth connection failure and diagnostics
-            # should make that distinction clear.
-            _yahoo_store_oauth_status("connected_api_error", str(api_exc))
-            return redirect(url_for("league_sync", yahoo="connected", yahoo_api="error"))
+            token_payload = response.json()
+        except Exception:
+            token_payload = {}
+        if not token_payload.get("access_token"):
+            _yahoo_store_oauth_status("token_exchange_failed", "Yahoo token response did not contain an access_token.")
+            return page("error.html", code=502, message="Yahoo accepted the login but did not return an access token."), 502
+
+        _yahoo_store_token(token_payload)
+        verify = _yahoo_token()
+        if not verify.get("access_token"):
+            raise RuntimeError("Yahoo token was received but could not be read back from server storage.")
+
+        # OAuth is now genuinely connected. League discovery is a separate
+        # step so a Fantasy Sports permission problem never masquerades as a
+        # failed Yahoo login.
+        _yahoo_store_oauth_status("connected", "Yahoo login completed and the OAuth token was verified. Loading NFL leagues next.")
+        return redirect(url_for("league_sync", yahoo="connected"))
+
     except Exception as exc:
         _yahoo_store_oauth_status("callback_failed", str(exc))
         app.logger.exception("Yahoo authorization failed")
@@ -1677,7 +1748,7 @@ def yahoo_callback():
 
 @app.post("/api/yahoo/disconnect")
 def yahoo_disconnect():
-    for path in tuple(_yahoo_token_paths()) + (YAHOO_PREF_FILE, YAHOO_OAUTH_STATUS_FILE):
+    for path in tuple(_yahoo_token_paths()) + (YAHOO_PREF_FILE, YAHOO_OAUTH_STATUS_FILE, YAHOO_OAUTH_PENDING_FILE):
         try:
             if path.exists():
                 path.unlink()
@@ -1694,7 +1765,7 @@ def yahoo_leagues():
             error="Yahoo is not signed in.",
             detail="Click Sign In / Reconnect Yahoo and complete Yahoo authorization before loading leagues.",
             suggestion="Do not use Load My Leagues or Sync Yahoo League until the Yahoo badge says Connected.",
-            build="v47-yahoo-reconnect",
+            build="v48-yahoo-login-rewrite",
         ), 401
     try:
         leagues = _yahoo_discover_leagues()
@@ -1703,7 +1774,7 @@ def yahoo_leagues():
             leagues=leagues,
             selected_league=_yahoo_selected_league(),
             connected=True,
-            build="v47-yahoo-reconnect",
+            build="v48-yahoo-login-rewrite",
         )
     except Exception as exc:
         app.logger.exception("Yahoo league discovery failed")
@@ -1818,7 +1889,7 @@ def yahoo_sync():
             "league_name": league_name,
             "teams": payload["settings"]["team_count"],
         })
-        return jsonify(ok=True, build="v47-yahoo-reconnect", **payload)
+        return jsonify(ok=True, build="v48-yahoo-login-rewrite", **payload)
     except Exception as exc:
         app.logger.exception("Yahoo league sync failed")
         return jsonify(
