@@ -1993,7 +1993,7 @@ MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
 BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
-MOCK_DRAFT_BUILD = "mock-draft-v44-role-adjusted-scoring"
+MOCK_DRAFT_BUILD = "mock-draft-v53-slot-analytics"
 MOCK_DIRECTORY_MINIMUMS = {
     "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
 }
@@ -2953,6 +2953,121 @@ def _manual_player_pick_score(mock, player, counts=None, overall=None, round_no=
     return _manual_pick_score_components(mock, player, counts=counts, overall=overall, round_no=round_no)["score"]
 
 
+def _manual_next_user_pick(mock):
+    """Return the user's next snake-draft pick after the current selection."""
+    order = _manual_order(mock)
+    current_index = len(mock.get("picks", []))
+    user_slot = int(mock.get("draft_slot") or 1)
+    for row in order[current_index + 1:]:
+        if int(row.get("slot") or 0) == user_slot:
+            return row
+    return None
+
+
+def _manual_candidate_analytics(mock, player, counts, overall, round_no, available=None):
+    """Draft-Center-style analytics for a candidate at the user's current mock slot."""
+    components = _manual_pick_score_components(
+        mock, player, counts=counts, overall=overall, round_no=round_no
+    )
+    adp = float(components.get("adp") or 999)
+    next_pick = _manual_next_user_pick(mock)
+    next_overall = int(next_pick.get("overall")) if next_pick else None
+    survival = _draft_survival_probability(adp, next_overall) if next_overall else 0
+
+    tier = player.get("tier")
+    position = str(player.get("pos") or "").upper()
+    same_tier = []
+    if available is not None:
+        same_tier = [
+            candidate for candidate in available
+            if str(candidate.get("pos") or "").upper() == position
+            and (tier is None or candidate.get("tier") == tier)
+        ]
+    tier_remaining = len(same_tier)
+    if position in {"K", "DEF"}:
+        scarcity_label = "Low"
+        tier_risk = "Low"
+    elif tier_remaining and tier_remaining <= 2:
+        scarcity_label = "High"
+        tier_risk = "High"
+    elif tier_remaining and tier_remaining <= 4:
+        scarcity_label = "Medium"
+        tier_risk = "Medium"
+    else:
+        scarcity_label = "Low"
+        tier_risk = "Low"
+
+    score = int(components.get("score") or 0)
+    quality = int(components.get("quality_grade") or 0)
+    potential = int(components.get("scoring_grade") or components.get("projection_grade") or 0)
+    need = int(components.get("roster_fit_grade") or 0)
+    usage = int(components.get("usage_grade") or 0)
+    role = components.get("role_label") or "Role unknown"
+    value_vs_adp = round(float(components.get("value") or 0) - float(components.get("reach") or 0), 1)
+
+    if score >= 88:
+        action = "DRAFT NOW"
+    elif score >= 80:
+        action = "STRONG PICK"
+    elif score >= 72:
+        action = "GOOD OPTION"
+    elif score >= 64:
+        action = "CONSIDER"
+    else:
+        action = "WAIT / LOOK ELSEWHERE"
+
+    if next_overall and survival <= 20 and score >= 75:
+        action = "DRAFT NOW"
+    elif next_overall and survival >= 70 and score < 88:
+        action = "CAN LIKELY WAIT"
+
+    projection = round(float(player.get("projection") or player.get("proj_2026_ppr") or 0), 1)
+    reasons = []
+    if need >= 85:
+        reasons.append("fills a strong roster need")
+    elif need >= 75:
+        reasons.append("fits the current roster well")
+    if quality >= 85:
+        reasons.append("high player-quality grade")
+    if potential >= 85:
+        reasons.append("strong scoring potential for this draft range")
+    if usage >= 85:
+        reasons.append(f"secure {role} usage")
+    elif usage < 60:
+        reasons.append(f"usage risk: {role}")
+    if value_vs_adp >= 6:
+        reasons.append(f"{value_vs_adp:+.1f} picks of ADP value")
+    elif value_vs_adp <= -8:
+        reasons.append(f"{abs(value_vs_adp):.1f} picks ahead of ADP")
+    if next_overall:
+        reasons.append(f"{survival}% chance to reach your next pick")
+    if scarcity_label == "High":
+        reasons.append("high tier scarcity")
+    if not reasons:
+        reasons.append("balanced value, role and roster fit")
+
+    return {
+        "pick_score": score,
+        "player_quality": quality,
+        "scoring_potential": potential,
+        "roster_need": need,
+        "usage_score": usage,
+        "usage_role": role,
+        "market_grade": int(components.get("market_grade") or 0),
+        "adp": round(adp, 1) if adp < 999 else None,
+        "value_vs_adp": value_vs_adp,
+        "projection_2026": projection,
+        "survival_probability": survival,
+        "next_pick_overall": next_overall,
+        "scarcity": scarcity_label,
+        "tier_risk": tier_risk,
+        "tier_remaining": tier_remaining,
+        "recommendation": action,
+        "reasons": reasons,
+        "rationale": f"{player.get('name')} is a {action.lower()} at pick #{overall}: " + "; ".join(reasons) + ".",
+    }
+
+
 def _manual_2025_points_map(names):
     # Fast snapshot lookup; never reparse the full CSV during a draft.
     players = _stats_2025_snapshot().get("players", {})
@@ -3803,6 +3918,28 @@ def manual_mock_state(mock_id):
             round_no=round_no,
         )
         scored.append(item)
+
+    # Add Draft-Center-style decision analytics after the complete available
+    # pool is known, so tier scarcity and next-pick survival are contextual.
+    for item in scored:
+        item["analytics"] = _manual_candidate_analytics(
+            mock, item, counts=counts, overall=overall, round_no=round_no, available=scored
+        )
+        # Keep Pick Score sourced from the same component calculation displayed
+        # in the analytics panel.
+        item["pick_score"] = item["analytics"]["pick_score"]
+
+    recommendations = sorted(
+        scored,
+        key=lambda x: (
+            int((x.get("analytics") or {}).get("pick_score") or 0),
+            int((x.get("analytics") or {}).get("player_quality") or 0),
+            int((x.get("analytics") or {}).get("scoring_potential") or 0),
+            -float(x.get("adp") or 9999),
+        ),
+        reverse=True,
+    )[:5]
+
     # Draft board is ranked by ADP (lowest/best ADP first).
     # Pick Score remains visible as Gridiron IQ's roster-aware recommendation.
     scored.sort(key=lambda x: (float(x.get("adp", 9999)), int(x.get("rank", 9999))))
@@ -3825,6 +3962,16 @@ def manual_mock_state(mock_id):
         ranking_label=ranking_label,
         ranking_source=ranking_source,
         platform_adp_loaded=has_platform_adp,
+        next_user_pick=_manual_next_user_pick(mock),
+        recommendations=[{
+            "name": candidate.get("name"),
+            "pos": candidate.get("pos"),
+            "team": candidate.get("team"),
+            "tier": candidate.get("tier"),
+            "projection": candidate.get("projection"),
+            "adp": candidate.get("adp"),
+            "analytics": candidate.get("analytics") or {},
+        } for candidate in recommendations],
     )
 
 @app.post("/api/mock-draft/manual/<mock_id>/pick")
