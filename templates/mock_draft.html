@@ -38,26 +38,43 @@
 .ms-grade-components{display:grid;gap:7px;margin-top:10px}.ms-grade-component{display:grid;grid-template-columns:1fr auto;gap:8px;padding:9px 10px;border:1px solid #edf0f5;border-radius:9px;background:#fafbfe}.ms-grade-component b{font-size:9px;color:var(--t)}.ms-grade-component span{font-size:9px;font-weight:900;color:var(--p)}.ms-grade-component small{grid-column:1/-1;color:var(--m);font-size:8px;line-height:1.4}.ms-grade-visible{margin:12px 0;padding:0;overflow:hidden}.ms-grade-visible summary{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;list-style:none}.ms-grade-visible summary::-webkit-details-marker{display:none}.ms-grade-visible summary:after{content:"Open +";flex:0 0 auto;color:var(--p);font-size:10px;font-weight:900}.ms-grade-visible[open] summary:after{content:"Close −"}.ms-grade-summary-copy h2{margin:3px 0 3px;font-size:16px}.ms-grade-summary-copy p{margin:0;font-size:9px;color:var(--m)}.ms-grade-visible .ms-grade-expanded{border-top:1px solid var(--l);padding:4px 18px 16px}.ms-grade-visible .ms-grade-expanded>p{margin:10px 0;font-size:10px;color:var(--m);line-height:1.5}.ms-grade-formula{padding:9px 10px;border-radius:9px;background:#f1efff;color:#4437a8;font-size:9px;font-weight:800;margin:8px 0 2px}
 
 .ms-analytics{margin:10px 0 12px;border:1px solid #ded9ff;border-radius:12px;background:linear-gradient(180deg,#fbfaff,#f5f3ff);padding:12px}.ms-analytics-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.ms-analytics-head h3{margin:2px 0 2px;font-size:14px}.ms-analytics-head p{margin:0;color:var(--m);font-size:9px}.ms-rec-badge{background:var(--p);color:#fff;border-radius:999px;padding:6px 9px;font-size:8px;font-weight:900;white-space:nowrap}.ms-analytics-player{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;margin-top:10px;padding:10px;border-radius:10px;background:#fff;border:1px solid #ece9ff}.ms-analytics-player strong{font-size:14px}.ms-analytics-player small{display:block;color:var(--m);font-size:8px;margin-top:2px}.ms-analytics-score{font-size:22px;font-weight:950;color:var(--p)}.ms-components{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}.ms-component{padding:7px 8px;border:1px solid #e9e6f6;border-radius:8px;background:#fff}.ms-component span{display:block;font-size:7px;color:var(--m);text-transform:uppercase;font-weight:900;letter-spacing:.04em}.ms-component b{display:block;font-size:10px;margin-top:2px}.ms-analytics-rationale{font-size:9px;line-height:1.45;color:#4c5568;margin:9px 0 0}.ms-group-intel{margin-top:8px;padding:9px;border-radius:9px;background:#f8f7ff;border:1px solid #e5e0ff}.ms-group-intel b{display:block;font-size:9px;color:#2f216e}.ms-group-intel span,.ms-group-intel small{display:block;margin-top:3px;font-size:8px;line-height:1.35;color:var(--m)}.ms-next-best{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}.ms-next-best button{border:1px solid #dcd6ff;background:#fff;color:#4c35d8;border-radius:999px;padding:5px 8px;font-size:8px;font-weight:900;cursor:pointer}.ms-analyze{border:1px solid #d9d4ff;border-radius:8px;background:#fff;color:#523bd8;padding:7px 8px;font-weight:900;font-size:8px;cursor:pointer;margin-right:4px}.ms-clock-note{font-size:8px;color:var(--m);margin-top:5px}.ms-warn{color:#b45309}.ms-good{color:#067647}
-@media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}}
+.ms-roster-builder{margin-top:14px;padding:12px;border:1px solid #e6e1ff;border-radius:12px;background:#faf9ff}.ms-roster-builder h3{margin:3px 0 4px;font-size:14px}.ms-roster-builder>p{margin:0 0 10px;font-size:9px;line-height:1.45}.ms-req-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.ms-req-grid label{font-size:8px;color:var(--m);font-weight:900;text-transform:uppercase}.ms-req-grid input{width:100%;box-sizing:border-box;border:1px solid var(--l);border-radius:8px;padding:8px;margin-top:4px;background:#fff}.ms-roster-total{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:10px;padding:9px 10px;border-radius:9px;background:#f0edff;color:#4c35d8;font-size:9px;font-weight:900}.ms-roster-total small{color:var(--m);font-weight:700}.ms-completion{margin:10px 0;border:1px solid #dce4f2;border-radius:12px;background:#fbfcff;padding:11px}.ms-completion-head{display:flex;justify-content:space-between;gap:10px;align-items:center}.ms-completion-head h3{margin:2px 0;font-size:13px}.ms-completion-pct{font-size:18px;font-weight:950;color:var(--p)}.ms-slot-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}.ms-slot-progress{padding:7px 8px;border:1px solid #e6eaf2;border-radius:8px;background:#fff}.ms-slot-progress span{display:block;font-size:7px;color:var(--m);font-weight:900}.ms-slot-progress b{display:block;font-size:10px;margin-top:2px}.ms-slot-progress.open b{color:#b45309}.ms-slot-progress.done b{color:#067647}.ms-priority{margin-top:8px;padding:8px 9px;border-radius:8px;background:#fff7ed;color:#9a3412;font-size:8px;font-weight:800}.ms-priority.complete{background:#f0fdf4;color:#166534}
+@media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}.ms-req-grid,.ms-slot-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <div class="ms">
-<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · ROUND-NEUTRAL GRADING V7 · LIVE PICK ANALYTICS V53</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, select any draft slot, and draft against 11 AI-controlled teams using verified platform ADP when available, current consensus rank, projections, tiers, roster construction and realistic team strategies.</p></div></div>
+<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · ROUND-NEUTRAL GRADING V7 · ROSTER STRATEGY V56</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, define your exact roster requirements, and let the Draft Intelligence Engine balance player quality, tiers, roster need, scoring potential and strategy at every one of your picks.</p></div></div>
 <div id="build-status" class="ms-status ms-build-check show busy" role="status" aria-live="polite">Checking the deployed server and complete player database…</div>
 
 <div id="setup" class="ms-grid">
+{% set rd = mock_roster_defaults.get(active_league_key, {}) %}
 <div class="ms-card"><div class="ms-k">DRAFT SETTINGS</div><h2>Start a Mock Draft</h2>
 <div class="ms-form">
 <label>League<select id="league">{% for item in draft_leagues %}<option value="{{ item.key }}" {% if item.key == active_league_key %}selected{% endif %}>{{ item.name }} — {{ item.platform }}</option>{% endfor %}</select></label>
 <label>Draft Position<input id="slot" type="number" min="1" max="{{ mock_context.teams }}" value="{{ mock_context.draft_slot }}"></label>
 <label>Teams<input id="teams" value="{{ mock_context.teams }}" disabled></label>
-<label>Rounds<select id="rounds"><option>10</option><option selected>12</option><option>15</option></select></label>
+<label>Total Draft Rounds<input id="rounds" value="15" disabled></label>
+<label>Draft Strategy<select id="strategy"><option value="balanced" selected>Balanced</option><option value="best-player">Best Player / Value</option><option value="hero-rb">Hero RB</option><option value="zero-rb">Zero RB</option><option value="robust-rb">Robust RB</option><option value="late-qb">Late QB</option></select></label>
+</div>
+<div class="ms-roster-builder">
+  <div class="ms-k">ROSTER REQUIREMENTS</div><h3>Tell Gridiron IQ exactly what your roster must contain</h3>
+  <p>Enter the required starting slots and bench size. The mock automatically uses the total as the number of rounds, then raises roster-need priority as required slots become scarce.</p>
+  <div class="ms-req-grid">
+    <label>QB<input id="req-qb" type="number" min="0" max="4" value="{{ rd.get('QB',1) }}"></label>
+    <label>RB<input id="req-rb" type="number" min="0" max="6" value="{{ rd.get('RB',2) }}"></label>
+    <label>WR<input id="req-wr" type="number" min="0" max="8" value="{{ rd.get('WR',2) }}"></label>
+    <label>TE<input id="req-te" type="number" min="0" max="4" value="{{ rd.get('TE',1) }}"></label>
+    <label>FLEX<input id="req-flex" type="number" min="0" max="4" value="{{ rd.get('FLEX',1) }}"></label>
+    <label>K<input id="req-k" type="number" min="0" max="2" value="{{ rd.get('K',1) }}"></label>
+    <label>D/ST<input id="req-def" type="number" min="0" max="2" value="{{ rd.get('DEF',1) }}"></label>
+    <label>Bench<input id="req-bench" type="number" min="0" max="12" value="{{ rd.get('BENCH',6) }}"></label>
+  </div>
+  <div class="ms-roster-total"><span>Total roster spots: <b id="roster-total">—</b></span><small id="roster-total-note">Draft rounds automatically match your roster size.</small></div>
 </div>
 <button id="start" class="ms-btn primary ms-full">Start AI Mock Draft</button>
 <div id="start-status" class="ms-status" role="status" aria-live="polite"></div>
 </div>
-<div class="ms-card"><div class="ms-k">AI OPPONENTS</div><h2>11 Different Draft Personalities</h2><p>Opponent teams use balanced, RB-heavy, WR-heavy, Zero-RB, Hero-RB, early-QB, late-QB and best-player approaches. Market rank remains an important input, while projected points and roster needs also shape every recommendation so AI teams do not draft by ADP alone.</p><p>Teams react to position runs and tier cliffs, build legal rosters, avoid early kicker and defense picks, and use only mild randomness so repeated mocks feel different but credible.</p></div>
+<div class="ms-card"><div class="ms-k">HOW THE STRATEGY ENGINE USES THIS</div><h2>Complete Roster + Best Available Talent</h2><p>Gridiron IQ treats your required starters as hard end-of-draft requirements, but it does not force mediocre players too early. It compares quality and tier cliffs across positions, then increases need pressure as your remaining picks shrink.</p><p>Bench spots stay flexible. The engine uses scoring format and your selected strategy to build soft RB/WR/QB/TE depth targets, while still jumping on a clearly better player or a position group that is about to fall off a tier.</p><p><b>Example:</b> if you still need TE and K with three picks left, those positions rise sharply. If you have six picks left and an elite WR falls, the engine can still take the value first because the roster can still be completed later.</p></div>
 </div>
-
 <details class="ms-card ms-grade-visible">
   <summary>
     <div class="ms-grade-summary-copy">
@@ -103,6 +120,11 @@
   <div id="analytics-content"><p class="ms-analytics-rationale">Player quality, scoring potential, roster need, league-settings fit, ADP value, NFL role/usage, position-group strength/weakness and next-pick availability will appear here.</p></div>
   <div id="next-best" class="ms-next-best"></div>
 </div>
+<div id="roster-completion" class="ms-completion">
+  <div class="ms-completion-head"><div><div class="ms-k">ROSTER COMPLETION PLAN</div><h3>Required Slots & Bench</h3></div><div id="completion-pct" class="ms-completion-pct">0%</div></div>
+  <div id="completion-slots" class="ms-slot-grid"></div>
+  <div id="completion-priority" class="ms-priority">Start the mock to see your live roster priorities.</div>
+</div>
 <div class="ms-stat"><span>LIVE DRAFT GRADE</span><strong id="grade">—</strong><small id="grade-detail">Your grade measures the quality of your picks at the spots you made them — not just projected points.</small></div>
 <details class="ms-grade-guide" style="margin-top:10px">
   <summary>ⓘ Explain my live Draft Grade</summary>
@@ -146,8 +168,67 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  const expectedBuild="mock-draft-v53-slot-analytics";
+  const expectedBuild="mock-draft-v56-roster-strategy";
   let id = null, available = [], recommendations = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="", selectedAnalyticsName="";
+  const rosterDefaults={{ mock_roster_defaults|tojson }};
+  const requirementInputs={QB:"req-qb",RB:"req-rb",WR:"req-wr",TE:"req-te",FLEX:"req-flex",K:"req-k",DEF:"req-def",BENCH:"req-bench"};
+
+  function rosterRequirements(){
+    const values={};
+    Object.entries(requirementInputs).forEach(([position,inputId])=>{
+      values[position]=Math.max(0,Number($(inputId)?.value||0));
+    });
+    return values;
+  }
+
+  function updateRosterTotal(){
+    const req=rosterRequirements();
+    const total=Object.values(req).reduce((sum,value)=>sum+Number(value||0),0);
+    $("roster-total").textContent=total;
+    $("rounds").value=total;
+    const note=$("roster-total-note");
+    if(total<6||total>20){
+      note.textContent="Use between 6 and 20 total roster spots.";
+      note.className="ms-warn";
+    }else{
+      note.textContent=`${total} rounds · starters + FLEX + bench`;
+      note.className="";
+    }
+    return total;
+  }
+
+  function applyLeagueDefaults(){
+    const defaults=rosterDefaults[$("league").value]||{};
+    Object.entries(requirementInputs).forEach(([position,inputId])=>{
+      if(defaults[position]!==undefined) $(inputId).value=defaults[position];
+    });
+    if(defaults.teams){$("teams").value=defaults.teams;$("slot").max=defaults.teams;}
+    if(defaults.draft_slot) $("slot").value=Math.min(Number(defaults.draft_slot),Number(defaults.teams||12));
+    updateRosterTotal();
+  }
+
+  function renderRosterCompletion(completion={},strategy="balanced"){
+    const req=completion.requirements||{};
+    const direct=completion.direct_filled||{};
+    const slots=[
+      ["QB",direct.QB||0,req.QB||0],["RB",direct.RB||0,req.RB||0],["WR",direct.WR||0,req.WR||0],["TE",direct.TE||0,req.TE||0],
+      ["FLEX",completion.flex_filled||0,req.FLEX||0],["K",direct.K||0,req.K||0],["D/ST",direct.DEF||0,req.DEF||0],["Bench",completion.bench_used||0,req.BENCH||0]
+    ];
+    $("completion-pct").textContent=`${Number(completion.completion_percent||0)}%`;
+    $("completion-slots").innerHTML=slots.map(([label,filled,required])=>`<div class="ms-slot-progress ${Number(filled)>=Number(required)?"done":"open"}"><span>${label}</span><b>${filled}/${required}</b></div>`).join("");
+    const priority=(completion.priority_positions||[]).map(x=>x==="DEF"?"D/ST":x);
+    const box=$("completion-priority");
+    if(completion.complete){
+      box.className="ms-priority complete";
+      box.textContent=`Roster complete · ${strategy.replace(/-/g," ")} strategy · every required slot filled.`;
+    }else if(priority.length){
+      box.className="ms-priority";
+      box.textContent=`Priority openings: ${priority.join(", ")} · ${completion.remaining_picks||0} picks left · ${completion.required_open||0} required starter slot${Number(completion.required_open||0)===1?"":"s"} still open.`;
+    }else{
+      box.className="ms-priority complete";
+      box.textContent=`All required starters covered. ${completion.remaining_picks||0} remaining pick${Number(completion.remaining_picks||0)===1?"":"s"} can focus on quality, tiers and bench upside.`;
+    }
+  }
 
   async function api(url,opt={}){
     const r=await fetch(url,{headers:{"Content-Type":"application/json"},...opt});
@@ -216,7 +297,9 @@
         body:JSON.stringify({
           league_key:$("league").value,
           draft_slot:+$("slot").value,
-          rounds:+$("rounds").value
+          rounds:+$("rounds").value,
+          roster_requirements:rosterRequirements(),
+          draft_strategy:$("strategy").value
         })
       });
       if(!d.mock||!d.mock.id) throw new Error("The server did not create a mock draft.");
@@ -315,6 +398,7 @@
     $("next-pick-note").textContent=nextUser
       ? `Next turn: Round ${nextUser.round} · Pick #${nextUser.overall} · Chance-to-return estimates use this pick.`
       : "This is your final scheduled selection.";
+    renderRosterCompletion(d.roster_completion||{},d.draft_strategy||"balanced");
 
     const grade=d.grade||{};
     $("grade").textContent=Number.isFinite(Number(grade.overall))&&Number(grade.overall)>0
@@ -454,7 +538,8 @@
 
   $("search").oninput=renderPlayers;
 
-  $("league").onchange=verifyBuild;
+  $("league").onchange=()=>{applyLeagueDefaults();verifyBuild();};
+  Object.values(requirementInputs).forEach(inputId=>$(inputId)?.addEventListener("input",updateRosterTotal));
 
   document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{
     document.querySelectorAll("#tabs button").forEach(x=>x.classList.remove("active"));
@@ -472,6 +557,7 @@
     await refresh();
   };
 
+  updateRosterTotal();
   verifyBuild();
 })();
 </script>
