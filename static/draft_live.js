@@ -149,20 +149,31 @@
       card.appendChild(box);
     }
     const role = clean(rec.usage_role) || clean(rec.player.pos) || "Role pending";
+    const group = rec.position_group || (rec.player && rec.player.position_group) || {};
     const action = clean(rec.draft_action) || (Number(rec.survival_probability) <= 25 ? "Draft Now" : "Strong Consideration");
+    const groupLabel = group.strength ? `${group.strength} · urgency ${group.urgency_score ?? rec.group_urgency_score ?? "—"}/100` : (rec.group_urgency_score != null ? `${rec.group_urgency_score}/100` : "—");
     const fields = [
       ["Player Quality", rec.player_quality ?? rec.position_score ?? "—"],
       ["Scoring Potential", rec.scoring_potential ?? "—"],
       ["Roster Need", rec.roster_need_score ?? rec.roster_fit ?? "—"],
+      ["League Settings Fit", rec.league_fit_score ?? "—"],
+      ["Position Group", groupLabel],
       ["ADP Value", rec.adp_value ?? "—"],
       ["Expected Usage", role],
       ["Next-Round Chance", rec.survival_probability != null ? `${rec.survival_probability}%` : "—"],
       ["Recommendation", action],
     ];
+    const strength = Array.isArray(group.strengths) && group.strengths.length ? group.strengths.join("; ") : "No major depth advantage";
+    const weakness = Array.isArray(group.weaknesses) && group.weaknesses.length ? group.weaknesses.join("; ") : "No immediate scarcity warning";
     box.innerHTML = `
-      <div class="giq-live-components-title">LIVE DECISION COMPONENTS</div>
+      <div class="giq-live-components-title">LIVE DECISION COMPONENTS · ${esc(rec.engine_version || "DRAFT IQ")}</div>
       <div class="giq-live-components-grid">
         ${fields.map(([k,v]) => `<div class="giq-live-component"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("")}
+      </div>
+      <div style="margin-top:8px;padding:9px;border:1px solid #e6e1ff;border-radius:10px;background:#faf9ff;font-size:12px;line-height:1.45">
+        <b>${esc(clean(rec.player.pos) || "Position")} group intelligence</b><br>
+        <span><strong>Strength:</strong> ${esc(strength)}</span><br>
+        <span><strong>Weakness:</strong> ${esc(weakness)}</span>
       </div>`;
   }
 
