@@ -235,6 +235,7 @@
         <div class="connector-body">
           <div class="step-label"><span>1</span> Yahoo developer connection</div>
           <p class="connector-help">Your Yahoo Client ID and Client Secret stay in Render. Gridiron IQ only uses them server-side for Yahoo OAuth.</p>
+          <p class="connector-help"><b>New Yahoo app?</b> Click <b>Sign In / Reconnect Yahoo</b>. The league controls stay disabled until Yahoo returns a valid OAuth token.</p>
           <div class="sync-form">
             <label>Redirect URI
               <div class="copy-field">
@@ -246,7 +247,7 @@
           </div>
           <div class="connector-actions">
             <button id="y34-check" type="button" class="button outline">Check Yahoo Setup</button>
-            <a id="y34-connect" class="button yahoo-connect" href="/auth/yahoo/start">Connect Yahoo</a>
+            <a id="y34-connect" class="button yahoo-connect" href="/auth/yahoo/start?force=1">Sign In / Reconnect Yahoo</a>
             <button id="y34-disconnect" type="button" class="text-button danger-text">Disconnect</button>
           </div>
 
@@ -256,11 +257,11 @@
             <label>Yahoo league
               <select id="y34-league-select" disabled><option value="">Connect Yahoo first</option></select>
             </label>
-            <button id="y34-load" type="button" class="button outline">Load My Leagues</button>
+            <button id="y34-load" type="button" class="button outline" disabled>Load My Leagues</button>
           </div>
           <div class="connector-actions">
-            <button id="y34-select" type="button" class="button outline">Use Selected League</button>
-            <button id="y34-sync" type="button" class="button success">Sync Yahoo League</button>
+            <button id="y34-select" type="button" class="button outline" disabled>Use Selected League</button>
+            <button id="y34-sync" type="button" class="button success" disabled>Sync Yahoo League</button>
           </div>
           <div id="y34-message" class="sync-message hidden"></div>
           <div id="y34-result" class="sync-result hidden"></div>
@@ -272,22 +273,34 @@
       <div><span class="help-icon">?</span></div>
       <div>
         <h3>Having trouble connecting?</h3>
-        <p><b>ESPN:</b> enter the League ID, season, SWID, and espn_s2, test the connection, then sync. <b>Yahoo:</b> save the Yahoo app settings, authorize Yahoo, load your leagues, choose one, then sync.</p>
+        <p><b>ESPN:</b> enter the League ID, season, SWID, and espn_s2, test the connection, then sync. <b>Yahoo:</b> click Sign In / Reconnect Yahoo, approve access, wait for the Connected badge, choose a league, then sync.</p>
       </div>
     </section>
 
-    <section class="sync-help panel"><div><span class="help-icon">✓</span></div><div><h3>Connection build</h3><p><b>Gridiron IQ v43 Standalone Sync</b> — Yahoo Sync and Mock Draft are packaged together so frontend/backend versions stay matched.</p></div></section>
+    <section class="sync-help panel"><div><span class="help-icon">✓</span></div><div><h3>Connection build</h3><p><b>Gridiron IQ v47 Yahoo Reconnect</b> — Yahoo Sync and Mock Draft are packaged together so frontend/backend versions stay matched.</p></div></section>
   </main>
 </div>
 <script>
-
 (function(){
   const $=id=>document.getElementById(id);
   const badge=$('y34-badge'), msg=$('y34-message'), result=$('y34-result'), sel=$('y34-league-select');
+  const loadBtn=$('y34-load'), selectBtn=$('y34-select'), syncBtn=$('y34-sync');
   let leagues=[];
+  let connected=false;
   function say(text,error=false){ if(!msg)return; msg.textContent=text; msg.className='sync-message '+(error?'error':'success'); }
   function mark(text,state){ if(!badge)return; badge.className='connection-badge '+state; badge.innerHTML='<i></i>'+text; }
   function working(btn,on,label){ if(!btn)return; if(on){btn.dataset.old=btn.textContent;btn.disabled=true;btn.textContent=label||'Working…';}else{btn.disabled=false;btn.textContent=btn.dataset.old||btn.textContent;} }
+  function setLeagueControls(state){
+    connected=!!state;
+    if(loadBtn) loadBtn.disabled=!connected;
+    if(!connected){
+      leagues=[];
+      if(sel){sel.disabled=true;sel.innerHTML='<option value="">Sign in to Yahoo first</option>';}
+      if(selectBtn)selectBtn.disabled=true;
+      if(syncBtn)syncBtn.disabled=true;
+      showSelected(null);
+    }
+  }
   async function api(url,options={}){
     const r=await fetch(url,{credentials:'same-origin',...options,headers:{'Accept':'application/json',...(options.headers||{})}});
     const ct=r.headers.get('content-type')||'';
@@ -302,27 +315,50 @@
     result.classList.remove('hidden');
   }
   async function loadLeagues(silent=false){
-    const btn=$('y34-load'); if(!silent)working(btn,true,'Loading…');
+    if(!connected){say('Sign in to Yahoo first. The league list cannot load until the backend has a valid Yahoo token.',true);return;}
+    if(!silent)working(loadBtn,true,'Loading…');
     try{
       const d=await api('/api/yahoo/leagues'); leagues=d.leagues||[];
-      if(!leagues.length){ sel.disabled=true; sel.innerHTML='<option value="">No Yahoo football leagues found</option>'; say('Yahoo authorized successfully, but no NFL leagues were returned. Click Check Yahoo Setup for the API permission test.',true); return; }
-      sel.innerHTML=leagues.map((l,i)=>'<option value="'+i+'">'+(l.name||'Yahoo League')+(l.season?' · '+l.season:'')+'</option>').join(''); sel.disabled=false;
-      if(d.selected_league&&d.selected_league.league_key){ const i=leagues.findIndex(x=>x.league_key===d.selected_league.league_key); if(i>=0)sel.value=String(i); showSelected(d.selected_league); }
-      mark('Connected','connected'); say('Found '+leagues.length+' Yahoo league'+(leagues.length===1?'':'s')+'. Choose your league and click Use Selected League.');
-    }catch(e){sel.disabled=true;sel.innerHTML='<option value="">Unable to load Yahoo leagues</option>';say(e.message,true);}finally{if(!silent)working(btn,false);}
+      if(!leagues.length){
+        sel.disabled=true; sel.innerHTML='<option value="">No Yahoo football leagues found</option>';
+        if(selectBtn)selectBtn.disabled=true; if(syncBtn)syncBtn.disabled=true;
+        say('Yahoo is signed in, but no NFL leagues were returned. Click Check Yahoo Setup to test Fantasy Sports API access.',true); return;
+      }
+      sel.innerHTML=leagues.map((l,i)=>'<option value="'+i+'">'+(l.name||'Yahoo League')+(l.season?' · '+l.season:'')+'</option>').join('');
+      sel.disabled=false;
+      if(selectBtn)selectBtn.disabled=false; if(syncBtn)syncBtn.disabled=false;
+      if(d.selected_league&&d.selected_league.league_key){
+        const i=leagues.findIndex(x=>x.league_key===d.selected_league.league_key); if(i>=0)sel.value=String(i); showSelected(d.selected_league);
+      }
+      mark('Connected','connected'); say('Found '+leagues.length+' Yahoo league'+(leagues.length===1?'':'s')+'. Choose your league below.');
+    }catch(e){
+      sel.disabled=true;sel.innerHTML='<option value="">Unable to load Yahoo leagues</option>';
+      if(selectBtn)selectBtn.disabled=true;if(syncBtn)syncBtn.disabled=true;
+      say(e.message,true);
+    }finally{if(!silent&&connected)working(loadBtn,false);}
   }
   async function status(){
+    setLeagueControls(false);
     try{
       const d=await api('/api/yahoo/status'); $('y34-redirect-uri').value=d.redirect_uri||window.location.origin+'/auth/yahoo/callback';
-      if(d.connected){mark('Connected','connected');say('Yahoo is authorized. Loading your leagues…');await loadLeagues(true);}else if(d.app_configured){mark('Ready to connect','ready');say('Yahoo settings were found in Render. Click Connect Yahoo.');}else{mark('Not configured','offline');say('Yahoo environment settings are incomplete in Render.',true);}
-    }catch(e){mark('Unavailable','offline');say(e.message,true);}
+      if(d.connected){
+        setLeagueControls(true); mark('Connected','connected'); say('Yahoo sign-in is verified. Loading your leagues…'); await loadLeagues(true);
+      }else if(d.app_configured){
+        setLeagueControls(false); mark('Sign-in required','ready');
+        const st=d.oauth_status&&d.oauth_status.status;
+        if(st==='started') say('Yahoo sign-in has not completed. Click Sign In / Reconnect Yahoo and approve access.',true);
+        else say('Yahoo app settings are configured. Click Sign In / Reconnect Yahoo before loading leagues.');
+      }else{
+        setLeagueControls(false); mark('Not configured','offline'); say('Yahoo environment settings are incomplete in Render.',true);
+      }
+    }catch(e){setLeagueControls(false);mark('Unavailable','offline');say(e.message,true);}
   }
-  $('y34-check')?.addEventListener('click',async()=>{const b=$('y34-check');working(b,true,'Checking…');try{const d=await api('/api/yahoo/diagnostics');if(d.api_ok===true){say(d.api_detail+' '+d.next_step);}else if(d.issues&&d.issues.length){say(d.issues.join(' ')+' '+d.next_step,true);}else{say(d.next_step);}}catch(e){say(e.message,true);}finally{working(b,false);}});
+  $('y34-check')?.addEventListener('click',async()=>{const b=$('y34-check');working(b,true,'Checking…');try{const d=await api('/api/yahoo/diagnostics');if(d.connected&&d.api_ok===true){setLeagueControls(true);mark('Connected','connected');say(d.api_detail+' '+d.next_step);await loadLeagues(true);}else if(d.issues&&d.issues.length){say(d.issues.join(' ')+' '+d.next_step,true);}else{setLeagueControls(!!d.connected);say((d.oauth_status&&d.oauth_status.detail?d.oauth_status.detail+' ':'')+d.next_step,!d.connected);}}catch(e){say(e.message,true);}finally{working(b,false);}});
   $('y34-copy')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('y34-redirect-uri').value);say('Redirect URI copied.');}catch(e){say('Could not copy automatically. Select and copy the Redirect URI manually.',true);}});
-  $('y34-load')?.addEventListener('click',()=>loadLeagues(false));
-  $('y34-select')?.addEventListener('click',async()=>{const b=$('y34-select');if(sel.disabled||!leagues.length){say('Load your Yahoo leagues first.',true);return;}const l=leagues[Number(sel.value)];if(!l){say('Choose a Yahoo league first.',true);return;}working(b,true,'Saving…');try{const d=await api('/api/yahoo/select-league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(l)});showSelected(d.selected_league);say(d.message);}catch(e){say(e.message,true);}finally{working(b,false);}});
-  $('y34-sync')?.addEventListener('click',async()=>{const b=$('y34-sync');working(b,true,'Syncing…');try{const d=await api('/api/yahoo/sync',{method:'POST'});mark('Synced','connected');showSelected({league_name:d.league.name,season:d.league.season});say(d.league.name+' synced successfully. '+d.league.team_count+' teams loaded.');}catch(e){say(e.message,true);}finally{working(b,false);}});
-  $('y34-disconnect')?.addEventListener('click',async()=>{const b=$('y34-disconnect');working(b,true,'Disconnecting…');try{const d=await api('/api/yahoo/disconnect',{method:'POST'});leagues=[];sel.disabled=true;sel.innerHTML='<option value="">Connect Yahoo first</option>';mark('Not connected','offline');say(d.message);showSelected(null);}catch(e){say(e.message,true);}finally{working(b,false);}});
+  loadBtn?.addEventListener('click',()=>loadLeagues(false));
+  selectBtn?.addEventListener('click',async()=>{const b=selectBtn;if(!connected||sel.disabled||!leagues.length){say('Sign in and load your Yahoo leagues first.',true);return;}const l=leagues[Number(sel.value)];if(!l){say('Choose a Yahoo league first.',true);return;}working(b,true,'Saving…');try{const d=await api('/api/yahoo/select-league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(l)});showSelected(d.selected_league);say(d.message);syncBtn.disabled=false;}catch(e){say(e.message,true);}finally{working(b,false);}});
+  syncBtn?.addEventListener('click',async()=>{const b=syncBtn;if(!connected){say('Sign in to Yahoo first.',true);return;}if(!leagues.length||sel.disabled){say('Load and choose your Yahoo league first.',true);return;}const l=leagues[Number(sel.value)];working(b,true,'Syncing…');try{if(l){await api('/api/yahoo/select-league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(l)});}const d=await api('/api/yahoo/sync',{method:'POST'});mark('Synced','connected');showSelected({league_name:d.league.name,season:d.league.season});say(d.league.name+' synced successfully. '+d.league.team_count+' teams loaded.');}catch(e){say(e.message,true);}finally{working(b,false);}});
+  $('y34-disconnect')?.addEventListener('click',async()=>{const b=$('y34-disconnect');working(b,true,'Disconnecting…');try{const d=await api('/api/yahoo/disconnect',{method:'POST'});setLeagueControls(false);mark('Not connected','offline');say(d.message);}catch(e){say(e.message,true);}finally{working(b,false);}});
   status();
 })();
 
