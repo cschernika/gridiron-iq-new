@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json, os, re, uuid, time
+import json, os, re, uuid, time, hmac, hashlib
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -82,7 +82,7 @@ def hide_legacy_connect_league_navigation(response):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
-            response.headers["X-Gridiron-Build"] = "v45-yahoo-token-storage"
+            response.headers["X-Gridiron-Build"] = "v46-yahoo-callback-state"
     except Exception:
         pass
     return response
@@ -745,7 +745,7 @@ def league_sync():
             analytics=DEMO,
             yahoo_configured=yahoo_configured,
             yahoo_redirect=yahoo_redirect,
-            gridiron_build="v45-yahoo-token-storage",
+            gridiron_build="v46-yahoo-callback-state",
         )
     except Exception as exc:
         app.logger.exception("League Sync page failed to render")
@@ -763,7 +763,7 @@ def league_sync():
             "<p><a href='/api/diagnostics/league-sync'>Open League Sync diagnostics</a> · "
             "<a href='/app'>Return to Command Center</a></p></div></body></html>",
             200,
-            {"X-Gridiron-Build": "v45-yahoo-token-storage", "Cache-Control": "no-store"},
+            {"X-Gridiron-Build": "v46-yahoo-callback-state", "Cache-Control": "no-store"},
         )
 
 
@@ -773,7 +773,7 @@ def league_sync_diagnostics():
     snapshot = load_snapshot()
     return jsonify(
         ok=True,
-        build="v45-yahoo-token-storage",
+        build="v46-yahoo-callback-state",
         league_sync_template=(template_dir / "league_sync.html").exists(),
         base_template=(template_dir / "base.html").exists(),
         sidebar_template=(template_dir / "_sidebar.html").exists(),
@@ -996,7 +996,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v45-yahoo-token-storage",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v46-yahoo-callback-state",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -1489,7 +1489,7 @@ def yahoo_diagnostics():
 
     return jsonify(
         ok=not issues,
-        build="v45-yahoo-token-storage",
+        build="v46-yahoo-callback-state",
         issues=issues,
         redirect_uri=creds["redirect_uri"] or f"{request.url_root.rstrip('/')}/auth/yahoo/callback",
         connected=bool(token.get("access_token") or token.get("refresh_token")),
@@ -1499,6 +1499,8 @@ def yahoo_diagnostics():
         next_step=next_step,
         token_storage=storage,
         oauth_status=oauth_status,
+        oauth_state_mode="signed-stateless-with-session-fallback",
+        callback_path="/auth/yahoo/callback",
         persistent_data_configured=bool(str(os.getenv("GRIDIRON_DATA_DIR", "") or "").strip()),
     )
 
@@ -1512,13 +1514,55 @@ def yahoo_app_credentials_info():
     return jsonify(ok=False, error="Configure YAHOO_CLIENT_ID, YAHOO_CLIENT_SECRET and YAHOO_REDIRECT_URI in Render."), 400
 
 
+def _yahoo_make_oauth_state():
+    """Create a state value that can be validated without a browser session.
+
+    Yahoo redirects back through a top-level cross-site navigation. Some browser
+    or deployment combinations can lose the Flask session cookie on that trip.
+    Signing the nonce lets the callback validate state independently while still
+    preserving CSRF protection.
+    """
+    nonce = os.urandom(24).hex()
+    creds = _yahoo_credentials()
+    message = f"{nonce}|{creds.get('redirect_uri','')}".encode("utf-8")
+    secret = str(app.secret_key or os.getenv("SECRET_KEY") or "change-me").encode("utf-8")
+    signature = hmac.new(secret, message, hashlib.sha256).hexdigest()
+    return f"{nonce}.{signature}"
+
+
+def _yahoo_validate_oauth_state(returned_state):
+    returned_state = str(returned_state or "").strip()
+    if not returned_state:
+        return False, "missing"
+
+    # Preserve compatibility with an intact Flask session.
+    session_state = str(session.get("yahoo_state") or "").strip()
+    if session_state and hmac.compare_digest(returned_state, session_state):
+        return True, "session"
+
+    # Stateless verification for callbacks where the session cookie was lost.
+    try:
+        nonce, supplied_sig = returned_state.rsplit(".", 1)
+        if not nonce or not supplied_sig:
+            return False, "invalid_format"
+        creds = _yahoo_credentials()
+        message = f"{nonce}|{creds.get('redirect_uri','')}".encode("utf-8")
+        secret = str(app.secret_key or os.getenv("SECRET_KEY") or "change-me").encode("utf-8")
+        expected_sig = hmac.new(secret, message, hashlib.sha256).hexdigest()
+        if hmac.compare_digest(supplied_sig, expected_sig):
+            return True, "signed"
+    except Exception:
+        app.logger.exception("Unable to validate Yahoo OAuth state")
+    return False, "mismatch"
+
+
 @app.get("/auth/yahoo")
 @app.get("/auth/yahoo/start")
 def yahoo_start():
     creds = _yahoo_credentials()
     if not creds["client_id"] or not creds["client_secret"] or not creds["redirect_uri"]:
         return page("error.html", code=400, message="Yahoo is not fully configured in Render."), 400
-    state = os.urandom(24).hex()
+    state = _yahoo_make_oauth_state()
     session["yahoo_state"] = state
     _yahoo_store_oauth_status("started", "Yahoo authorization started; waiting for callback.")
     params = {
@@ -1533,13 +1577,29 @@ def yahoo_start():
 
 @app.get("/auth/yahoo/callback")
 def yahoo_callback():
+    # Record callback arrival before any validation so diagnostics can
+    # distinguish "Yahoo never returned" from a state/code/token failure.
+    _yahoo_store_oauth_status("callback_received", "Yahoo callback reached Gridiron IQ; validating authorization response.")
+
     if request.args.get("error"):
-        return page("error.html", code=400, message=f"Yahoo authorization was declined: {request.args.get('error_description') or request.args.get('error')}."), 400
-    if request.args.get("state") != session.get("yahoo_state"):
-        return page("error.html", code=400, message="Yahoo authorization state did not match. Start the Yahoo connection again from League Sync."), 400
+        detail = request.args.get("error_description") or request.args.get("error")
+        _yahoo_store_oauth_status("authorization_denied", str(detail))
+        return page("error.html", code=400, message=f"Yahoo authorization was declined: {detail}."), 400
+
+    valid_state, state_mode = _yahoo_validate_oauth_state(request.args.get("state"))
+    if not valid_state:
+        _yahoo_store_oauth_status(
+            "state_validation_failed",
+            f"Yahoo callback arrived, but OAuth state validation failed ({state_mode}). Start Connect Yahoo again after this deployment."
+        )
+        return page("error.html", code=400, message="Yahoo returned to Gridiron IQ, but the authorization state could not be verified. Click Connect Yahoo again and approve access."), 400
+
     code = str(request.args.get("code") or "").strip()
     if not code:
-        return page("error.html", code=400, message="Yahoo did not return an authorization code."), 400
+        _yahoo_store_oauth_status("authorization_code_missing", "Yahoo callback arrived without an authorization code.")
+        return page("error.html", code=400, message="Yahoo returned to Gridiron IQ but did not provide an authorization code."), 400
+
+    _yahoo_store_oauth_status("exchanging_code", f"Yahoo callback validated using {state_mode} state; exchanging authorization code.")
     creds = _yahoo_credentials()
     try:
         response = requests.post(
@@ -1584,7 +1644,7 @@ def yahoo_leagues():
             leagues=leagues,
             selected_league=_yahoo_selected_league(),
             connected=True,
-            build="v45-yahoo-token-storage",
+            build="v46-yahoo-callback-state",
         )
     except Exception as exc:
         app.logger.exception("Yahoo league discovery failed")
@@ -1693,7 +1753,7 @@ def yahoo_sync():
             "league_name": league_name,
             "teams": payload["settings"]["team_count"],
         })
-        return jsonify(ok=True, build="v45-yahoo-token-storage", **payload)
+        return jsonify(ok=True, build="v46-yahoo-callback-state", **payload)
     except Exception as exc:
         app.logger.exception("Yahoo league sync failed")
         return jsonify(
