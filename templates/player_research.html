@@ -19,7 +19,7 @@
     <div>
       <div class="pr-kicker">GRIDIRON IQ PLAYER CENTER</div>
       <h1>Player Research</h1>
-      <p class="pr-sub">Current teams, platform ADP, each player's latest available NFL season and 2026 projections. Injury and news badges appear directly beside each affected player.</p>
+      <p class="pr-sub">Current teams, platform ADP, each player's latest available NFL season and 2026 projections. Breaking news and injury timelines are checked while this page is open.</p>
     </div>
     <div class="pr-head-actions">
       <span id="pr-build" class="pr-build">Player Data v54</span>
@@ -46,7 +46,7 @@
     <div class="pr-legend">
       <div class="pr-legend-items">
         <span class="pr-legend-item"><span class="pr-mini-icon injury">✚</span> Injury designation</span>
-        <span class="pr-legend-item"><span class="pr-mini-icon news">📰</span> Player news — auto-checks every 10 minutes; click beside any player for an immediate deeper live check</span>
+        <span class="pr-legend-item"><span class="pr-mini-icon news">📰</span> Player news — auto-checks every 2 minutes; click beside any player for an immediate deeper live check</span>
         <span class="pr-legend-item"><span class="pr-depth starter">WR1</span> Published depth chart</span>
         <span class="pr-legend-item"><span class="pr-depth projected">WR1</span> Team projection when unpublished</span>
         <span class="pr-legend-item"><span class="pr-sos easy">#1 Easy</span> Position-adjusted 2026 schedule</span>
@@ -72,7 +72,7 @@
         <tbody id="pr-body"><tr><td class="pr-loading" colspan="12">Loading Player Research…</td></tr></tbody>
       </table>
     </div>
-    <div class="pr-foot"><span id="pr-source">Teams, depth charts and injuries refresh daily. Player news auto-checks every 10 minutes.</span><span>Click any heading to sort.</span></div>
+    <div class="pr-foot"><span id="pr-source">Teams, depth charts and injuries refresh daily. Player news auto-checks every 2 minutes.</span><span>Click any heading to sort.</span></div>
   </section>
 </div>
 
@@ -99,7 +99,7 @@
   let modalRequestToken = 0;
   let modalPlayerKey = "";
   let liveNewsTimer = null;
-  const AUTO_NEWS_INTERVAL_MS = 10 * 60 * 1000;
+  const AUTO_NEWS_INTERVAL_MS = 2 * 60 * 1000;
   let autoNewsTimer = null;
   let autoNewsInFlight = false;
   let lastAutoNewsScanAt = 0;
@@ -125,7 +125,7 @@
       document.querySelectorAll("[data-count]").forEach(node=>{const key=node.dataset.count;node.textContent=`(${key==="ALL"?rows.length:(counts[key]||0)})`;});
       const updated=firstData.updated_at||{};
       if(updated.current_players){$("pr-refresh").title=`Last current-player update: ${dateText(updated.current_players)}`;}
-      $("pr-source").textContent=`Teams and injuries: ${firstData.sources?.current_players||"daily player directory"} · News: automatic live scan every 10 minutes + ${firstData.sources?.recent_news||"daily news index"} · SOS: 2026 schedule with position-adjusted defensive grades`;
+      $("pr-source").textContent=`Teams and injuries: ${firstData.sources?.current_players||"daily player directory"} · News: near-real-time live scan every 2 minutes + ${firstData.sources?.recent_news||"daily news index"} · SOS: 2026 schedule with position-adjusted defensive grades`;
       render();
       startAutoNewsRefresh();
       const requested=new URLSearchParams(location.search).get("player");if(requested) openPlayerByName(requested,"profile");
@@ -161,9 +161,11 @@
         const update=matches[row.name];
         if(!update)return;
         const wasNews=Boolean(row.has_news);
+        const wasInjury=Boolean(row.has_injury);
         const oldTitle=String(row.latest_news_title||"");
+        const oldReturn=String(row.expected_return||"");
         Object.assign(row,update);
-        if(!wasNews||oldTitle!==String(update.latest_news_title||"")){
+        if(!wasNews||!wasInjury&&Boolean(update.has_injury)||oldTitle!==String(update.latest_news_title||"")||oldReturn!==String(update.expected_return||"")){
           changed=true;
           profileCache.delete(profileCacheKey(row));
         }
@@ -173,7 +175,7 @@
       const checked=data.updated_at?dateText(data.updated_at):new Date().toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
       setAutoNewsStatus(`📰 Auto News · ${data.matched_players||0} updates · ${checked}`,"ready");
       const node=$("pr-news-auto");
-      if(node)node.title=`Automatic live player-news scan every 10 minutes. Last checked ${checked}. ${data.source||""}`;
+      if(node)node.title=`Automatic live player-news scan every 2 minutes. Last checked ${checked}. ${data.source||""}`;
     }catch(error){
       lastAutoNewsScanAt=Date.now();
       setAutoNewsStatus("📰 Auto News · retrying later","warn");
@@ -264,7 +266,7 @@
     document.querySelectorAll("[data-arrow]").forEach(node=>node.textContent=node.dataset.arrow===sortKey?(sortDirection==="asc"?"▲":"▼"):"");
     if(!visible.length){$("pr-body").innerHTML='<tr><td class="pr-empty" colspan="12">No players match the selected filters.</td></tr>';return;}
     $("pr-body").innerHTML=visible.map(row=>{
-      const injuryTitle=[row.injury_status,row.injury_body_part,row.practice_participation].filter(Boolean).join(" · ");
+      const injuryTitle=[row.injury_status,row.injury_body_part,row.expected_return?`Expected return: ${row.expected_return}`:"",row.practice_participation].filter(Boolean).join(" · ");
       const newsTitle=row.has_news?(row.latest_news_title||`${row.news_count||1} recent player update${Number(row.news_count||1)===1?"":"s"}`):`Check live player news for ${row.name}`;
       const showNewsButton=String(row.position||"").toUpperCase()!=="DEF";
       const newsClass=row.has_news?"news":"news-check";
