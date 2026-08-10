@@ -1088,7 +1088,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v54-injury-expected-return",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v57-live-player-news-injuries",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -7087,48 +7087,81 @@ def _player_research_news(player_name):
 
 
 def _injury_expected_return_from_text(text):
-    """Extract a conservative return timeline from a reported injury/news sentence."""
+    """Extract reported return targets and absence windows without inventing a date."""
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     if not text:
         return None
 
-    patterns = [
-        (r"\b(?:expected|targeting|targets|hoping|hopes|likely|could|may|set|scheduled)\s+to\s+return\s+(?:in\s+|by\s+|for\s+)?(week\s+\d{1,2})\b", "Reported"),
-        (r"\b(?:return|returns|returning)\s+(?:in\s+|by\s+|for\s+)?(week\s+\d{1,2})\b", "Reported"),
-        (r"\beligible\s+to\s+return\s+(?:in\s+|for\s+|by\s+)?(week\s+\d{1,2})\b", "Reported"),
-        (r"\b(?:expected|targeting|targets|hoping|hopes|likely|could|may|set|scheduled)\s+to\s+return\s+(?:on\s+|by\s+)?([A-Z][a-z]+\s+\d{1,2}(?:,\s*20\d{2})?)\b", "Reported"),
-        (r"\b(?:targeting|targets|eyeing|eying)\s+(?:a\s+)?([A-Z][a-z]+\s+\d{1,2}(?:,\s*20\d{2})?)\s+return\b", "Reported"),
-        (r"\b(?:expected|likely|could|may|set)\s+(?:back|to be back)\s+(?:in\s+|by\s+|for\s+)?(week\s+\d{1,2})\b", "Reported"),
-        (r"\b(?:return|eligible)\s+(?:date\s+)?(?:of\s+|on\s+|by\s+)?([A-Z][a-z]+\s+\d{1,2}(?:,\s*20\d{2})?)\b", "Reported"),
-        (r"\bout\s+(?:approximately\s+|about\s+)?(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s+weeks?\b", "Estimated"),
-        (r"\bout\s+(?:approximately\s+|about\s+)?(\d{1,2})\s+weeks?\b", "Estimated"),
+    week_words = {
+        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+        "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+        "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18",
+    }
+
+    def week_label(value):
+        raw = str(value or "").strip().lower()
+        raw = week_words.get(raw, raw)
+        return f"Week {raw}" if raw.isdigit() else f"Week {str(value).strip()}"
+
+    # Specific return targets are more useful than a generic absence duration.
+    target_patterns = [
+        r"\b(?:expected|targeting|targets|hoping|hopes|likely|could|may|set|scheduled)\s+to\s+return\s+(?:in\s+|by\s+|for\s+)?week\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen)\b",
+        r"\b(?:return|returns|returning|back|ready)\s+(?:in\s+|by\s+|for\s+)?week\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen)\b",
+        r"\b(?:ready|back|available)\s+for\s+week\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen)\b",
+        r"\bweek\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen)\s+(?:return|returning|target|possible|availability)\b",
+        r"\beligible\s+to\s+return\s+(?:in\s+|for\s+|by\s+)?week\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen)\b",
     ]
-    for pattern, confidence in patterns:
+    for pattern in target_patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            return {"label": week_label(m.group(1)), "confidence": "Reported", "kind": "target"}
+
+    date_patterns = [
+        r"\b(?:expected|targeting|targets|hoping|hopes|likely|could|may|set|scheduled)\s+to\s+return\s+(?:on\s+|by\s+)?([A-Z][a-z]+\s+\d{1,2}(?:,\s*20\d{2})?)\b",
+        r"\b(?:targeting|targets|eyeing|eying)\s+(?:a\s+)?([A-Z][a-z]+\s+\d{1,2}(?:,\s*20\d{2})?)\s+return\b",
+        r"\b(?:return|eligible)\s+(?:date\s+)?(?:of\s+|on\s+|by\s+)?([A-Z][a-z]+\s+\d{1,2}(?:,\s*20\d{2})?)\b",
+    ]
+    for pattern in date_patterns:
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            return {"label": m.group(1), "confidence": "Reported", "kind": "target"}
+
+    duration_patterns = [
+        (r"\b(?:expected\s+to\s+miss|will\s+miss|should\s+miss|likely\s+to\s+miss|miss|out|sidelined|sidelined\s+for)\s+(?:for\s+)?(?:at\s+least\s+)?(?:approximately\s+|about\s+|around\s+)?(\d{1,2})\s*(?:-|–|to)\s*(\d{1,2})\s+weeks?\b", "range_weeks"),
+        (r"\b(?:expected\s+to\s+miss|will\s+miss|should\s+miss|likely\s+to\s+miss|miss|out|sidelined|sidelined\s+for)\s+(?:for\s+)?(?:at\s+least\s+)?(?:approximately\s+|about\s+|around\s+)?(\d{1,2})\s+weeks?\b", "weeks"),
+        (r"\b(?:expected\s+to\s+miss|will\s+miss|should\s+miss|likely\s+to\s+miss|miss|out|sidelined|sidelined\s+for)\s+(?:for\s+)?(?:at\s+least\s+)?(?:approximately\s+|about\s+|around\s+)?(?:a|one|1)\s+month\b", "month"),
+        (r"\b(?:expected\s+to\s+miss|will\s+miss|should\s+miss|likely\s+to\s+miss|miss|out|sidelined|sidelined\s+for)\s+(?:for\s+)?(?:at\s+least\s+)?(?:approximately\s+|about\s+|around\s+)?(\d{1,2})\s+months?\b", "months"),
+    ]
+    lower = text.lower()
+    at_least = "at least" in lower
+    for pattern, kind in duration_patterns:
         m = re.search(pattern, text, flags=re.IGNORECASE)
         if not m:
             continue
-        if len(m.groups()) == 2 and all(g and g.isdigit() for g in m.groups()):
-            return {"label": f"Approximately {m.group(1)}–{m.group(2)} weeks", "confidence": confidence}
-        value = m.group(1)
-        if value and value.isdigit():
-            return {"label": f"Approximately {value} weeks", "confidence": confidence}
-        value = re.sub(r"\bweek\b", "Week", value, flags=re.IGNORECASE)
-        return {"label": value, "confidence": confidence}
+        prefix = "At least " if at_least else "Approximately "
+        if kind == "range_weeks":
+            return {"label": f"{prefix}{m.group(1)}–{m.group(2)} weeks", "confidence": "Estimated", "kind": "duration"}
+        if kind == "weeks":
+            return {"label": f"{prefix}{m.group(1)} weeks", "confidence": "Estimated", "kind": "duration"}
+        if kind == "month":
+            return {"label": f"{prefix}1 month", "confidence": "Estimated", "kind": "duration"}
+        if kind == "months":
+            return {"label": f"{prefix}{m.group(1)} months", "confidence": "Estimated", "kind": "duration"}
 
-    lower = text.lower()
     if re.search(r"\b(day[- ]to[- ]day|daily basis)\b", lower):
-        return {"label": "Day-to-day", "confidence": "Reported"}
+        return {"label": "Day-to-day", "confidence": "Reported", "kind": "status"}
     if re.search(r"\bweek[- ]to[- ]week\b", lower):
-        return {"label": "Week-to-week", "confidence": "Reported"}
+        return {"label": "Week-to-week", "confidence": "Reported", "kind": "status"}
     if re.search(r"\b(no timetable|without a timetable|indefinitely)\b", lower):
-        return {"label": "No timetable announced", "confidence": "Reported"}
+        return {"label": "No timetable announced", "confidence": "Reported", "kind": "status"}
     if re.search(r"\b(season[- ]ending|out for (?:the )?season|miss (?:the )?remainder of (?:the )?season)\b", lower):
-        return {"label": "Not expected to return this season", "confidence": "Reported"}
+        return {"label": "Not expected to return this season", "confidence": "Reported", "kind": "target"}
     return None
 
 
 def _injury_expected_return(master, injury_row=None, news_items=None, status="", description=""):
-    """Choose the strongest reported return date/timeline; never invent one."""
+    """Choose the strongest reported return date/timeline and preserve useful duration context."""
     injury_row = injury_row if isinstance(injury_row, dict) else {}
     master = master if isinstance(master, dict) else {}
 
@@ -7168,14 +7201,34 @@ def _injury_expected_return(master, injury_row=None, news_items=None, status="",
         if combined.strip():
             text_candidates.append((item.get("source") or "Recent player news", combined))
 
+    target = None
+    duration = None
+    fallback = None
     for source_name, text in text_candidates:
         parsed = _injury_expected_return_from_text(text)
-        if parsed:
-            return {
-                "expected_return": parsed["label"],
-                "return_confidence": parsed["confidence"],
-                "return_source": source_name,
-            }
+        if not parsed:
+            continue
+        item = {**parsed, "source": source_name}
+        if parsed.get("kind") == "target" and target is None:
+            target = item
+        elif parsed.get("kind") == "duration" and duration is None:
+            duration = item
+        elif fallback is None:
+            fallback = item
+
+    if target:
+        label = target["label"]
+        source = target["source"]
+        confidence = target["confidence"]
+        if duration and duration["label"].lower() not in label.lower():
+            label = f"{label} target · {duration['label'].lower()} absence"
+            if duration["source"] != source:
+                source = f"{source} + {duration['source']}"
+        return {"expected_return": label, "return_confidence": confidence, "return_source": source}
+    if duration:
+        return {"expected_return": duration["label"], "return_confidence": duration["confidence"], "return_source": duration["source"]}
+    if fallback:
+        return {"expected_return": fallback["label"], "return_confidence": fallback["confidence"], "return_source": fallback["source"]}
 
     normalized_status = str(status or "").strip().lower()
     active = bool(normalized_status and normalized_status not in {"active", "healthy", "none", "full"})
@@ -7184,7 +7237,6 @@ def _injury_expected_return(master, injury_row=None, news_items=None, status="",
         "return_confidence": "Unknown" if active else "—",
         "return_source": "No reported return window" if active else "No active injury designation",
     }
-
 
 def _player_research_injury(player_name, news_items=None):
     master = _player_research_master_row(player_name)
@@ -7223,10 +7275,27 @@ def _player_research_injury(player_name, news_items=None):
     except Exception:
         pass
 
+    # Training-camp and breaking injuries often appear in news before a structured
+    # injury API updates. Promote a clear recent injury report into the profile
+    # instead of continuing to show Active/Unknown.
+    recent_news = news_items if news_items is not None else _indexed_player_news(player_name)
+    news_signal = None
+    for item in recent_news or []:
+        candidate = _news_injury_signal(item)
+        if candidate:
+            news_signal = candidate
+            break
+    if news_signal and (not _has_active_injury(result.get("status")) or not result.get("body_part")):
+        result["status"] = news_signal.get("injury_status") or result.get("status") or "Injured"
+        result["body_part"] = news_signal.get("injury_body_part") or result.get("body_part") or ""
+        result["description"] = news_signal.get("injury_news_description") or result.get("description") or ""
+        result["updated_at"] = news_signal.get("injury_news_published") or result.get("updated_at") or ""
+        result["source"] = news_signal.get("injury_news_source") or result.get("source") or "Recent player news"
+
     return_info = _injury_expected_return(
         master,
         live_row,
-        news_items=news_items if news_items is not None else _indexed_player_news(player_name),
+        news_items=recent_news,
         status=result.get("status"),
         description=result.get("description"),
     )
@@ -7238,7 +7307,7 @@ def _player_research_injury(player_name, news_items=None):
 # of running a separate external search for 1,000+ players. Individual player
 # profiles still use _player_research_news(), which performs the deeper ESPN +
 # Google News search when a player is opened.
-PLAYER_NEWS_AUTO_REFRESH_SECONDS = 10 * 60
+PLAYER_NEWS_AUTO_REFRESH_SECONDS = 2 * 60
 _PLAYER_NEWS_LIVE_FEED_CACHE = {
     "expires_at": 0.0,
     "updated_at": "",
@@ -7247,7 +7316,56 @@ _PLAYER_NEWS_LIVE_FEED_CACHE = {
 }
 
 
+_INJURY_BODY_PARTS = (
+    "groin", "hamstring", "knee", "ankle", "shoulder", "concussion", "calf",
+    "quadriceps", "quad", "foot", "toe", "hip", "back", "wrist", "hand",
+    "elbow", "achilles", "neck", "rib", "oblique", "abdomen", "chest",
+)
+
+
+def _player_news_article_matches(article, player_name):
+    match_text = str(article.get("match_text") or "")
+    target = _pr_identity_key(player_name)
+    return bool(target and target in match_text)
+
+
+def _news_injury_signal(item):
+    if not isinstance(item, dict):
+        return None
+    text = " ".join(str(item.get(k) or "") for k in ("title", "summary", "description"))
+    lower = text.lower()
+    injury_words = (
+        "injury", "injured", "hurt", "sidelined", "out ", "expected to miss",
+        "will miss", "should miss", "questionable", "doubtful", "ir ", "pup ",
+    )
+    body = next((part for part in _INJURY_BODY_PARTS if re.search(rf"\b{re.escape(part)}\b", lower)), "")
+    if not body and not any(word in lower for word in injury_words):
+        return None
+    if body and not any(word in lower for word in injury_words):
+        # Body-part mentions alone can appear in unrelated historical context.
+        if not re.search(r"\b(?:suffered|dealing with|left practice|left game|miss|out|sidelined|injur|hurt)\b", lower):
+            return None
+    timeline = _injury_expected_return_from_text(text)
+    status = "Injured"
+    if re.search(r"\b(?:out|sidelined|expected to miss|will miss|should miss|ir\b|pup\b)\b", lower):
+        status = "Out"
+    elif re.search(r"\bdoubtful\b", lower):
+        status = "Doubtful"
+    elif re.search(r"\bquestionable\b", lower):
+        status = "Questionable"
+    return {
+        "has_injury": True,
+        "injury_status": status,
+        "injury_body_part": body.title() if body else "",
+        "expected_return": timeline.get("label") if timeline else "No timetable announced",
+        "injury_news_description": _clean_news_text(item.get("summary") or item.get("title") or ""),
+        "injury_news_source": item.get("source") or "Recent player news",
+        "injury_news_published": item.get("published") or "",
+    }
+
+
 def _player_news_live_feed():
+    """Shared near-real-time news pool: ESPN plus broad Google News NFL feeds."""
     now = time.time()
     cached = _PLAYER_NEWS_LIVE_FEED_CACHE
     if cached.get("articles") and now < float(cached.get("expires_at") or 0):
@@ -7255,6 +7373,25 @@ def _player_news_live_feed():
 
     articles = []
     warnings = []
+    seen_titles = set()
+
+    def add_article(title, summary="", published="", source="", url="", category="NFL"):
+        clean_title = _clean_news_title(title or "Player update", source)
+        key = _pr_norm(clean_title)
+        if not key or key in seen_titles:
+            return
+        seen_titles.add(key)
+        clean_summary = _summarize_news_item(clean_title, summary or "")
+        articles.append({
+            "title": clean_title,
+            "summary": clean_summary,
+            "published": published or "",
+            "source": source or "Player news",
+            "category": category,
+            "url": url or "",
+            "match_text": _pr_identity_key(" ".join([clean_title, clean_summary])),
+        })
+
     try:
         response = requests.get(
             "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news",
@@ -7268,33 +7405,59 @@ def _player_news_live_feed():
             if not isinstance(article, dict):
                 continue
             web_link = ((article.get("links") or {}).get("web") or {})
-            title = _clean_news_title(article.get("headline") or "Player update", "ESPN")
-            summary = _summarize_news_item(title, article.get("description") or "")
-            articles.append({
-                "title": title,
-                "summary": summary,
-                "published": article.get("published") or article.get("lastModified") or "",
-                "source": "ESPN",
-                "category": "NFL",
-                "url": web_link.get("href") or "",
-                # Keep a normalized searchable body server-side so the client
-                # never has to download all 100 raw articles.
-                "match_text": _pr_identity_key(" ".join([
-                    str(article.get("headline") or ""),
-                    str(article.get("description") or ""),
-                ])),
-            })
+            add_article(
+                article.get("headline") or "Player update",
+                article.get("description") or "",
+                article.get("published") or article.get("lastModified") or "",
+                "ESPN",
+                web_link.get("href") or "",
+            )
     except Exception as exc:
         warnings.append(f"ESPN live feed: {exc}")
 
+    # ESPN's general feed does not contain every fantasy-relevant practice injury.
+    # Broad Google News RSS feeds let one shared request pool catch reports from
+    # NFL Network, CBS, team sites, Yahoo, NBC/PFT and other publishers without
+    # issuing a separate web request for every player in the database.
+    try:
+        import xml.etree.ElementTree as ET
+        rss_queries = (
+            'NFL injury when:2d',
+            'NFL "expected to miss" when:2d',
+            'NFL player news trade contract suspended released when:2d',
+        )
+        for query in rss_queries:
+            response = requests.get(
+                "https://news.google.com/rss/search",
+                params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                headers={"User-Agent": "Mozilla/5.0 Gridiron-IQ/2026"},
+                timeout=(5, 10),
+            )
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+            for item in root.findall("./channel/item")[:100]:
+                source_node = item.find("source")
+                source_name = source_node.text.strip() if source_node is not None and source_node.text else "Google News"
+                add_article(
+                    item.findtext("title") or "Player update",
+                    item.findtext("description") or "",
+                    item.findtext("pubDate") or "",
+                    source_name,
+                    item.findtext("link") or "",
+                )
+    except Exception as exc:
+        warnings.append(f"Google News live feeds: {exc}")
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).timestamp()
+    articles = [a for a in articles if not _news_timestamp(a.get("published")) or _news_timestamp(a.get("published")) >= cutoff]
     articles.sort(key=lambda item: _news_timestamp(item.get("published")), reverse=True)
     updated_at = datetime.now(timezone.utc).isoformat()
     cached.clear()
     cached.update({
         "expires_at": now + PLAYER_NEWS_AUTO_REFRESH_SECONDS,
         "updated_at": updated_at,
-        "articles": articles[:100],
-        "warnings": warnings[-2:],
+        "articles": articles[:300],
+        "warnings": warnings[-3:],
     })
     return cached
 
@@ -7328,7 +7491,7 @@ def player_research_news_scan_api():
     for name, norm in players:
         player_news = []
         for article in feed_articles:
-            if norm not in str(article.get("match_text") or ""):
+            if not _player_news_article_matches(article, name):
                 continue
             published_ts = _news_timestamp(article.get("published"))
             if published_ts and published_ts < cutoff:
@@ -7339,25 +7502,34 @@ def player_research_news_scan_api():
         if player_news:
             player_news.sort(key=lambda item: _news_timestamp(item.get("published")), reverse=True)
             latest = player_news[0]
-            matches[name] = {
+            update = {
                 "has_news": True,
                 "news_count": len(player_news),
                 "latest_news_title": latest.get("title") or "Player update",
                 "latest_news_summary": latest.get("summary") or "",
                 "latest_news_published": latest.get("published") or "",
-                "latest_news_source": latest.get("source") or "ESPN",
+                "latest_news_source": latest.get("source") or "Player news",
                 "latest_news_url": latest.get("url") or "",
             }
+            injury_signal = None
+            for item in player_news:
+                candidate = _news_injury_signal(item)
+                if candidate:
+                    injury_signal = candidate
+                    break
+            if injury_signal:
+                update.update(injury_signal)
+            matches[name] = update
 
     response = jsonify(
         ok=True,
-        build="v53-player-news-auto",
+        build="v57-live-player-news-injuries",
         checked_players=len(players),
         matched_players=len(matches),
         matches=matches,
         updated_at=feed.get("updated_at") or datetime.now(timezone.utc).isoformat(),
         refresh_seconds=PLAYER_NEWS_AUTO_REFRESH_SECONDS,
-        source="Live ESPN NFL news feed; individual player profiles also search Google News",
+        source="Live ESPN + broad Google News NFL feeds; individual player profiles run a deeper player-specific search",
         warnings=feed.get("warnings") or [],
     )
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
