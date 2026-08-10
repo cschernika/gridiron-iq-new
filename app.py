@@ -1088,7 +1088,7 @@ def help_page(): return page("help.html")
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return jsonify(ok=True,service="Gridiron IQ",build="v57-live-player-news-injuries",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
+    return jsonify(ok=True,service="Gridiron IQ",build="v58-news-injury-repair",mock_draft_build=MOCK_DRAFT_BUILD,espn_snapshot=bool(load_snapshot()),time=datetime.now(timezone.utc).isoformat())
 
 @app.post("/api/espn/test")
 def espn_test():
@@ -6852,7 +6852,7 @@ PLAYER_NEWS_CACHE_DIR = DATA_DIR / "player_news_cache"
 # Player news is checked on demand whenever a profile opens. Keep the server
 # cache disabled so a newly published transaction or injury is not hidden by
 # an earlier empty result.
-PLAYER_NEWS_CACHE_TTL = 0
+PLAYER_NEWS_CACHE_TTL = 45
 
 def _news_cache_path(player_name):
     PLAYER_NEWS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -7039,18 +7039,26 @@ def _player_research_news(player_name):
     except Exception as exc:
         warnings.append(f"ESPN news: {exc}")
 
-    if len(news) < 5:
-        try:
-            import xml.etree.ElementTree as ET
+    # Always run at least one targeted aggregator search for this player.  The
+    # ESPN general feed can have several articles for a player while still
+    # missing the newest practice/injury report.  Google News + Bing News RSS
+    # give the profile a second and third path to breaking reports.
+    try:
+        import xml.etree.ElementTree as ET
+        google_queries = (
+            f'"{player_name}" NFL when:7d',
+            f'"{player_name}" injury OR "expected to miss" OR return when:7d',
+        )
+        for query in google_queries:
             response = requests.get(
                 "https://news.google.com/rss/search",
-                params={"q": f'"{player_name}" NFL when:7d', "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
                 headers={"User-Agent": "Mozilla/5.0 Gridiron-IQ/2026"},
                 timeout=(5, 10),
             )
             response.raise_for_status()
             rss_root = ET.fromstring(response.content)
-            for item in rss_root.findall("./channel/item")[:12]:
+            for item in rss_root.findall("./channel/item")[:15]:
                 link = item.findtext("link") or ""
                 source_node = item.find("source")
                 source_name = source_node.text.strip() if source_node is not None and source_node.text else "Google News"
@@ -7063,10 +7071,36 @@ def _player_research_news(player_name):
                     "category": "NFL",
                     "url": link,
                 })
-                if len(news) >= 10:
-                    break
-        except Exception as exc:
-            warnings.append(f"Google News: {exc}")
+    except Exception as exc:
+        warnings.append(f"Google News: {exc}")
+
+    try:
+        import xml.etree.ElementTree as ET
+        response = requests.get(
+            "https://www.bing.com/news/search",
+            params={"q": f'"{player_name}" NFL injury expected return', "format": "rss"},
+            headers={"User-Agent": "Mozilla/5.0 Gridiron-IQ/2026"},
+            timeout=(5, 10),
+        )
+        response.raise_for_status()
+        rss_root = ET.fromstring(response.content)
+        for item in rss_root.findall("./channel/item")[:15]:
+            title = item.findtext("title") or "Player update"
+            summary = item.findtext("description") or ""
+            combined = _pr_identity_key(" ".join([title, _clean_news_text(summary)]))
+            if target and target not in combined:
+                continue
+            add_news({
+                "title": title,
+                "summary": summary,
+                "analysis": "",
+                "published": item.findtext("pubDate") or "",
+                "source": "Bing News",
+                "category": "NFL",
+                "url": item.findtext("link") or "",
+            })
+    except Exception as exc:
+        warnings.append(f"Bing News: {exc}")
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).timestamp()
     recent = [item for item in news if not _news_timestamp(item.get("published")) or _news_timestamp(item.get("published")) >= cutoff]
@@ -7285,12 +7319,38 @@ def _player_research_injury(player_name, news_items=None):
         if candidate:
             news_signal = candidate
             break
-    if news_signal and (not _has_active_injury(result.get("status")) or not result.get("body_part")):
-        result["status"] = news_signal.get("injury_status") or result.get("status") or "Injured"
-        result["body_part"] = news_signal.get("injury_body_part") or result.get("body_part") or ""
-        result["description"] = news_signal.get("injury_news_description") or result.get("description") or ""
-        result["updated_at"] = news_signal.get("injury_news_published") or result.get("updated_at") or ""
-        result["source"] = news_signal.get("injury_news_source") or result.get("source") or "Recent player news"
+    if news_signal:
+        current_status = str(result.get("status") or "").strip()
+        news_status = str(news_signal.get("injury_status") or "").strip()
+        severity = {
+            "": 0, "active": 0, "healthy": 0,
+            "questionable": 1, "injured": 2, "doubtful": 2,
+            "out": 3, "pup": 3, "ir": 4, "injured reserve": 4,
+        }
+        if (
+            not _has_active_injury(current_status)
+            or severity.get(news_status.lower(), 2) > severity.get(current_status.lower(), 1)
+        ):
+            result["status"] = news_status or current_status or "Injured"
+
+        generic_parts = {
+            "", "lower body", "lower-body", "upper body", "upper-body",
+            "leg", "arm", "undisclosed", "not disclosed", "other",
+        }
+        current_body = str(result.get("body_part") or "").strip()
+        news_body = str(news_signal.get("injury_body_part") or "").strip()
+        if news_body and current_body.lower() in generic_parts:
+            result["body_part"] = news_body
+
+        # Prefer a newer, player-specific injury description over a generic master
+        # database note, while retaining structured practice data separately.
+        news_description = news_signal.get("injury_news_description") or ""
+        if news_description:
+            result["description"] = news_description
+        if news_signal.get("injury_news_published"):
+            result["updated_at"] = news_signal.get("injury_news_published")
+        if news_signal.get("injury_news_source"):
+            result["source"] = news_signal.get("injury_news_source")
 
     return_info = _injury_expected_return(
         master,
@@ -7448,6 +7508,28 @@ def _player_news_live_feed():
     except Exception as exc:
         warnings.append(f"Google News live feeds: {exc}")
 
+    try:
+        import xml.etree.ElementTree as ET
+        for query in ('NFL injury expected to miss', 'NFL player news injury return'):
+            response = requests.get(
+                "https://www.bing.com/news/search",
+                params={"q": query, "format": "rss"},
+                headers={"User-Agent": "Mozilla/5.0 Gridiron-IQ/2026"},
+                timeout=(5, 10),
+            )
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+            for item in root.findall("./channel/item")[:100]:
+                add_article(
+                    item.findtext("title") or "Player update",
+                    item.findtext("description") or "",
+                    item.findtext("pubDate") or "",
+                    "Bing News",
+                    item.findtext("link") or "",
+                )
+    except Exception as exc:
+        warnings.append(f"Bing News live feeds: {exc}")
+
     cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).timestamp()
     articles = [a for a in articles if not _news_timestamp(a.get("published")) or _news_timestamp(a.get("published")) >= cutoff]
     articles.sort(key=lambda item: _news_timestamp(item.get("published")), reverse=True)
@@ -7523,7 +7605,7 @@ def player_research_news_scan_api():
 
     response = jsonify(
         ok=True,
-        build="v57-live-player-news-injuries",
+        build="v58-news-injury-repair",
         checked_players=len(players),
         matched_players=len(matches),
         matches=matches,
@@ -7538,9 +7620,45 @@ def player_research_news_scan_api():
 
 @app.get("/api/player-research/news/<path:player_name>")
 def player_research_news_api(player_name):
-    news_result = _player_research_news(player_name)
-    injury = _player_research_injury(player_name, news_items=news_result.get("news", []))
-    response = jsonify(ok=True, **news_result, injury=injury)
+    try:
+        news_result = _player_research_news(player_name)
+        injury = _player_research_injury(player_name, news_items=news_result.get("news", []))
+        warnings = news_result.get("warnings") or []
+        response = jsonify(
+            ok=True,
+            degraded=bool(warnings),
+            **news_result,
+            injury=injury,
+        )
+    except Exception as exc:
+        # Do not turn a partial upstream outage into an empty/failed player card.
+        # Preserve the most recent saved news and injury data and let the client
+        # keep retrying the live sources.
+        fallback_news = _indexed_player_news(player_name)
+        try:
+            injury = _player_research_injury(player_name, news_items=fallback_news)
+        except Exception:
+            injury = {
+                "status": "",
+                "body_part": "",
+                "practice": "",
+                "description": "",
+                "expected_return": "No timetable announced",
+                "return_confidence": "Unknown",
+                "return_source": "Latest saved injury data",
+                "source": "Latest saved injury data",
+            }
+        response = jsonify(
+            ok=True,
+            degraded=True,
+            player=player_name,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            refresh_minutes=1,
+            news=fallback_news[:10],
+            warnings=[f"Live refresh retrying: {exc}"],
+            source="Latest saved player updates while live sources retry",
+            injury=injury,
+        )
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
     return response
