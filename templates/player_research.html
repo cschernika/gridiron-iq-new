@@ -392,7 +392,7 @@
       `<section class="pr-profile-section"><div class="pr-profile-head"><div><h3>${esc(actualYear)} Actual Statistics</h3><p>Latest available NFL regular-season production and usage</p></div></div>${metricGrid(actual,position)}</section>`,
       `<section class="pr-profile-section"><div class="pr-profile-head"><div><h3>2026 Projected Statistics</h3><p>${esc(projection.method||"Gridiron IQ projection")}</p></div></div>${metricGrid(projection,position)}</section>`,
       `<section class="pr-profile-section" id="pr-profile-injury"><div class="pr-profile-head"><div><h3>Injury & Availability</h3><p>Current designation, expected return and practice participation</p></div></div><div id="pr-injury-panel">${injuryHtml(row,injury)}</div></section>`,
-      `<section class="pr-profile-section" id="pr-profile-news"><div class="pr-profile-head"><div><h3>Current Player News</h3><p>Checked immediately and every minute while this profile is open</p></div><span id="pr-live-news-status" class="pr-live-status">Checking live news now…</span></div><div id="pr-live-news">${newsHtml(news)}</div></section>`,
+      `<section class="pr-profile-section" id="pr-profile-news"><div class="pr-profile-head"><div><h3>Current Player News</h3><p>Checked immediately and every minute · ESPN + Google News + Bing News</p></div><span id="pr-live-news-status" class="pr-live-status">Checking live news now…</span></div><div id="pr-live-news">${newsHtml(news)}</div></section>`,
       `<section class="pr-profile-section"><div class="pr-profile-head"><div><h3>Data Notes</h3><p>How this profile is assembled</p></div></div><ul class="pr-source-list">${sources||'<li>Gridiron IQ player data sources.</li>'}</ul></section>`
     ].join("");
   }
@@ -444,7 +444,12 @@
         if(injuryPanel)injuryPanel.innerHTML=injuryHtml(row,data.injury);
       }
       const currentStatus=$("pr-live-news-status");
-      if(currentStatus){currentStatus.classList.add("ready");currentStatus.textContent=`Live now · checked ${dateText(data.updated_at)}`;}
+      if(currentStatus){
+        currentStatus.classList.add("ready");
+        const checked=dateText(data.updated_at);
+        currentStatus.textContent=data.degraded?`Latest news shown · some sources retrying · ${checked}`:`Live now · checked ${checked}`;
+        currentStatus.title=(data.warnings||[]).join(" | ");
+      }
       if(items.length){
         const latest=items[0];
         row.has_news=true;row.news_count=items.length;row.latest_news_title=latest.title||"Player update";row.latest_news_summary=latest.summary||"";row.latest_news_published=latest.published||"";row.latest_news_source=latest.source||"";row.latest_news_url=latest.url||"";
@@ -453,7 +458,11 @@
     }catch(error){
       if(requestToken!==modalRequestToken||modalPlayerKey!==row.player_key)return;
       const currentStatus=$("pr-live-news-status");
-      if(currentStatus){currentStatus.classList.remove("ready");currentStatus.textContent="Live news temporarily unavailable";currentStatus.title=error.message;}
+      if(currentStatus){
+        currentStatus.classList.remove("ready");
+        currentStatus.textContent="Latest saved news shown · live refresh retrying";
+        currentStatus.title=error.message;
+      }
     }
   }
 
