@@ -10448,12 +10448,12 @@ def _weekly_matchup_rows(week=1, position="ALL"):
         if player_position == "RB":
             score = _def_clamp(
                 run_trench_score * 0.30
-                + skill_grade * 0.20
+                + skill_grade * 0.10
                 + run_defense_advantage * 0.15
                 + _off_num(role.get("role_grade"), 50) * 0.25
-                + receiving_matchup_grade * 0.10
+                + receiving_matchup_grade * 0.20
             )
-            matchup_model = "RB_ROLE_AWARE_V5"
+            matchup_model = "RB_ROLE_AWARE_V6_PPR"
         elif player_position in {"WR", "TE"}:
             # Role/usage now carries 25%, preventing low-volume reserves from
             # topping the board solely because the coverage matchup is soft.
