@@ -1,1 +1,57 @@
-{% extends "base.html" %}{% block title %}Lineup Optimizer | Gridiron IQ{% endblock %}{% block heading %}Lineup Optimizer{% endblock %}{% block body %}<section class="page-intro"><span class="pill">Weekly Mode</span><h2>Build your highest-value starting lineup</h2><p>Roster-specific optimization will use your ESPN roster once drafted players are populated.</p></section><section class="panel"><p>{{ "ESPN connected: " + league.league_name if connected else "Connect ESPN to activate league-specific analysis." }}</p></section>{% endblock %}
+{% extends "base.html" %}
+{% block title %}Start / Sit Optimizer | Gridiron IQ{% endblock %}
+{% block body %}
+<style>
+.li{--ink:#142033;--muted:#6b7890;--line:#dfe5ef;--purple:#5d3df5;--green:#087b6d;--red:#b42318;color:var(--ink)}
+.li-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:18px}.li-kicker{font-size:11px;font-weight:900;letter-spacing:.1em;color:var(--purple)}.li h1{font-size:36px;line-height:1.05;margin:5px 0 8px}.li-sub{max-width:850px;color:var(--muted);margin:0;line-height:1.55}.li-actions{display:flex;gap:8px;flex-wrap:wrap}.li-link,.li-button{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px 13px;background:#fff;color:#4435d4;font:inherit;font-size:11px;font-weight:900;text-decoration:none;cursor:pointer}.li-button.primary{background:linear-gradient(90deg,#3478f6,#6636f4);color:#fff;border:0}
+.li-card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}.li-controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.li-field label{display:block;font-size:9px;color:var(--muted);font-weight:900;letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}.li-field select{min-width:130px;border:1px solid var(--line);border-radius:9px;padding:10px;background:#fff;font:inherit}.li-status{margin-left:auto;color:var(--muted);font-size:10px;font-weight:800}
+.li-formula{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.li-formula div{border:1px solid #e5e9f0;border-radius:12px;padding:12px}.li-formula b{display:block;font-size:18px;color:#4d3bd5}.li-formula span{display:block;font-size:10px;font-weight:900;margin-top:2px}.li-formula p{font-size:9px;line-height:1.45;color:var(--muted);margin:5px 0 0}.li-note{margin:11px 0 0;color:#7453c5;font-size:9px;font-weight:800}
+.li-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.li-summary article{border:1px solid var(--line);border-radius:13px;padding:13px}.li-summary span{display:block;color:var(--muted);font-size:9px;font-weight:900;text-transform:uppercase}.li-summary strong{display:block;font-size:20px;margin-top:5px}.li-summary small{display:block;color:var(--muted);font-size:9px;margin-top:3px}
+.li-grid{display:grid;grid-template-columns:1.4fr .8fr;gap:14px}.li-card h2{font-size:18px;margin:0 0 10px}.li-table-wrap{overflow:auto}.li-table{width:100%;border-collapse:collapse;min-width:950px}.li-table th,.li-table td{padding:10px 8px;border-bottom:1px solid #e9edf3;text-align:right;font-size:10px;white-space:nowrap}.li-table th{text-transform:uppercase;color:#66758b;font-size:8px;letter-spacing:.04em;background:#f8f9fc}.li-table th:first-child,.li-table td:first-child{text-align:left}.li-name{font-weight:900;color:#3025b8}.li-pos{display:inline-block;margin-left:5px;padding:3px 5px;border-radius:6px;background:#ede9fe;color:#5036d4;font-size:8px;font-weight:900}.li-score{display:inline-flex;min-width:42px;justify-content:center;padding:4px 7px;border-radius:999px;background:#ede9fe;color:#4e35d3;font-weight:900}.li-score.good{background:#dcfce7;color:#166534}.li-score.bad{background:#fee2e2;color:#991b1b}.li-start{color:#087b6d;font-weight:900}.li-sit{color:#8b5b16;font-weight:900}.li-injury{color:#b42318;font-weight:900}.li-na{color:#a3adbd}
+.li-starters{display:grid;gap:8px}.li-starter{border:1px solid #e5e9f0;border-radius:11px;padding:10px}.li-starter-top{display:flex;justify-content:space-between;gap:8px}.li-starter b{font-size:11px}.li-starter strong{font-size:10px;color:#4e35d3}.li-starter p{font-size:9px;color:var(--muted);margin:5px 0 0;line-height:1.4}.li-change{border-left:3px solid #5d3df5;background:#f8f7ff;border-radius:9px;padding:10px;margin-top:8px}.li-change b{font-size:10px}.li-change p{font-size:9px;color:var(--muted);margin:4px 0 0}.li-empty{padding:35px;text-align:center;color:var(--muted);font-size:11px}.li-error{border:1px solid #fecaca;background:#fff7f7;color:#991b1b;border-radius:12px;padding:13px;font-size:10px}
+@media(max-width:1000px) { .li-grid{grid-template-columns:1fr}.li-formula,.li-summary{grid-template-columns:repeat(2,1fr)} }
+@media(max-width:650px) { .li-head{display:block}.li-actions{margin-top:10px}.li-formula,.li-summary{grid-template-columns:1fr 1fr}.li-status{width:100%;margin-left:0}.li h1{font-size:30px} }
+</style>
+
+<div class="app-shell">
+  {% set active='lineup' %}{% include "_sidebar.html" %}
+  <main class="main">
+    <div class="li">
+      <header class="li-head">
+        <div><div class="li-kicker">GRIDIRON IQ · START / SIT V2 SOS-AWARE</div><h1>Start / Sit Optimizer</h1><p class="li-sub">Optimize your synced roster using projected scoring, this week's role-aware matchup, expected role/volume and position-adjusted Strength of Schedule. SOS is intentionally only 10%, so it helps break close calls without overpowering the current matchup.</p></div>
+        <div class="li-actions"><a class="li-link" href="/weekly-matchups">Weekly Rankings →</a><a class="li-link" href="/player-research">Player Research →</a></div>
+      </header>
+
+      <section class="li-card"><div class="li-controls"><div class="li-field"><label for="li-week">NFL Week</label><select id="li-week">{% for w in range(1,19) %}<option value="{{ w }}">Week {{ w }}</option>{% endfor %}</select></div><button class="li-button primary" id="li-refresh" type="button">Optimize Lineup</button><div class="li-status" id="li-status">Loading synced roster…</div></div></section>
+
+      <section class="li-card"><h2>How Start IQ is calculated</h2><div class="li-formula"><div><b>45%</b><span>Projected Scoring</span><p>Position-relative projected fantasy production for the selected week.</p></div><div><b>30%</b><span>Current-Week Matchup</span><p>The same role-aware matchup model used by Weekly Rankings.</p></div><div><b>15%</b><span>Role & Expected Volume</span><p>QB1/RB1/WR1/TE1 status plus expected dropbacks, touches, targets and routes.</p></div><div><b>10%</b><span>Strength of Schedule</span><p>Position-adjusted season SOS. Rank #1 is easiest. It is a tiebreaker, not the main weekly signal.</p></div></div><p class="li-note">Injury/availability penalties are applied after the component score. A player listed Out, IR or PUP cannot stay highly ranked just because his matchup is favorable.</p></section>
+
+      <section class="li-summary"><article><span>League</span><strong id="li-league">—</strong><small id="li-platform">Sync league</small></article><article><span>Team</span><strong id="li-team">—</strong><small>Synced roster</small></article><article><span>Recommended Starters</span><strong id="li-starter-count">—</strong><small id="li-roster-size">— rostered</small></article><article><span>Lineup Changes</span><strong id="li-change-count">—</strong><small>Compared with current slots</small></article></section>
+
+      <div id="li-error" class="li-error" hidden></div>
+      <section class="li-grid" id="li-content" hidden>
+        <article class="li-card"><h2>Roster Start / Sit Rankings</h2><div class="li-table-wrap"><table class="li-table"><thead><tr><th>Player</th><th>Opp</th><th>Proj</th><th>Matchup</th><th>Role</th><th>Season SOS</th><th>Start IQ</th><th>Decision</th></tr></thead><tbody id="li-body"></tbody></table></div></article>
+        <aside><section class="li-card"><h2>Recommended Starting Lineup</h2><div class="li-starters" id="li-starters"></div></section><section class="li-card"><h2>Suggested Changes</h2><div id="li-changes"></div></section></aside>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script>
+(()=>{
+  const $=id=>document.getElementById(id), esc=v=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+  const scoreClass=n=>Number(n)>=75?"good":Number(n)<45?"bad":"";
+  function rowHtml(r){const sos=r.sos_rank?`#${r.sos_rank} ${esc(r.sos_summary||"")}`:"—",inj=r.injury_status?`<br><span class="li-injury">${esc(r.injury_status)}</span>`:"";return `<tr><td><span class="li-name">${esc(r.name)}</span><span class="li-pos">${esc(r.position)}</span>${inj}</td><td>${esc(r.opponent||"—")}</td><td>${Number(r.projection||0).toFixed(1)}</td><td>${Number(r.matchup_score||0).toFixed(1)} <span class="li-na">${esc(r.matchup_grade||"")}</span></td><td>${Number(r.role_grade||0).toFixed(1)}<br><span class="li-na">${esc(r.role_label||"")}</span></td><td>${sos}</td><td><span class="li-score ${scoreClass(r.start_score)}">${Number(r.start_score||0).toFixed(1)}</span></td><td class="${r.decision==="START"?"li-start":"li-sit"}">${esc(r.decision)}</td></tr>`;}
+  function render(data){
+    $("li-error").hidden=true;$("li-content").hidden=false;
+    $("li-league").textContent=data.league?.name||data.league?.league_name||"Synced League";$("li-platform").textContent=data.league?.platform||data.settings?.platform||"Fantasy league";$("li-team").textContent=data.team?.team_name||data.team?.name||"Your Team";$("li-starter-count").textContent=data.starters.length;$("li-roster-size").textContent=`${data.all_players.length} rostered`;$("li-change-count").textContent=data.changes.length;
+    const starterNames=new Set(data.starters.map(x=>x.name));const all=data.all_players.map(r=>({...r,decision:starterNames.has(r.name)?"START":"SIT"}));$("li-body").innerHTML=all.length?all.map(rowHtml).join(""):`<tr><td colspan="8" class="li-empty">No roster players found for this week.</td></tr>`;
+    $("li-starters").innerHTML=data.starters.map(r=>`<div class="li-starter"><div class="li-starter-top"><b>${esc(r.recommended_slot)} · ${esc(r.name)}</b><strong>${Number(r.start_score).toFixed(1)} IQ</strong></div><p>${esc(r.position)} · vs ${esc(r.opponent)} · ${Number(r.projection).toFixed(1)} projected · SOS ${r.sos_rank?`#${r.sos_rank}`:"—"}</p></div>`).join("")||'<div class="li-empty">No recommended starters.</div>';
+    $("li-changes").innerHTML=data.changes.length?data.changes.map(c=>`<div class="li-change"><b>START ${esc(c.start)} · SIT ${esc(c.sit)}</b><p>${esc(c.reason)}</p></div>`).join(""):'<div class="li-empty">Your current starter assignments already align with the optimizer, or no current starter slots were available to compare.</div>';
+  }
+  let initialLoad=true;
+  async function load(){const week=$("li-week").value,url=initialLoad?"/api/lineup/optimizer":`/api/lineup/optimizer?week=${encodeURIComponent(week)}`;initialLoad=false;$("li-status").textContent="Calculating projection, matchup, role and SOS…";try{const r=await fetch(url,{cache:"no-store"});const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.detail||d.error||"Unable to optimize lineup.");$("li-week").value=String(d.week);$("li-status").textContent=`Week ${d.week} · ${d.model_version}`;render(d);}catch(e){$("li-content").hidden=true;$("li-error").hidden=false;$("li-error").textContent=e.message;$("li-status").textContent="Optimizer unavailable";}}
+  $("li-refresh").onclick=load;$("li-week").onchange=load;load();
+})();
+</script>
+{% endblock %}
