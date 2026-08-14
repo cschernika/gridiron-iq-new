@@ -19,7 +19,7 @@ from math import exp
 from statistics import mean
 from typing import Any, Iterable
 
-ENGINE_VERSION = "draft-intelligence-v2-roster-completion"
+ENGINE_VERSION = "draft-intelligence-v3-rb-wr-core"
 
 BASE_WEIGHTS = {
     "scoring_potential": 0.22,
@@ -506,11 +506,56 @@ def rank_candidates(
         }
         raw_score = sum(components[key] * weights[key] for key in weights)
 
-        # Draft strategy is a light tie-breaker, never the main engine.  It can
-        # shape two similarly graded choices without forcing a bad player.
+        # Strategy layer. v61's RB/WR-heavy option is intentionally stronger
+        # than a normal tie-breaker because it expresses a roster-construction
+        # rule: build three RB/WR pieces first, then add 2 QB, 1-2 TE and D/ST
+        # later while continuing to prioritize RB/WR depth.
         strategy_key = str(strategy or "balanced").lower().replace("_", "-")
         strategy_adjustment = 0.0
-        if strategy_key == "zero-rb":
+        strategy_cap = 99.0
+        position_targets = league.get("position_targets") if isinstance(league.get("position_targets"), dict) else {}
+        target_for_position = int(_num(position_targets.get(position), 0)) if position_targets else 0
+        core_count = int(roster_counts.get("RB", 0)) + int(roster_counts.get("WR", 0))
+        remaining_picks = max(0, int(total_rounds) - len(roster))
+
+        if strategy_key == "rb-wr-heavy":
+            if core_count < 3:
+                if position in {"RB", "WR"}:
+                    strategy_adjustment += 10.0
+                elif position in {"QB", "TE"}:
+                    strategy_adjustment -= 16.0
+                    elite_exception = quality >= 94 and market >= 90 and group_urgency >= 86
+                    if not elite_exception:
+                        strategy_cap = min(strategy_cap, 72.0)
+            else:
+                if position in {"RB", "WR"} and round_no <= 10:
+                    strategy_adjustment += 4.0
+                if position == "QB":
+                    current_qb = int(roster_counts.get("QB", 0))
+                    if current_qb == 0:
+                        strategy_adjustment += 4.0
+                    elif current_qb == 1 and target_for_position >= 2:
+                        strategy_adjustment += 1.0 if round_no < 8 else 6.0
+                    elif current_qb >= 2:
+                        strategy_adjustment -= 18.0
+                        strategy_cap = min(strategy_cap, 44.0)
+                if position == "TE":
+                    current_te = int(roster_counts.get("TE", 0))
+                    if current_te == 0:
+                        strategy_adjustment += 3.0
+                    elif current_te == 1 and target_for_position >= 2:
+                        strategy_adjustment += -3.0 if round_no < 8 else 3.0
+                    elif target_for_position and current_te >= target_for_position:
+                        strategy_adjustment -= 16.0
+                        strategy_cap = min(strategy_cap, 46.0)
+
+            if position == "QB" and target_for_position > int(roster_counts.get("QB", 0)) and remaining_picks <= 5:
+                strategy_adjustment += 8.0
+            if position == "TE" and target_for_position > int(roster_counts.get("TE", 0)) and remaining_picks <= 4:
+                strategy_adjustment += 6.0
+            if position in {"K", "DEF"} and target_for_position and int(roster_counts.get(position, 0)) >= target_for_position:
+                strategy_cap = min(strategy_cap, 20.0)
+        elif strategy_key == "zero-rb":
             if position == "WR" and round_no <= 5:
                 strategy_adjustment = 4.0
             elif position == "RB" and round_no <= 4:
@@ -527,7 +572,7 @@ def rank_candidates(
         raw_score += strategy_adjustment
 
         # Practical roster/draft safety rules.
-        hard_cap = 99.0
+        hard_cap = strategy_cap
         injury = str(item.get("injury_status") or "").upper()
         if item.get("active") is False:
             hard_cap = min(hard_cap, 10.0)
