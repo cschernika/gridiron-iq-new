@@ -10354,6 +10354,7 @@ def _weekly_matchup_rows(week=1, position="ALL"):
         defense = dict(teams.get(opponent) or {})
         line = dict(offensive_lines.get(team) or {})
         role = _weekly_position_role_profile(player)
+        season_sos = _player_strength_of_schedule(team, player_position) or {}
 
         defenders = _weekly_defender_candidates(payload, opponent, player_position) if player_position in {"WR", "TE"} else []
         primary = defenders[0] if defenders else {}
@@ -10488,6 +10489,16 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             score = skill_grade
             matchup_model = "ROLE_AWARE_V5"
 
+        # Weekly Rank deliberately keeps season-long Strength of Schedule small.
+        # The current-week matchup remains the dominant signal; SOS is an 8%
+        # tiebreaker for QB/RB/WR/TE and is neutral for positions without a
+        # position-adjusted season schedule model.
+        season_sos_score = _off_num(season_sos.get("score"), 50.0)
+        if player_position in {"QB", "RB", "WR", "TE"}:
+            weekly_iq_score = _def_clamp(score * 0.92 + season_sos_score * 0.08)
+        else:
+            weekly_iq_score = round(score, 1)
+
         grade = _def_letter_grade(score)
         verdict = (
             "Strong advantage" if score >= 72 else
@@ -10570,6 +10581,14 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             "projected_points": _off_round(player.get("fantasy_points"), 1),
             "offense_data_type": player.get("data_type") or "projection",
             "matchup_model": matchup_model,
+            "weekly_iq_score": round(weekly_iq_score, 1),
+            "sos_rank": season_sos.get("rank"),
+            "sos_score": round(season_sos_score, 1) if player_position in {"QB", "RB", "WR", "TE"} else None,
+            "sos_label": season_sos.get("label") or "",
+            "sos_summary": season_sos.get("summary") or "",
+            "playoff_sos_rank": season_sos.get("playoff_rank"),
+            "playoff_sos_score": season_sos.get("playoff_score"),
+            "playoff_sos_summary": season_sos.get("playoff_summary") or "",
             "skill_grade": round(skill_grade, 1),
             "workload_grade": workload_grade,
             "role_label": role.get("role_label") or "",
@@ -10679,9 +10698,18 @@ def _weekly_matchup_rows(week=1, position="ALL"):
             "trench_note": trench_note,
         })
 
-    prepared.sort(key=lambda row: (-_off_num(row.get("matchup_score")), -_off_num(row.get("projected_points")), row.get("name", "")))
-    for rank, row in enumerate(prepared, 1):
+    pure_matchup = sorted(
+        prepared,
+        key=lambda row: (-_off_num(row.get("matchup_score")), -_off_num(row.get("projected_points")), row.get("name", "")),
+    )
+    for rank, row in enumerate(pure_matchup, 1):
         row["matchup_rank"] = rank
+
+    prepared.sort(
+        key=lambda row: (-_off_num(row.get("weekly_iq_score")), -_off_num(row.get("matchup_score")), -_off_num(row.get("projected_points")), row.get("name", ""))
+    )
+    for rank, row in enumerate(prepared, 1):
+        row["weekly_rank"] = rank
     return prepared, payload
 
 
@@ -10715,7 +10743,7 @@ def weekly_matchups_api():
         count=len(rows),
         rows=rows,
         metadata={
-            "model_version": "Weekly Matchup Model V5 Role-Aware",
+            "model_version": "Weekly Matchup Model V7 SOS-Aware",
             "season": payload.get("matchup_season", 2026),
             "active_week": default_week,
             "data_through_week": _matchup_data_through_week(payload),
@@ -10735,6 +10763,7 @@ def weekly_matchups_api():
                 "Before current-season samples are available it is a performance-based preseason projection; the weekly refresh automatically switches to current-season results."
             ),
             "assignment_note": "Primary defenders are likely matchups based on current roster role, snap share and coverage usage; they are not guaranteed shadow assignments.",
+            "weekly_rank_note": "Weekly Rank = 92% current-week role-aware matchup score + 8% position-adjusted season Strength of Schedule for QB/RB/WR/TE. Kicker ranking remains current-week matchup only.",
         },
     )
 
@@ -11707,3 +11736,215 @@ def server_error(error):
 
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=int(os.getenv("PORT","8000")),debug=os.getenv("FLASK_DEBUG")=="1")
+
+
+# ============================================================
+# START / SIT OPTIMIZER V2 — WEEKLY MATCHUP + STRENGTH OF SCHEDULE
+# ============================================================
+
+def _lineup_position(value):
+    pos = str(value or "").strip().upper()
+    aliases = {
+        "D/ST": "DEF", "DST": "DEF", "D": "DEF", "DEFENSE": "DEF",
+        "PK": "K", "W/R/T": "FLEX", "RB/WR/TE": "FLEX",
+        "WR/RB/TE": "FLEX", "RB/WR": "FLEX", "WR/RB": "FLEX",
+        "OP": "SUPERFLEX", "SUPER FLEX": "SUPERFLEX", "Q/W/R/T": "SUPERFLEX",
+    }
+    return aliases.get(pos, pos)
+
+
+def _lineup_requirements_from_roster(roster, settings=None):
+    """Infer starter counts from the synced league lineup slots when possible."""
+    settings = settings or {}
+    req = {"QB": 0, "RB": 0, "WR": 0, "TE": 0, "FLEX": 0, "SUPERFLEX": 0, "K": 0, "DEF": 0}
+
+    # Prefer an explicit starter dictionary if a connector supplied one.
+    starter_dict = settings.get("starters") or settings.get("starter_slots")
+    if isinstance(starter_dict, dict):
+        for raw, amount in starter_dict.items():
+            pos = _lineup_position(raw)
+            if pos in req:
+                try:
+                    req[pos] += max(0, int(amount or 0))
+                except (TypeError, ValueError):
+                    pass
+
+    # Otherwise infer the league shape from currently assigned starter slots.
+    if sum(req.values()) == 0:
+        for player in roster or []:
+            slot = _lineup_position(player.get("lineup_slot"))
+            if slot in {"", "BE", "BN", "BENCH", "IR", "RES", "NA"}:
+                continue
+            if slot in req:
+                req[slot] += 1
+
+    # Safe fantasy defaults when the platform did not expose lineup-slot counts.
+    if sum(req.values()) < 5:
+        req = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "FLEX": 1, "SUPERFLEX": 0, "K": 1, "DEF": 1}
+    return req
+
+
+def _projection_percentile(rows, position, value):
+    values = sorted(
+        _off_num(row.get("projected_points"))
+        for row in rows
+        if _lineup_position(row.get("position")) == position and _off_num(row.get("projected_points")) > 0
+    )
+    if not values or value <= 0:
+        return 50.0
+    if len(values) == 1:
+        return 75.0
+    below = sum(1 for item in values if item < value)
+    equal = sum(1 for item in values if item == value)
+    pct = (below + max(0, equal - 1) / 2) / max(1, len(values) - 1)
+    return _def_clamp(1 + pct * 98)
+
+
+def _injury_start_penalty(status):
+    text = str(status or "").strip().upper()
+    if not text or text in {"ACTIVE", "HEALTHY"}:
+        return 0.0
+    if any(flag in text for flag in ("OUT", "IR", "PUP", "NFI", "SUSP")):
+        return 80.0
+    if "DOUBTFUL" in text:
+        return 28.0
+    if "QUESTIONABLE" in text:
+        return 5.0
+    return 2.0
+
+
+def _start_sit_candidates(week=None):
+    payload = _defensive_stats_snapshot()
+    active_week = _matchup_default_week(payload)
+    try:
+        week = max(1, min(18, int(week or active_week)))
+    except (TypeError, ValueError):
+        week = active_week
+
+    weekly_rows, _ = _weekly_matchup_rows(week=week, position="ALL")
+    weekly_by_name = {_pr_norm(row.get("name")): row for row in weekly_rows}
+
+    league_data = connected_league_data()
+    team = league_data.get("user_team") or {}
+    roster = list(team.get("roster") or [])
+    requirements = _lineup_requirements_from_roster(roster, league_data.get("settings") or {})
+
+    candidates = []
+    for player in roster:
+        name = str(player.get("name") or "").strip()
+        if not name:
+            continue
+        pos = _lineup_position(player.get("position"))
+        if pos not in {"QB", "RB", "WR", "TE", "K", "DEF"}:
+            continue
+        weekly = weekly_by_name.get(_pr_norm(name), {})
+        projection = _off_num(weekly.get("projected_points"), _off_num(player.get("projected_points")))
+        projection_grade = _projection_percentile(weekly_rows, pos, projection)
+        matchup_score = _off_num(weekly.get("matchup_score"), 50.0)
+        role_grade = _off_num(weekly.get("role_grade"), 50.0)
+        team_code = _def_team_code(weekly.get("team") or player.get("pro_team"))
+        sos = _player_strength_of_schedule(team_code, pos) or {}
+        sos_score = _off_num(weekly.get("sos_score"), _off_num(sos.get("score"), 50.0))
+        injury_status = player.get("injury_status") or weekly.get("injury_status") or ""
+
+        # Start/Sit V2: this week's projection and matchup dominate.  Season SOS
+        # is useful context/tiebreaker at 10%, not a reason to bench a clearly
+        # superior weekly play.
+        base_score = (
+            projection_grade * 0.45
+            + matchup_score * 0.30
+            + role_grade * 0.15
+            + sos_score * 0.10
+        )
+        penalty = _injury_start_penalty(injury_status)
+        start_score = _def_clamp(base_score - penalty)
+        candidates.append({
+            "name": name,
+            "position": pos,
+            "team": team_code,
+            "current_slot": player.get("lineup_slot") or "",
+            "opponent": weekly.get("opponent") or "—",
+            "projection": round(projection, 1),
+            "projection_grade": round(projection_grade, 1),
+            "matchup_score": round(matchup_score, 1),
+            "matchup_grade": weekly.get("matchup_grade") or "—",
+            "role_grade": round(role_grade, 1),
+            "role_label": weekly.get("role_label") or "",
+            "sos_rank": weekly.get("sos_rank") or sos.get("rank"),
+            "sos_score": round(sos_score, 1) if pos in {"QB", "RB", "WR", "TE"} else None,
+            "sos_summary": weekly.get("sos_summary") or sos.get("summary") or "Not modeled for this position",
+            "injury_status": injury_status,
+            "injury_penalty": round(penalty, 1),
+            "start_score": round(start_score, 1),
+            "weekly_iq_score": weekly.get("weekly_iq_score"),
+        })
+
+    used = set()
+    starters = []
+
+    def take(slot, eligible, count):
+        pool = [row for row in candidates if row["name"] not in used and row["position"] in eligible]
+        pool.sort(key=lambda row: (-row["start_score"], -row["projection"], row["name"]))
+        for index, row in enumerate(pool[:max(0, int(count or 0))], 1):
+            used.add(row["name"])
+            label = slot if int(count or 0) == 1 else f"{slot}{index}"
+            starters.append({**row, "recommended_slot": label, "decision": "START"})
+
+    for pos in ("QB", "RB", "WR", "TE"):
+        take(pos, {pos}, requirements.get(pos, 0))
+    take("FLEX", {"RB", "WR", "TE"}, requirements.get("FLEX", 0))
+    take("SUPERFLEX", {"QB", "RB", "WR", "TE"}, requirements.get("SUPERFLEX", 0))
+    take("K", {"K"}, requirements.get("K", 0))
+    take("DEF", {"DEF"}, requirements.get("DEF", 0))
+
+    starter_names = {row["name"] for row in starters}
+    bench = [{**row, "recommended_slot": "BENCH", "decision": "SIT"} for row in candidates if row["name"] not in starter_names]
+    bench.sort(key=lambda row: (-row["start_score"], -row["projection"], row["name"]))
+
+    # Surface clear lineup changes compared with platform-designated starters.
+    bench_markers = {"", "BE", "BN", "BENCH", "IR", "RES", "NA"}
+    promoted = [row for row in starters if _lineup_position(row.get("current_slot")) in bench_markers]
+    demoted = [row for row in bench if _lineup_position(row.get("current_slot")) not in bench_markers]
+    changes = []
+    for row in promoted:
+        comparable = [x for x in demoted if x["position"] == row["position"] or row["recommended_slot"].startswith(("FLEX", "SUPERFLEX"))]
+        other = comparable[0] if comparable else (demoted[0] if demoted else None)
+        if other:
+            changes.append({
+                "start": row["name"], "sit": other["name"],
+                "start_score": row["start_score"], "sit_score": other["start_score"],
+                "gain": round(row["projection"] - other["projection"], 1),
+                "reason": f"Higher Start IQ ({row['start_score']:.1f} vs {other['start_score']:.1f}), combining projection, this-week matchup, role and SOS.",
+            })
+
+    return {
+        "week": week,
+        "active_week": active_week,
+        "league": league_data.get("league") or {},
+        "settings": league_data.get("settings") or {},
+        "team": team,
+        "requirements": requirements,
+        "starters": starters,
+        "bench": bench,
+        "all_players": sorted(candidates, key=lambda row: (-row["start_score"], row["name"])),
+        "changes": changes,
+    }
+
+
+@app.get("/api/lineup/optimizer")
+def lineup_optimizer_v2_api():
+    result = _start_sit_candidates(request.args.get("week"))
+    if not result.get("team") or not result["team"].get("roster"):
+        return jsonify(
+            ok=False,
+            error="No synced roster is available yet.",
+            detail="Sync your ESPN or Yahoo league after the draft, then reopen Start / Sit Optimizer.",
+            week=result.get("week"),
+        ), 400
+    return jsonify(
+        ok=True,
+        model_version="Start/Sit V2 SOS-Aware",
+        formula={"projection":45, "current_week_matchup":30, "role_expected_volume":15, "strength_of_schedule":10},
+        injury_note="Availability penalties are applied after the 100-point component score.",
+        **result,
+    )
