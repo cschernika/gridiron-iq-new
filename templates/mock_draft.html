@@ -42,7 +42,7 @@
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}.ms-req-grid,.ms-slot-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <div class="ms">
-<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · ROUND-NEUTRAL GRADING V7 · ROSTER STRATEGY V56</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, define your exact roster requirements, and let the Draft Intelligence Engine balance player quality, tiers, roster need, scoring potential and strategy at every one of your picks.</p></div></div>
+<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · ROUND-NEUTRAL GRADING V7 · RB/WR CORE STRATEGY V61</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, define your exact roster requirements, and let the Draft Intelligence Engine balance player quality, tiers, roster need, scoring potential and strategy at every one of your picks.</p></div></div>
 <div id="build-status" class="ms-status ms-build-check show busy" role="status" aria-live="polite">Checking the deployed server and complete player database…</div>
 
 <div id="setup" class="ms-grid">
@@ -53,7 +53,7 @@
 <label>Draft Position<input id="slot" type="number" min="1" max="{{ mock_context.teams }}" value="{{ mock_context.draft_slot }}"></label>
 <label>Teams<input id="teams" value="{{ mock_context.teams }}" disabled></label>
 <label>Total Draft Rounds<input id="rounds" value="15" disabled></label>
-<label>Draft Strategy<select id="strategy"><option value="balanced" selected>Balanced</option><option value="best-player">Best Player / Value</option><option value="hero-rb">Hero RB</option><option value="zero-rb">Zero RB</option><option value="robust-rb">Robust RB</option><option value="late-qb">Late QB</option></select></label>
+<label>Draft Strategy<select id="strategy"><option value="rb-wr-heavy" selected>RB/WR Heavy — Recommended</option><option value="balanced">Balanced</option><option value="best-player">Best Player / Value</option><option value="hero-rb">Hero RB</option><option value="zero-rb">Zero RB</option><option value="robust-rb">Robust RB</option><option value="late-qb">Late QB</option></select></label>
 </div>
 <div class="ms-roster-builder">
   <div class="ms-k">ROSTER REQUIREMENTS</div><h3>Tell Gridiron IQ exactly what your roster must contain</h3>
@@ -73,7 +73,7 @@
 <button id="start" class="ms-btn primary ms-full">Start AI Mock Draft</button>
 <div id="start-status" class="ms-status" role="status" aria-live="polite"></div>
 </div>
-<div class="ms-card"><div class="ms-k">HOW THE STRATEGY ENGINE USES THIS</div><h2>Complete Roster + Best Available Talent</h2><p>Gridiron IQ treats your required starters as hard end-of-draft requirements, but it does not force mediocre players too early. It compares quality and tier cliffs across positions, then increases need pressure as your remaining picks shrink.</p><p>Bench spots stay flexible. The engine uses scoring format and your selected strategy to build soft RB/WR/QB/TE depth targets, while still jumping on a clearly better player or a position group that is about to fall off a tier.</p><p><b>Example:</b> if you still need TE and K with three picks left, those positions rise sharply. If you have six picks left and an elite WR falls, the engine can still take the value first because the roster can still be completed later.</p></div>
+<div class="ms-card"><div class="ms-k">V61 RB/WR-HEAVY DRAFT PLAN</div><h2>Build the RB/WR Core First</h2><p><b>Opening rule:</b> Gridiron IQ tries to make your first three roster pieces RBs and/or WRs before recommending a QB or TE. A truly elite QB/TE fall can still trigger an exception, but ordinary QB/TE value is pushed down until the three-player RB/WR core is built.</p><p><b>Finished-roster target:</b> 2 QBs total, 1–2 TEs depending on roster size, exactly the D/ST and K required by your league, then use the remaining FLEX/bench inventory primarily on RB/WR depth and upside.</p><p><b>Middle/late rounds:</b> after the three-player core is complete, QB1 and TE1 become eligible; QB2 and TE2 are normally delayed. D/ST and K stay late. Tier cliffs, player quality, league scoring, roster need and next-pick availability can still move a player up or down.</p></div>
 </div>
 <details class="ms-card ms-grade-visible">
   <summary>
@@ -168,7 +168,7 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  const expectedBuild="mock-draft-v56-roster-strategy";
+  const expectedBuild="mock-draft-v61-rb-wr-heavy";
   let id = null, available = [], recommendations = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="", selectedAnalyticsName="";
   const rosterDefaults={{ mock_roster_defaults|tojson }};
   const requirementInputs={QB:"req-qb",RB:"req-rb",WR:"req-wr",TE:"req-te",FLEX:"req-flex",K:"req-k",DEF:"req-def",BENCH:"req-bench"};
