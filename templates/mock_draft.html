@@ -42,7 +42,7 @@
 @media(max-width:900px){.ms-grid,.ms-live{grid-template-columns:1fr}}@media(max-width:620px){.ms-form{grid-template-columns:1fr}.ms-req-grid,.ms-slot-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <div class="ms">
-<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · ROUND-NEUTRAL GRADING V7 · RB/WR CORE STRATEGY V61</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, define your exact roster requirements, and let the Draft Intelligence Engine balance player quality, tiers, roster need, scoring potential and strategy at every one of your picks.</p></div></div>
+<div class="ms-head"><div><div class="ms-k">DATA-SAFE PLAYER POOL V4 · ROUND-NEUTRAL GRADING V7 · PPR MAX-POINTS STRATEGY V64 · NO KICKER</div><h1>Mock Draft Lab</h1><p>Choose ESPN or Yahoo, define your exact roster requirements, and let the Draft Intelligence Engine balance player quality, tiers, roster need, scoring potential and strategy at every one of your picks.</p></div></div>
 <div id="build-status" class="ms-status ms-build-check show busy" role="status" aria-live="polite">Checking the deployed server and complete player database…</div>
 
 <div id="setup" class="ms-grid">
@@ -53,7 +53,7 @@
 <label>Draft Position<input id="slot" type="number" min="1" max="{{ mock_context.teams }}" value="{{ mock_context.draft_slot }}"></label>
 <label>Teams<input id="teams" value="{{ mock_context.teams }}" disabled></label>
 <label>Total Draft Rounds<input id="rounds" value="15" disabled></label>
-<label>Draft Strategy<select id="strategy"><option value="rb-wr-heavy" selected>RB/WR Heavy — Recommended</option><option value="balanced">Balanced</option><option value="best-player">Best Player / Value</option><option value="hero-rb">Hero RB</option><option value="zero-rb">Zero RB</option><option value="robust-rb">Robust RB</option><option value="late-qb">Late QB</option></select></label>
+<label>Draft Strategy<select id="strategy"><option value="rb-wr-heavy" selected>PPR Max Points — RB/WR Heavy — Recommended</option><option value="balanced">Balanced</option><option value="best-player">Best Player / Value</option><option value="hero-rb">Hero RB</option><option value="zero-rb">Zero RB</option><option value="robust-rb">Robust RB</option><option value="late-qb">Late QB</option></select></label>
 </div>
 <div class="ms-roster-builder">
   <div class="ms-k">ROSTER REQUIREMENTS</div><h3>Tell Gridiron IQ exactly what your roster must contain</h3>
@@ -64,7 +64,7 @@
     <label>WR<input id="req-wr" type="number" min="0" max="8" value="{{ rd.get('WR',2) }}"></label>
     <label>TE<input id="req-te" type="number" min="0" max="4" value="{{ rd.get('TE',1) }}"></label>
     <label>FLEX<input id="req-flex" type="number" min="0" max="4" value="{{ rd.get('FLEX',1) }}"></label>
-    <label>K<input id="req-k" type="number" min="0" max="2" value="{{ rd.get('K',1) }}"></label>
+    <input id="req-k" type="hidden" value="0">
     <label>D/ST<input id="req-def" type="number" min="0" max="2" value="{{ rd.get('DEF',1) }}"></label>
     <label>Bench<input id="req-bench" type="number" min="0" max="12" value="{{ rd.get('BENCH',6) }}"></label>
   </div>
@@ -73,7 +73,7 @@
 <button id="start" class="ms-btn primary ms-full">Start AI Mock Draft</button>
 <div id="start-status" class="ms-status" role="status" aria-live="polite"></div>
 </div>
-<div class="ms-card"><div class="ms-k">V61 RB/WR-HEAVY DRAFT PLAN</div><h2>Build the RB/WR Core First</h2><p><b>Opening rule:</b> Gridiron IQ tries to make your first three roster pieces RBs and/or WRs before recommending a QB or TE. A truly elite QB/TE fall can still trigger an exception, but ordinary QB/TE value is pushed down until the three-player RB/WR core is built.</p><p><b>Finished-roster target:</b> 2 QBs total, 1–2 TEs depending on roster size, exactly the D/ST and K required by your league, then use the remaining FLEX/bench inventory primarily on RB/WR depth and upside.</p><p><b>Middle/late rounds:</b> after the three-player core is complete, QB1 and TE1 become eligible; QB2 and TE2 are normally delayed. D/ST and K stay late. Tier cliffs, player quality, league scoring, roster need and next-pick availability can still move a player up or down.</p></div>
+<div class="ms-card"><div class="ms-k">V65 12-TEAM PPR MAX-POINTS PLAN</div><h2>Build RB/WR Strength First — Then Attack Positional Value</h2><p><b>Rounds 1–4: HARD RB/WR LOCK.</b> QB, TE and D/ST are completely excluded from the recommendation choices. The engine chooses only between RB and WR using player quality, projected PPR points, tiers, usage, scarcity, roster fit and next-pick survival.</p><p><b>Round 5:</b> normally RB/WR. A QB or TE can break through only if it is a truly elite tier/value fall. This keeps at least <b>4 RB/WR through five picks</b>.</p><p><b>Round 6:</b> the roster must reach at least <b>5 RB/WR through six picks</b>. Once that is secured, QB1/TE1 can compete normally with another RB/WR.</p><p><b>Later rounds:</b> prioritize QB1/TE1 when value is right, continue high-upside RB/WR depth, take exactly one D/ST near the end, and <b>never draft a kicker</b>. QB2/TE2 are optional late values—not required bench spots.</p></div>
 </div>
 <details class="ms-card ms-grade-visible">
   <summary>
@@ -92,7 +92,7 @@
       <div class="ms-grade-item"><h4>Scoring Potential — 20%</h4><p>Compares the player's 2026 projection with same-position players normally available around that draft range. A strong Round 12 option is graded against Round 12 alternatives, not against first-round stars.</p></div>
       <div class="ms-grade-item"><h4>Roster Need / Fit — 15%</h4><p>Rewards filling open starters and useful depth while lowering unnecessary duplicate-position picks.</p></div>
       <div class="ms-grade-item"><h4>Usage / NFL Role — 15%</h4><p>Uses current depth-chart role plus available snap, target and workload information. WR1/WR2, RB1/RB2, starting QB and starting TE roles receive more credit than reserve roles.</p></div>
-      <div class="ms-grade-item"><h4>Final Roster Construction — 10%</h4><p>Checks starters, practical RB/WR depth, position limits and sensible K/D/ST timing.</p></div>
+      <div class="ms-grade-item"><h4>Final Roster Construction — 10%</h4><p>Checks starters, practical RB/WR depth, position limits, late D/ST timing and the no-kicker league rule.</p></div>
       <div class="ms-grade-item"><h4>Individual Pick Score</h4><p>Each pick is round-neutral: 20% ADP, 25% player quality, 25% scoring potential, 15% roster need and 15% usage/role.</p></div>
       <div class="ms-grade-item"><h4>Grade Scale</h4><div class="ms-grade-scale">
         <div class="ms-grade-band"><b>90–99 · Elite</b>Outstanding selection quality and roster construction.</div>
@@ -109,7 +109,7 @@
 
 <div id="live" class="ms-live">
 <div class="ms-card">
-<div class="ms-tools"><input id="search" class="ms-search" placeholder="Search available players..."><div id="tabs" class="ms-tabs"><button class="active" data-pos="" data-label="All">All <small></small></button><button data-pos="QB" data-label="QB">QB <small></small></button><button data-pos="RB" data-label="RB">RB <small></small></button><button data-pos="WR" data-label="WR">WR <small></small></button><button data-pos="TE" data-label="TE">TE <small></small></button><button data-pos="K" data-label="K">K <small></small></button><button data-pos="DEF" data-label="D/ST">D/ST <small></small></button></div></div>
+<div class="ms-tools"><input id="search" class="ms-search" placeholder="Search available players..."><div id="tabs" class="ms-tabs"><button class="active" data-pos="" data-label="All">All <small></small></button><button data-pos="QB" data-label="QB">QB <small></small></button><button data-pos="RB" data-label="RB">RB <small></small></button><button data-pos="WR" data-label="WR">WR <small></small></button><button data-pos="TE" data-label="TE">TE <small></small></button><button data-pos="DEF" data-label="D/ST">D/ST <small></small></button></div></div>
 <div id="pool-summary" class="ms-pool-summary"><span>Loading the complete player pool…</span></div>
 <div class="ms-table-wrap"><table class="ms-table"><thead><tr><th>Player</th><th>Pos</th><th>NFL</th><th id="rank-heading">Draft Rank</th><th>Proj</th><th>Pick Score</th><th>Decision</th><th></th></tr></thead><tbody id="players"></tbody></table></div>
 </div>
@@ -168,7 +168,7 @@
 <script>
 (()=>{
   const $ = id => document.getElementById(id);
-  const expectedBuild="mock-draft-v61-rb-wr-heavy";
+  const expectedBuild="mock-draft-v65-analyze-button-repair";
   let id = null, available = [], recommendations = [], pos = "", poolTotal = 0, positionCounts = {}, rankingLabel="Draft Rank", rankingSource="", selectedAnalyticsName="";
   const rosterDefaults={{ mock_roster_defaults|tojson }};
   const requirementInputs={QB:"req-qb",RB:"req-rb",WR:"req-wr",TE:"req-te",FLEX:"req-flex",K:"req-k",DEF:"req-def",BENCH:"req-bench"};
@@ -178,6 +178,7 @@
     Object.entries(requirementInputs).forEach(([position,inputId])=>{
       values[position]=Math.max(0,Number($(inputId)?.value||0));
     });
+    values.K=0;
     return values;
   }
 
@@ -212,7 +213,7 @@
     const direct=completion.direct_filled||{};
     const slots=[
       ["QB",direct.QB||0,req.QB||0],["RB",direct.RB||0,req.RB||0],["WR",direct.WR||0,req.WR||0],["TE",direct.TE||0,req.TE||0],
-      ["FLEX",completion.flex_filled||0,req.FLEX||0],["K",direct.K||0,req.K||0],["D/ST",direct.DEF||0,req.DEF||0],["Bench",completion.bench_used||0,req.BENCH||0]
+      ["FLEX",completion.flex_filled||0,req.FLEX||0],["D/ST",direct.DEF||0,req.DEF||0],["Bench",completion.bench_used||0,req.BENCH||0]
     ];
     $("completion-pct").textContent=`${Number(completion.completion_percent||0)}%`;
     $("completion-slots").innerHTML=slots.map(([label,filled,required])=>`<div class="ms-slot-progress ${Number(filled)>=Number(required)?"done":"open"}"><span>${label}</span><b>${filled}/${required}</b></div>`).join("");
@@ -238,7 +239,7 @@
   }
 
   function formatCounts(counts={}){
-    return ["QB","RB","WR","TE","K","DEF"]
+    return ["QB","RB","WR","TE","DEF"]
       .map(position=>`${position==="DEF"?"D/ST":position} ${Number(counts[position]||0)}`)
       .join(" · ");
   }
@@ -506,15 +507,47 @@
           <td>${p.projection}</td>
           <td><b>${p.pick_score}</b></td>
           <td><small class="ms-rank-source">${a.recommendation||"—"}</small></td>
-          <td><button class="ms-analyze" data-a="${p.name.replace(/"/g,'&quot;')}">Analyze</button><button class="ms-pick" data-p="${p.name.replace(/"/g,'&quot;')}">Draft</button></td>
+          <td><button type="button" class="ms-analyze" data-a="${p.name.replace(/"/g,'&quot;')}">Analyze</button><button class="ms-pick" data-p="${p.name.replace(/"/g,'&quot;')}">Draft</button></td>
         </tr>`;
     }).join("") : `<tr><td class="ms-empty" colspan="8">No available players match this search and position.</td></tr>`;
 
-    document.querySelectorAll(".ms-analyze").forEach(b=>b.onclick=()=>{
-      const player=available.find(p=>p.name===b.dataset.a);
-      if(player){
-        renderCandidateAnalytics(player,player.analytics||{},"Player Pick Analysis");
-        document.getElementById("on-clock-analytics")?.scrollIntoView({behavior:"smooth",block:"nearest"});
+    document.querySelectorAll(".ms-analyze").forEach(b=>b.onclick=async(event)=>{
+      event.preventDefault();
+      event.stopPropagation();
+      if(!id){
+        alert("Start the mock draft before analyzing a player.");
+        return;
+      }
+      const playerName=b.dataset.a||"";
+      const localPlayer=available.find(p=>p.name===playerName);
+      const priorText=b.textContent;
+      b.disabled=true;
+      b.textContent="Analyzing…";
+      $("analytics-title").textContent="Analyzing Player…";
+      $("analytics-subtitle").textContent=playerName||"Loading current pick analytics";
+      $("analytics-action").textContent="WORKING";
+      $("analytics-content").innerHTML='<p class="ms-analytics-rationale">Refreshing player quality, scoring potential, roster fit, tiers, ADP value, role and next-pick availability for this exact draft slot…</p>';
+      try{
+        const result=await api(`/api/mock-draft/manual/${id}/analyze`,{
+          method:"POST",
+          body:JSON.stringify({player:playerName})
+        });
+        const player=result.player||localPlayer;
+        if(!player) throw new Error("The selected player could not be found.");
+        if(localPlayer && result.analytics){
+          localPlayer.analytics=result.analytics;
+          localPlayer.pick_score=Number(result.analytics.pick_score||localPlayer.pick_score||0);
+        }
+        renderCandidateAnalytics(player,result.analytics||player.analytics||{},"Player Pick Analysis");
+        document.getElementById("on-clock-analytics")?.scrollIntoView({behavior:"smooth",block:"center"});
+      }catch(e){
+        $("analytics-title").textContent="Analysis unavailable";
+        $("analytics-subtitle").textContent=playerName;
+        $("analytics-action").textContent="RETRY";
+        $("analytics-content").innerHTML=`<p class="ms-analytics-rationale ms-warn">${String(e.message||e)}</p>`;
+      }finally{
+        b.disabled=false;
+        b.textContent=priorText;
       }
     });
 
