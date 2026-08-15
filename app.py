@@ -2018,7 +2018,7 @@ MANUAL_MOCK_FILE = DATA_DIR / "manual_mock_drafts.json"
 MOCK_PLAYER_CACHE_FILE = DATA_DIR / "sleeper_players_cache.json"
 BUNDLED_MOCK_PLAYER_CACHE_FILE = BASE_DIR / "data" / "sleeper_players_cache.json"
 MOCK_PLAYER_CACHE_TTL = 24 * 60 * 60
-MOCK_DRAFT_BUILD = "mock-draft-v61-rb-wr-heavy"
+MOCK_DRAFT_BUILD = "mock-draft-v65-analyze-button-repair"
 MOCK_DIRECTORY_MINIMUMS = {
     "QB": 40, "RB": 100, "WR": 150, "TE": 80, "K": 10, "DEF": 20,
 }
@@ -2875,6 +2875,25 @@ def _manual_usage_role_grade(player):
     return role, max(20.0, min(99.0, base + adjustment))
 
 
+def _mock_effective_user_strategy(mock):
+    """Return the strategy that should govern the user team's mock recommendations.
+
+    In a 12-team full-PPR league Gridiron IQ always applies the PPR Max Points
+    RB/WR-heavy opening to the user's team, even if an older saved mock carried
+    a stale strategy value. Opponent teams still keep their varied AI styles.
+    """
+    stored = str((mock or {}).get("draft_strategy") or "rb-wr-heavy").lower().replace("_", "-")
+    try:
+        teams = int((mock or {}).get("teams") or 0)
+    except (TypeError, ValueError):
+        teams = 0
+    scoring = str((mock or {}).get("scoring") or "").upper()
+    full_ppr = "PPR" in scoring and "HALF" not in scoring
+    if teams == 12 and full_ppr:
+        return "rb-wr-heavy"
+    return stored
+
+
 def _manual_pick_score_components(mock, player, counts=None, overall=None, round_no=None):
     if counts is None:
         counts = Counter(p["pos"] for p in _manual_user_roster(mock))
@@ -2916,7 +2935,7 @@ def _manual_pick_score_components(mock, player, counts=None, overall=None, round
         for _ in range(int(amount or 0))
     ]
     requirements = _mock_requirements_for_mock(mock)
-    strategy = str(mock.get("draft_strategy") or "balanced")
+    strategy = _mock_effective_user_strategy(mock)
     scoring = str(mock.get("scoring") or "")
     allowed_positions = _mock_allowed_positions(
         roster, round_no, total_rounds, requirements, scoring, strategy
@@ -2953,16 +2972,33 @@ def _manual_pick_score_components(mock, player, counts=None, overall=None, round
     strategy_key = str(strategy or "balanced").lower().replace("_", "-")
     if strategy_key == "rb-wr-heavy":
         core_count = int(counts.get("RB", 0)) + int(counts.get("WR", 0))
-        if core_count < 3 and position in {"QB", "TE"}:
-            # Soft gate: an elite fall can still be analyzed, but ordinary QB/TE
-            # options should not outrank the RB/WR core before three are rostered.
-            hard_cap = min(hard_cap, 78.0 if quality_grade >= 94 and market_grade >= 90 else 70.0)
-        if position == "QB" and int(counts.get("QB", 0)) >= 2:
-            hard_cap = min(hard_cap, 42.0)
-        if position == "TE" and int(counts.get("TE", 0)) >= 2:
-            hard_cap = min(hard_cap, 45.0)
-    if position in {"K", "DEF"} and round_no < late_round_start:
-        hard_cap = 12.0
+        qb_te_count = int(counts.get("QB", 0)) + int(counts.get("TE", 0))
+        if position == "K":
+            hard_cap = 0.0
+        elif int(round_no) <= 4 and position not in {"RB", "WR"}:
+            hard_cap = 0.0
+        elif int(round_no) == 5:
+            if core_count < 4 and position not in {"RB", "WR"}:
+                hard_cap = min(hard_cap, 5.0)
+            elif position in {"QB", "TE"}:
+                elite_exception = (
+                    qb_te_count == 0
+                    and quality_grade >= 94.0
+                    and scoring_grade >= 92.0
+                    and market_grade >= 88.0
+                )
+                if not elite_exception:
+                    hard_cap = min(hard_cap, 65.0)
+        elif int(round_no) == 6 and core_count < 5 and position not in {"RB", "WR"}:
+            hard_cap = min(hard_cap, 5.0)
+        if position == "QB" and int(counts.get("QB", 0)) >= 1 and int(round_no) < 11:
+            hard_cap = min(hard_cap, 58.0)
+        if position == "TE" and int(counts.get("TE", 0)) >= 1 and int(round_no) < 11:
+            hard_cap = min(hard_cap, 60.0)
+    if position == "K":
+        hard_cap = 0.0
+    if position == "DEF" and round_no < max(10, total_rounds - 1):
+        hard_cap = min(hard_cap, 12.0)
     if str(player.get("team") or "").upper() in {"", "FA"}:
         hard_cap = min(hard_cap, 18.0)
     if player.get("active") is False:
@@ -3392,15 +3428,20 @@ def _mock_roster_template(context):
             normalized[label] = max(0, int(value or 0))
         except (TypeError, ValueError):
             pass
+    legacy_k_slots = max(0, int(normalized.get("K", 0) or 0))
+    bench_spots = max(0, int(context.get("bench_spots") or context.get("bench") or 6))
+    # v63 league rule: no kicker.  If an older/default context still contains
+    # a kicker slot, convert that roster spot to bench so total draft size is
+    # preserved instead of silently shortening the mock.
     return {
         "QB": normalized.get("QB", 1),
         "RB": normalized.get("RB", 2),
         "WR": normalized.get("WR", 2 if "Half" in scoring else 3),
         "TE": normalized.get("TE", 1),
         "FLEX": normalized.get("FLEX", normalized.get("W/R/T", 1)),
-        "K": normalized.get("K", 1),
+        "K": 0,
         "DEF": normalized.get("DEF", 1),
-        "BENCH": max(0, int(context.get("bench_spots") or context.get("bench") or 6)),
+        "BENCH": bench_spots + legacy_k_slots,
     }
 
 
@@ -3416,6 +3457,7 @@ def _mock_normalize_roster_requirements(raw, context=None):
             result[position] = max(0, min(20, int(value or 0)))
         except (TypeError, ValueError):
             result[position] = int(defaults.get(position, 0) or 0)
+    result["K"] = 0
     return result
 
 
@@ -3457,42 +3499,38 @@ def _mock_league_profile(mock):
 def _mock_position_targets_from_requirements(requirements, scoring="", strategy="balanced"):
     """Create full-roster position targets from starters + FLEX + bench.
 
-    v61 adds an RB/WR-heavy construction plan.  It still respects the user's
-    league requirements, but the default strategy aims for two total QBs,
-    one or two total TEs, exactly the configured D/ST/K count, and uses most
-    flexible/bench inventory on RB/WR depth.
+    v63 PPR Max-Points plan: no kicker, satisfy the league's required QB/TE/DST
+    starters, then push flexible inventory toward RB/WR depth.  QB2/TE2 are
+    value options rather than required roster targets in a normal 1-QB league.
     """
     req = _mock_normalize_roster_requirements(requirements or {}, {})
+    req["K"] = 0
     plan = {pos: int(req.get(pos, 0)) for pos in ("QB", "RB", "WR", "TE", "K", "DEF")}
+    plan["K"] = 0
     flexible_spots = int(req.get("FLEX", 0)) + int(req.get("BENCH", 0))
     strategy_key = str(strategy or "balanced").lower().replace("_", "-")
     scoring_label = str(scoring or "").upper()
-    total_roster = sum(int(req.get(pos, 0)) for pos in ("QB", "RB", "WR", "TE", "FLEX", "K", "DEF", "BENCH"))
 
     if strategy_key == "rb-wr-heavy":
-        # Desired finished roster: 2 QBs, 1-2 TEs, configured D/ST/K, then
-        # devote nearly every remaining flexible slot to RB/WR depth.
-        desired_qb = 2 if plan.get("QB", 0) > 0 and total_roster >= 11 else plan.get("QB", 0)
-        while flexible_spots > 0 and plan.get("QB", 0) < desired_qb:
-            plan["QB"] += 1
-            flexible_spots -= 1
+        # Protect a useful RB/WR base first, but do not force 3+3 before every
+        # other position.  The opening-round engine handles timing dynamically.
+        for core_pos in ("RB", "WR"):
+            while flexible_spots > 0 and plan.get(core_pos, 0) < 3:
+                plan[core_pos] += 1
+                flexible_spots -= 1
 
-        # Carry a second TE only on normal/deep benches.  Short rosters keep one.
-        desired_te = max(plan.get("TE", 0), 2 if plan.get("TE", 0) > 0 and total_roster >= 14 and int(req.get("BENCH", 0)) >= 4 else 1 if plan.get("TE", 0) > 0 else 0)
-        while flexible_spots > 0 and plan.get("TE", 0) < desired_te:
-            plan["TE"] += 1
-            flexible_spots -= 1
-
-        # PPR leans slightly WR; half/standard alternates with a slight RB lean.
+        # Every remaining FLEX/bench target goes to the positions with the
+        # greatest weekly lineup and injury-replacement leverage.  Full PPR
+        # leans WR first; RB remains nearly equal because of scarcity/upside.
         if "FULL" in scoring_label or ("PPR" in scoring_label and "HALF" not in scoring_label):
-            order = ["WR", "RB", "WR", "RB", "WR", "RB"]
+            order = ["WR", "RB", "WR", "RB", "RB", "WR"]
         else:
             order = ["RB", "WR", "RB", "WR", "RB", "WR"]
         for index in range(max(0, flexible_spots)):
             plan[order[index % len(order)]] += 1
         return plan
 
-    # Legacy strategies retain their prior behavior.
+    # Other strategy modes remain available, but this league still has no K.
     if flexible_spots >= 5 and plan.get("QB", 0) > 0 and strategy_key != "late-qb":
         plan["QB"] += 1
         flexible_spots -= 1
@@ -3511,6 +3549,7 @@ def _mock_position_targets_from_requirements(requirements, scoring="", strategy=
 
     for index in range(max(0, flexible_spots)):
         plan[order[index % len(order)]] += 1
+    plan["K"] = 0
     return plan
 
 def _mock_team_counts(team_roster):
@@ -3562,19 +3601,12 @@ def _mock_roster_plan(total_rounds, requirements=None, scoring="", strategy="bal
     if requirements:
         return _mock_position_targets_from_requirements(requirements, scoring, strategy)
     total_rounds = max(6, int(total_rounds or 12))
-    plan = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 0, "DEF": 0}
-    if total_rounds >= 8:
-        plan["K"] = 1
-        plan["DEF"] = 1
+    plan = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 0, "DEF": 1 if total_rounds >= 8 else 0}
     remaining = total_rounds - sum(plan.values())
-    if total_rounds >= 14 and remaining > 0:
-        plan["QB"] += 1
-        remaining -= 1
-    depth_order = ("RB", "WR", "RB", "WR", "RB", "WR", "TE")
+    depth_order = ("WR", "RB", "RB", "WR", "WR", "RB") if "PPR" in str(scoring).upper() else ("RB", "WR", "RB", "WR")
     for index in range(max(0, remaining)):
         plan[depth_order[index % len(depth_order)]] += 1
     return plan
-
 
 def _mock_position_caps(total_rounds, requirements=None, scoring="", strategy="balanced"):
     plan = _mock_roster_plan(total_rounds, requirements, scoring, strategy)
@@ -3582,14 +3614,14 @@ def _mock_position_caps(total_rounds, requirements=None, scoring="", strategy="b
     if requirements:
         req = _mock_normalize_roster_requirements(requirements, {})
         if strategy_key == "rb-wr-heavy":
-            # Keep the roster disciplined: no QB3/TE3/DST2 detours. RB/WR may
-            # exceed the soft target by one only when value is exceptional.
+            # One-QB/one-TE are the targets; a second can appear only as a late
+            # value pick.  No kicker and never more than the required D/ST.
             return {
-                "QB": max(int(req.get("QB", 0)), min(2, int(plan.get("QB", 0)))),
+                "QB": max(int(req.get("QB", 0)), 2 if int(req.get("QB", 0)) > 0 else 0),
                 "RB": int(plan.get("RB", 0)) + 1,
                 "WR": int(plan.get("WR", 0)) + 1,
-                "TE": max(int(req.get("TE", 0)), min(2, int(plan.get("TE", 0)))),
-                "K": max(0, int(req.get("K", 0))),
+                "TE": max(int(req.get("TE", 0)), 2 if int(req.get("TE", 0)) > 0 else 0),
+                "K": 0,
                 "DEF": max(0, int(req.get("DEF", 0))),
             }
         return {
@@ -3597,7 +3629,7 @@ def _mock_position_caps(total_rounds, requirements=None, scoring="", strategy="b
             "RB": plan["RB"] + 1,
             "WR": plan["WR"] + 1,
             "TE": plan["TE"] + 1,
-            "K": max(0, int(req.get("K", 0))),
+            "K": 0,
             "DEF": max(0, int(req.get("DEF", 0))),
         }
     return {
@@ -3605,27 +3637,42 @@ def _mock_position_caps(total_rounds, requirements=None, scoring="", strategy="b
         "RB": plan["RB"] + 1,
         "WR": plan["WR"] + 1,
         "TE": plan["TE"] + (1 if int(total_rounds) >= 13 else 0),
-        "K": 1 if plan["K"] else 0,
+        "K": 0,
         "DEF": 1 if plan["DEF"] else 0,
     }
 
 def _mock_mandatory_minimums(total_rounds, requirements=None):
     if requirements:
         req = _mock_normalize_roster_requirements(requirements, {})
-        return {pos: req.get(pos, 0) for pos in ("QB", "RB", "WR", "TE", "K", "DEF")}
+        return {pos: (0 if pos == "K" else req.get(pos, 0)) for pos in ("QB", "RB", "WR", "TE", "K", "DEF")}
     minimums = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 0, "DEF": 0}
     if int(total_rounds) >= 8:
-        minimums["K"] = 1
         minimums["DEF"] = 1
     return minimums
 
 
 def _mock_allowed_positions(roster, round_no, total_rounds, requirements=None, scoring="", strategy="balanced"):
-    """Prevent impossible rosters and enforce v61 construction guardrails."""
+    """Prevent impossible rosters and apply the v63 PPR opening plan."""
     counts = _mock_team_counts(roster)
     caps = _mock_position_caps(total_rounds, requirements, scoring, strategy)
     minimums = _mock_mandatory_minimums(total_rounds, requirements)
     remaining_picks = max(1, int(total_rounds) - len(roster))
+    strategy_key = str(strategy or "balanced").lower().replace("_", "-")
+
+    if strategy_key == "rb-wr-heavy":
+        core_count = int(counts.get("RB", 0)) + int(counts.get("WR", 0))
+        # Rounds 1-4: pure RB/WR accumulation.
+        if int(round_no) <= 4:
+            return {"RB", "WR"}
+        # Round 5 may consider an elite QB/TE only after the first four picks
+        # were RB/WR.  The candidate scorer applies the elite-value test.
+        if int(round_no) == 5 and core_count < 4:
+            return {"RB", "WR"}
+        # By the end of Round 6 we want at least five RB/WR.  If Round 5 was
+        # the elite exception, Round 6 returns immediately to the core.
+        if int(round_no) == 6 and core_count < 5:
+            return {"RB", "WR"}
+
     missing = {pos: max(0, required - counts.get(pos, 0)) for pos, required in minimums.items()}
     flex_missing = 0
     if requirements:
@@ -3634,22 +3681,18 @@ def _mock_allowed_positions(roster, round_no, total_rounds, requirements=None, s
     missing_total = sum(missing.values()) + flex_missing
 
     if missing_total and remaining_picks <= missing_total:
-        forced = {pos for pos, amount in missing.items() if amount > 0}
+        forced = {pos for pos, amount in missing.items() if amount > 0 and pos != "K"}
         if flex_missing:
             forced.update({"RB", "WR", "TE"})
         return forced
 
-    allowed = {pos for pos, maximum in caps.items() if maximum > 0 and counts.get(pos, 0) < maximum}
-    strategy_key = str(strategy or "balanced").lower().replace("_", "-")
+    allowed = {pos for pos, maximum in caps.items() if pos != "K" and maximum > 0 and counts.get(pos, 0) < maximum}
 
     if strategy_key == "rb-wr-heavy" and requirements:
         targets = _mock_roster_plan(total_rounds, requirements, scoring, strategy)
-        # Near the end, complete the strategy targets (2 QB, 1-2 TE, one
-        # configured D/ST, and the planned RB/WR depth) instead of taking an
-        # unnecessary third QB/TE or excess defense.
         target_deficits = {
             pos: max(0, int(targets.get(pos, 0)) - int(counts.get(pos, 0)))
-            for pos in ("QB", "RB", "WR", "TE", "K", "DEF")
+            for pos in ("QB", "RB", "WR", "TE", "DEF")
         }
         deficit_total = sum(target_deficits.values())
         if deficit_total and remaining_picks <= deficit_total + 1:
@@ -3657,11 +3700,13 @@ def _mock_allowed_positions(roster, round_no, total_rounds, requirements=None, s
             if target_allowed:
                 allowed &= target_allowed
 
-    late_round_start = max(8, int(total_rounds) - 2)
-    if int(round_no) < late_round_start:
-        if not requirements or remaining_picks > missing_total + 2:
-            allowed -= {"K", "DEF"}
-    return allowed or {pos for pos, amount in missing.items() if amount > 0}
+    # One D/ST, at the end. With no kicker there is no reason to spend an
+    # earlier selection on defense unless roster completion forces it.
+    if int(round_no) < max(10, int(total_rounds) - 1):
+        if not requirements or remaining_picks > missing_total + 1:
+            allowed.discard("DEF")
+    allowed.discard("K")
+    return allowed or {pos for pos, amount in missing.items() if amount > 0 and pos != "K"}
 
 def _mock_position_need_score(pos, roster, round_no, total_rounds, requirements=None, scoring="", strategy="balanced"):
     counts = _mock_team_counts(roster)
@@ -3700,43 +3745,49 @@ def _mock_position_need_score(pos, roster, round_no, total_rounds, requirements=
 
     strategy_key = str(strategy or "balanced").lower().replace("_", "-")
     if strategy_key == "rb-wr-heavy":
-        core_count = int(counts.get("RB", 0)) + int(counts.get("WR", 0))
-        # Build at least three RB/WR pieces before paying for QB or TE unless
-        # the shared intelligence engine identifies a true elite exception.
-        if core_count < 3:
-            if pos in {"RB", "WR"}:
-                score += 10.0
+        rb_count = int(counts.get("RB", 0))
+        wr_count = int(counts.get("WR", 0))
+        core_count = rb_count + wr_count
+        if pos == "K":
+            return -100.0
+        if int(round_no) <= 4:
+            score += 18.0 if pos in {"RB", "WR"} else -60.0
+        elif int(round_no) == 5:
+            if core_count < 4:
+                score += 18.0 if pos in {"RB", "WR"} else -60.0
+            elif pos in {"RB", "WR"}:
+                score += 7.0
             elif pos in {"QB", "TE"}:
-                score -= 13.0
+                score -= 5.0
+        elif int(round_no) == 6:
+            if core_count < 5:
+                score += 18.0 if pos in {"RB", "WR"} else -60.0
+            elif pos in {"RB", "WR"}:
+                score += 5.0
+            elif pos in {"QB", "TE"} and current == 0:
+                score += 5.0
         else:
             if pos in {"RB", "WR"} and current < target:
-                score += 5.0
+                score += 6.0
             if pos == "QB":
                 if current == 0:
-                    score += 5.0
-                elif current == 1 and target >= 2:
-                    score += 1.0 if int(round_no) < 8 else 6.0
-                elif current >= 2:
-                    score -= 22.0
+                    score += 6.0
+                elif current == 1:
+                    score += -8.0 if int(round_no) < 11 else -2.0
+                else:
+                    score -= 24.0
             if pos == "TE":
                 if current == 0:
-                    score += 4.0
-                elif current == 1 and target >= 2:
-                    score += -3.0 if int(round_no) < 8 else 3.0
-                elif current >= max(1, target):
-                    score -= 18.0
+                    score += 5.0
+                elif current == 1:
+                    score += -7.0 if int(round_no) < 11 else -2.0
+                else:
+                    score -= 22.0
 
-        # Ensure the desired QB2 / optional TE2 are not forgotten in the final
-        # rounds while still keeping them behind RB/WR early.
-        soft_missing_qb = max(0, int(targets.get("QB", 0)) - int(counts.get("QB", 0)))
-        soft_missing_te = max(0, int(targets.get("TE", 0)) - int(counts.get("TE", 0)))
-        if remaining_picks <= 5 and pos == "QB" and soft_missing_qb:
-            score += 9.0
-        if remaining_picks <= 4 and pos == "TE" and soft_missing_te:
-            score += 7.0
-
-    if pos in {"K", "DEF"} and int(round_no) < max(8, int(total_rounds) - 2):
-        if not requirements or remaining_picks > missing_total + 2:
+    if pos == "K":
+        return -100.0
+    if pos == "DEF" and int(round_no) < max(10, int(total_rounds) - 1):
+        if not requirements or remaining_picks > missing_total + 1:
             score -= 60.0
     return score
 
@@ -3763,21 +3814,30 @@ def _mock_strategy_bonus_for_ai(player, style, round_no, roster_counts=None):
     pos = player["pos"]
     if style == "rb-wr-heavy":
         core_count = int(roster_counts.get("RB", 0)) + int(roster_counts.get("WR", 0))
-        if core_count < 3:
+        if pos == "K":
+            return -100.0
+        if int(round_no) <= 4:
+            return 12.0 if pos in {"RB", "WR"} else -70.0
+        if int(round_no) == 5:
+            if core_count < 4:
+                return 14.0 if pos in {"RB", "WR"} else -70.0
             if pos in {"RB", "WR"}:
-                return 10.0
+                return 6.0
             if pos in {"QB", "TE"}:
-                return -14.0
-        if pos in {"RB", "WR"} and round_no <= 10:
-            return 3.5
-        if pos == "QB" and roster_counts.get("QB", 0) >= 2:
-            return -18.0
-        if pos == "QB" and roster_counts.get("QB", 0) == 1 and round_no < 8:
-            return -3.0
-        if pos == "TE" and roster_counts.get("TE", 0) >= 2:
-            return -16.0
-        if pos == "TE" and roster_counts.get("TE", 0) == 1 and round_no < 8:
-            return -3.0
+                return -12.0
+        if int(round_no) == 6:
+            if core_count < 5:
+                return 14.0 if pos in {"RB", "WR"} else -70.0
+            if pos in {"RB", "WR"}:
+                return 4.0
+            if pos in {"QB", "TE"} and roster_counts.get(pos, 0) == 0:
+                return 4.0
+        if pos in {"RB", "WR"} and round_no <= 12:
+            return 4.0
+        if pos == "QB" and roster_counts.get("QB", 0) >= 1:
+            return -10.0 if round_no < 11 else -3.0
+        if pos == "TE" and roster_counts.get("TE", 0) >= 1:
+            return -9.0 if round_no < 11 else -3.0
     if style == "balanced" and pos in {"RB", "WR"} and round_no <= 6:
         return 1.0
     if style == "rb-heavy" and pos == "RB" and round_no <= 5 and roster_counts.get("RB", 0) < 4:
@@ -4011,7 +4071,7 @@ def _mock_ai_pick(
         "manager": f"Team {slot}",
         "ai_style": style,
         "ai_score": round(ai_score, 2),
-        "formula_version": "smart-draft-v8-rb-wr-heavy",
+        "formula_version": "smart-draft-v11-ppr-rbwr-hard-recommendations",
     }
 
 def _manual_autopick_until_user(mock):
@@ -4069,7 +4129,7 @@ def manual_mock_autodraft_rest():
                 row,
                 adp_players=adp_players,
                 stats_players=stats_players,
-                style_override=str(mock.get("draft_strategy") or "balanced"),
+                style_override=_mock_effective_user_strategy(mock),
             )
             if not pick:
                 mock["status"] = "complete"
@@ -4139,7 +4199,7 @@ def manual_mock_start():
         "picks": [],
         "player_pool": player_pool,
         "pool_version": "complete-v5",
-        "formula_version": "smart-draft-v7",
+        "formula_version": "smart-draft-v11-ppr-rbwr-hard-recommendations",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -4293,7 +4353,7 @@ def manual_mock_state(mock_id):
         next_overall=next_overall,
         round_no=int(round_no),
         total_rounds=int(mock.get("rounds") or 15),
-        strategy=str(mock.get("draft_strategy") or "balanced"),
+        strategy=_mock_effective_user_strategy(mock),
     )
     engine_by_name = {
         _mock_identity_key(candidate.get("name")): candidate
@@ -4334,8 +4394,36 @@ def manual_mock_state(mock_id):
         item["pick_score"] = item["analytics"]["pick_score"]
         item.pop("_draft_components", None)
 
+    # v64 belt-and-suspenders recommendation gate. The engine score is not
+    # allowed to leak a QB/TE/DST back into the visible recommendation list
+    # during an RB/WR-only opening. This is the final UI-facing decision gate.
+    effective_strategy = _mock_effective_user_strategy(mock)
+    recommendation_allowed = _mock_allowed_positions(
+        roster, int(round_no), int(mock.get("rounds") or 15),
+        _mock_requirements_for_mock(mock), str(mock.get("scoring") or ""),
+        effective_strategy,
+    )
+    recommendation_pool = [
+        item for item in scored if str(item.get("pos") or "").upper() in recommendation_allowed
+    ]
+    if not recommendation_pool:
+        recommendation_pool = scored
+
+    # Make the lock visible on non-eligible rows as well. They remain browsable
+    # for research, but they are not presented as a recommended choice.
+    if effective_strategy == "rb-wr-heavy" and int(round_no) <= 4:
+        for item in scored:
+            if str(item.get("pos") or "").upper() not in {"RB", "WR"}:
+                analytics = item.get("analytics") or {}
+                analytics["pick_score"] = 0
+                analytics["recommendation"] = "LOCKED — RB/WR FIRST"
+                analytics["rationale"] = "Rounds 1–4 are reserved for RB/WR in the 12-team PPR Max Points plan."
+                analytics["reasons"] = ["12-team full-PPR opening lock", "RB/WR core takes priority"]
+                item["analytics"] = analytics
+                item["pick_score"] = 0
+
     recommendations = sorted(
-        scored,
+        recommendation_pool,
         key=lambda x: (
             int((x.get("analytics") or {}).get("pick_score") or 0),
             int((x.get("analytics") or {}).get("player_quality") or 0),
@@ -4372,7 +4460,7 @@ def manual_mock_state(mock_id):
         draft_engine_weights=engine.get("weights") or {},
         position_groups=engine.get("position_groups") or {},
         roster_completion=_mock_requirement_status(_mock_requirements_for_mock(mock), roster),
-        draft_strategy=str(mock.get("draft_strategy") or "balanced"),
+        draft_strategy=_mock_effective_user_strategy(mock),
         recommendations=[{
             "name": candidate.get("name"),
             "pos": candidate.get("pos"),
@@ -4383,6 +4471,56 @@ def manual_mock_state(mock_id):
             "analytics": candidate.get("analytics") or {},
         } for candidate in recommendations],
     )
+
+@app.post("/api/mock-draft/manual/<mock_id>/analyze")
+def manual_mock_analyze(mock_id):
+    """Return fresh current-slot analytics for one available mock-draft player.
+
+    v65 intentionally reuses the exact state/recommendation calculation used by
+    the Mock Draft screen so the Analyze button cannot drift from the visible
+    player board or from the RB/WR recommendation locks.
+    """
+    data = request.get_json(silent=True) or {}
+    player_name = str(data.get("player") or "").strip()
+    if not player_name:
+        return jsonify(ok=False, error="Choose a player to analyze."), 400
+
+    state_result = manual_mock_state(mock_id)
+    if isinstance(state_result, tuple):
+        state_response = state_result[0]
+        state_status = int(state_result[1]) if len(state_result) > 1 else 500
+    else:
+        state_response = state_result
+        state_status = int(getattr(state_response, "status_code", 200) or 200)
+
+    if state_status >= 400:
+        return state_result
+
+    payload = state_response.get_json(silent=True) or {}
+    target_key = _mock_identity_key(player_name)
+    player = next(
+        (row for row in (payload.get("available") or [])
+         if _mock_identity_key(row.get("name")) == target_key),
+        None,
+    )
+    if not player:
+        return jsonify(ok=False, error="That player is no longer available in this mock draft."), 404
+
+    return jsonify(
+        ok=True,
+        player={
+            "name": player.get("name"),
+            "pos": player.get("pos"),
+            "team": player.get("team"),
+            "adp": player.get("adp"),
+            "projection": player.get("projection"),
+            "pick_score": player.get("pick_score"),
+        },
+        analytics=player.get("analytics") or {},
+        current_pick=payload.get("current_pick"),
+        server_build=MOCK_DRAFT_BUILD,
+    )
+
 
 @app.post("/api/mock-draft/manual/<mock_id>/pick")
 def manual_mock_pick(mock_id):

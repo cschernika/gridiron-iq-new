@@ -19,7 +19,7 @@ from math import exp
 from statistics import mean
 from typing import Any, Iterable
 
-ENGINE_VERSION = "draft-intelligence-v3-rb-wr-core"
+ENGINE_VERSION = "draft-intelligence-v6-ppr-rbwr-hard-recommendations"
 
 BASE_WEIGHTS = {
     "scoring_potential": 0.22,
@@ -506,10 +506,10 @@ def rank_candidates(
         }
         raw_score = sum(components[key] * weights[key] for key in weights)
 
-        # Strategy layer. v61's RB/WR-heavy option is intentionally stronger
-        # than a normal tie-breaker because it expresses a roster-construction
-        # rule: build three RB/WR pieces first, then add 2 QB, 1-2 TE and D/ST
-        # later while continuing to prioritize RB/WR depth.
+        # Strategy layer. v62 turns the RB/WR-heavy opening into a HARD
+        # roster-construction rule: collect at least 3 RBs AND 3 WRs before
+        # QB, TE, K or D/ST can become a recommended pick. Once one side of
+        # the 3+3 core is complete, the engine forces the still-missing side.
         strategy_key = str(strategy or "balanced").lower().replace("_", "-")
         strategy_adjustment = 0.0
         strategy_cap = 99.0
@@ -519,42 +519,120 @@ def rank_candidates(
         remaining_picks = max(0, int(total_rounds) - len(roster))
 
         if strategy_key == "rb-wr-heavy":
-            if core_count < 3:
+            # v63 PPR Max-Points strategy.  RB/WR carry the opening because
+            # they fill the most weekly lineup/FLEX inventory and preserve
+            # replacement-level leverage.  We still allow a truly exceptional
+            # QB/TE value in Round 5, then unlock normal QB1/TE1 decisions once
+            # at least five RB/WR pieces are secured through six selections.
+            rb_count = int(roster_counts.get("RB", 0))
+            wr_count = int(roster_counts.get("WR", 0))
+            qb_count = int(roster_counts.get("QB", 0))
+            te_count = int(roster_counts.get("TE", 0))
+            core_count = rb_count + wr_count
+            early_non_core = qb_count + te_count
+
+            # This league has no kicker.  K is never a valid recommendation.
+            if position == "K":
+                strategy_adjustment -= 100.0
+                strategy_cap = 0.0
+
+            if round_no <= 4:
                 if position in {"RB", "WR"}:
-                    strategy_adjustment += 10.0
-                elif position in {"QB", "TE"}:
-                    strategy_adjustment -= 16.0
-                    elite_exception = quality >= 94 and market >= 90 and group_urgency >= 86
-                    if not elite_exception:
-                        strategy_cap = min(strategy_cap, 72.0)
+                    strategy_adjustment += 9.0
+                elif position in {"QB", "TE", "DEF"}:
+                    strategy_adjustment -= 80.0
+                    strategy_cap = 0.0
+            elif round_no == 5:
+                # Guarantee at least four RB/WR through five picks.  If the
+                # first four picks are already RB/WR, one elite QB/TE fall may
+                # be considered, but ordinary options remain well behind.
+                if core_count < 4:
+                    if position in {"RB", "WR"}:
+                        strategy_adjustment += 10.0
+                    elif position in {"QB", "TE", "DEF"}:
+                        strategy_adjustment -= 80.0
+                        strategy_cap = min(strategy_cap, 5.0)
+                else:
+                    if position in {"RB", "WR"}:
+                        strategy_adjustment += 6.0
+                    elif position in {"QB", "TE"}:
+                        elite_exception = (
+                            early_non_core == 0
+                            and quality >= 94.0
+                            and scoring >= 92.0
+                            and market >= 88.0
+                            and (group_urgency >= 72.0 or market >= 94.0)
+                        )
+                        if elite_exception:
+                            strategy_adjustment += 2.0
+                        else:
+                            strategy_adjustment -= 18.0
+                            strategy_cap = min(strategy_cap, 65.0)
+                    elif position == "DEF":
+                        strategy_cap = min(strategy_cap, 8.0)
+            elif round_no == 6:
+                # If an elite QB/TE was taken in Round 5, Round 6 must restore
+                # the fifth RB/WR.  Otherwise all four skill positions can be
+                # considered according to tier/value.
+                if core_count < 5:
+                    if position in {"RB", "WR"}:
+                        strategy_adjustment += 10.0
+                    elif position in {"QB", "TE", "DEF"}:
+                        strategy_adjustment -= 80.0
+                        strategy_cap = min(strategy_cap, 5.0)
+                else:
+                    if position in {"RB", "WR"}:
+                        strategy_adjustment += 4.0
+                    elif position == "QB":
+                        strategy_adjustment += 4.0 if qb_count == 0 else -12.0
+                        if qb_count >= 1:
+                            strategy_cap = min(strategy_cap, 62.0)
+                    elif position == "TE":
+                        strategy_adjustment += 4.0 if te_count == 0 else -10.0
+                        if te_count >= 1:
+                            strategy_cap = min(strategy_cap, 64.0)
+                    elif position == "DEF":
+                        strategy_cap = min(strategy_cap, 10.0)
             else:
-                if position in {"RB", "WR"} and round_no <= 10:
+                if position in {"RB", "WR"} and round_no <= 12:
                     strategy_adjustment += 4.0
                 if position == "QB":
-                    current_qb = int(roster_counts.get("QB", 0))
-                    if current_qb == 0:
-                        strategy_adjustment += 4.0
-                    elif current_qb == 1 and target_for_position >= 2:
-                        strategy_adjustment += 1.0 if round_no < 8 else 6.0
-                    elif current_qb >= 2:
-                        strategy_adjustment -= 18.0
-                        strategy_cap = min(strategy_cap, 44.0)
+                    if qb_count == 0:
+                        strategy_adjustment += 5.0
+                    elif qb_count == 1:
+                        strategy_adjustment += -10.0 if round_no < 11 else -3.0
+                        if round_no < 10:
+                            strategy_cap = min(strategy_cap, 58.0)
+                    else:
+                        strategy_adjustment -= 24.0
+                        strategy_cap = min(strategy_cap, 34.0)
                 if position == "TE":
-                    current_te = int(roster_counts.get("TE", 0))
-                    if current_te == 0:
+                    if te_count == 0:
+                        strategy_adjustment += 4.0
+                    elif te_count == 1:
+                        strategy_adjustment += -9.0 if round_no < 11 else -2.0
+                        if round_no < 10:
+                            strategy_cap = min(strategy_cap, 60.0)
+                    else:
+                        strategy_adjustment -= 22.0
+                        strategy_cap = min(strategy_cap, 36.0)
+                if position == "DEF":
+                    def_target = int(_num(position_targets.get("DEF"), 0)) if position_targets else int(starters.get("DEF", 0))
+                    if def_target <= 0 or int(roster_counts.get("DEF", 0)) >= def_target:
+                        strategy_cap = min(strategy_cap, 8.0)
+                    elif round_no < max(10, total_rounds - 1):
+                        strategy_cap = min(strategy_cap, 18.0)
+                    else:
                         strategy_adjustment += 3.0
-                    elif current_te == 1 and target_for_position >= 2:
-                        strategy_adjustment += -3.0 if round_no < 8 else 3.0
-                    elif target_for_position and current_te >= target_for_position:
-                        strategy_adjustment -= 16.0
-                        strategy_cap = min(strategy_cap, 46.0)
 
-            if position == "QB" and target_for_position > int(roster_counts.get("QB", 0)) and remaining_picks <= 5:
-                strategy_adjustment += 8.0
-            if position == "TE" and target_for_position > int(roster_counts.get("TE", 0)) and remaining_picks <= 4:
-                strategy_adjustment += 6.0
-            if position in {"K", "DEF"} and target_for_position and int(roster_counts.get(position, 0)) >= target_for_position:
-                strategy_cap = min(strategy_cap, 20.0)
+            # Do not spend bench inventory on unnecessary QB2/TE2 while good
+            # RB/WR upside remains.  They can still surface late as huge value.
+            if position == "QB" and qb_count >= max(1, target_for_position):
+                if round_no < 11:
+                    strategy_cap = min(strategy_cap, 58.0)
+            if position == "TE" and te_count >= max(1, target_for_position):
+                if round_no < 11:
+                    strategy_cap = min(strategy_cap, 60.0)
         elif strategy_key == "zero-rb":
             if position == "WR" and round_no <= 5:
                 strategy_adjustment = 4.0
