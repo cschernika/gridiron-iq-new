@@ -1,18 +1,18 @@
 {
   "ok": true,
   "season": 2026,
-  "checked_at": "2026-11-02T20:52:30.077128+00:00",
+  "checked_at": "2026-11-03T18:38:40.552708+00:00",
   "data_changed": true,
   "player_count": 4266,
-  "team_change_count": 10,
-  "injury_change_count": 39,
+  "team_change_count": 14,
+  "injury_change_count": 17,
   "source": "Sleeper public NFL player directory",
   "depth_chart_source": "nflverse / ESPN published depth charts plus client-side team projection",
   "published_depth_count": 0,
   "depth_chart_warning": "",
   "news_source": "ESPN NFL news and Gridiron IQ roster updates",
-  "news_player_count": 38,
-  "news_article_count": 49,
+  "news_player_count": 31,
+  "news_article_count": 36,
   "news_warning": "",
   "next_scheduled_refresh": "Daily at 6:37 AM America/New_York"
 }
